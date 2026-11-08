@@ -7,7 +7,7 @@ from .contracts import (CommitReceipt,LoadRequest,PersistenceConflict,Persistenc
 from .records import CheckpointPayload,LoadedCheckpoint
 
 
-@dataclass(frozen=True,slots=True)
+@dataclass(frozen=True,slots=True,weakref_slot=True)
 class CheckpointRequest:
     job: StorageJob
     payload: CheckpointPayload

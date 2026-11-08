@@ -47,6 +47,16 @@ def _number(value):
     return value
 
 
+def _check_archive(archive,job,manifest,checkpoint_sha256,checkpoint_digest,references):
+    if archive is None:return
+    from .atlas_archive import SceneAtlasArchive
+    if (type(archive) is not SceneAtlasArchive or archive.checkpoint_job!=job
+            or archive.map_epoch!=job.context.map_epoch or archive.checkpoint_sha256!=checkpoint_sha256
+            or archive.checkpoint_digest!=checkpoint_digest or archive.manifest_sha256!=sha256(manifest).hexdigest()
+            or archive.tile_references!=references):
+        raise SceneError('original full scene archive differs from actual checkpoint')
+
+
 @dataclass(frozen=True)
 class SurveyProfile:
     """설치에서 승인하는 값. station 기준이나 sensor 존재를 operator가 바꾸지 않는다."""
@@ -105,6 +115,33 @@ class FrozenSurvey:
     hazard_revision: int
     grant_revision: int
     receipt: CommitReceipt | None = None
+    archive: 'SceneAtlasArchive | None' = None
+    fixed_tiles: tuple = ()
+
+    @property
+    def checkpoint_sha256(self):return self.request.payload.sha256
+
+    @property
+    def manifest(self):return self.request.payload.manifest
+
+
+@dataclass(frozen=True)
+class RestoredSurvey:
+    """원 전체 CP와 실제 LOAD material을 함께 보존한다. 페이지를 원 요청으로 재포장하지 않는다."""
+    complete: 'SourceComplete'
+    summary: bytes
+    hazard_revision: int
+    grant_revision: int
+    archive: 'SceneAtlasArchive | None' = None
+
+    @property
+    def receipt(self):return self.complete.original_commit.receipt
+
+    @property
+    def checkpoint_sha256(self):return self.complete.original_commit.payload_sha256(self.complete.manifest)
+
+    @property
+    def manifest(self):return self.complete.manifest
 
 
 @dataclass(frozen=True,init=False)
@@ -123,6 +160,7 @@ class SceneEvidenceScope:
     method_manifest_sha256: str
     _tof: tuple
     _historical: tuple
+    _parking_methods: object
 
     def __init__(self,context,raw_binding,calibration,method_manifest_sha256,*,tof_sources=(),historical_scopes=()):
         if (type(context) is not StorageContext or type(raw_binding) is not RawBinding
@@ -158,8 +196,18 @@ class SceneEvidenceScope:
                         ('device_id','model_id','parser_id','graph_profile_sha256','calibration_bundle','format_table_sha256'))):
                 raise SceneError('historical source geometry/asset/Pi session differs')
         for name,value in dict(context=context,raw_binding=raw_binding,calibration=calibration,
-                method_manifest_sha256=method_manifest_sha256,_tof=tof_sources,_historical=historical_scopes).items():
+                method_manifest_sha256=method_manifest_sha256,_tof=tof_sources,_historical=historical_scopes,
+                _parking_methods=None).items():
             object.__setattr__(self,name,value)
+
+    def with_parking_method(self,actual_method):
+        """실제 Bridge가 쓰는 원 method를 고정한다. hash만으로 과거 알고리즘을 승인하지 않는다."""
+        from copy import copy
+        from .parking_scene import validate_parking_method
+        try:approved=validate_parking_method(actual_method,(self,*self._historical))
+        except ValueError as error:raise SceneError(str(error)) from error
+        result=copy(self);object.__setattr__(result,'_parking_methods',approved)
+        return result
 
     def context_record(self,kind,*,sensor_id=None):
         """원 source collector용 local context. wire나 측정/사용권 승인 API가 아니다."""
@@ -179,8 +227,14 @@ class SceneEvidenceScope:
             method_manifest_sha256=self.method_manifest_sha256,coordinate='MAP_X_FORWARD_Y_LEFT_REAR_AXLE',
             input_kind=self.calibration.kind,tof=leaf_data))))
 
-    def _record_scope(self,context_record):
+    def _record_scope(self,context_record,*,record=None,evidence=None):
         value=json_bytes(context_record.payload,4096); body=value['body']
+        if body.get('profile') in ('parking-method-1','parking-originals-1'):
+            from .parking_scene import record_sources
+            try:checked=record_sources(record,context_record,evidence=evidence,
+                scopes=(self,*self._historical),approved_methods=self._parking_methods)
+            except ValueError as error:raise SceneError(str(error)) from error
+            return checked.scope,value
         expected={'profile','storage_context','raw_binding','calibration_profile_sha256','vehicle_bundle_sha256',
                   'method_manifest_sha256','coordinate','input_kind','tof'}
         if set(body)!=expected or body['profile']!='scene-source-context-1':
@@ -334,6 +388,8 @@ class SceneEvidenceScope:
                 historical.append(old);keys.add(marker)
         result=SceneEvidenceScope(self.context,self.raw_binding,self.calibration,self.method_manifest_sha256,
             tof_sources=self._tof,historical_scopes=tuple(historical))
+        if self._parking_methods is not None:
+            object.__setattr__(result,'_parking_methods',self._parking_methods)
         for record in complete.evidence.provenance:
             context=by_sha[record.context_sha256]
             if json_bytes(context.payload,4096)['body'].get('profile')=='scene-source-context-1':
@@ -343,8 +399,15 @@ class SceneEvidenceScope:
     def _tof_fields(self):
         return tuple((name,leaf.sha256,instance,generation) for name,leaf,instance,generation in self._tof)
 
-    def record_sources(self,record,context_record):
+    def record_sources(self,record,context_record,*,evidence=None):
         """원 raw key의 실제 stream/session을 source mask와 대조한다."""
+        profile=json_bytes(context_record.payload,4096)['body'].get('profile')
+        if profile in ('parking-method-1','parking-originals-1'):
+            from .parking_scene import record_sources
+            try:checked=record_sources(record,context_record,evidence=evidence,
+                scopes=(self,*self._historical),approved_methods=self._parking_methods)
+            except ValueError as error:raise SceneError(str(error)) from error
+            return checked.actual_mask,checked.wire_mask
         scope,value=self._record_scope(context_record); kind=value['kind']; body=value['body']
         data=PROVENANCE.unpack(record.payload); record_kind=data[2]; raw_count=data[3]
         raw=data[-3]; streams=scope.raw_binding.fields['stream_instances']
@@ -452,6 +515,8 @@ class MapperScene:
         uint(now)
         if self._grant is None or self._lease is None: raise SceneError('no scene grant/clock')
         s, _, decode = _codec(); grant = decode(self._grant, s.SceneGrant)
+        if grant.lifecycle_state not in (3,4) and grant.source_admission_revision != self._lease.source_revision:
+            self.revoke('SOURCE'); raise SceneError('positive scene source admission revision changed')
         trust = decode(self._lease.trust_bytes, s.WorldTrust)
         if now + trust.upper_offset_us >= min(grant.valid_until_pi_us, self._lease.expires_pi_us):
             self.revoke('TIMEOUT'); raise SceneError('scene or original clock lease expired')
@@ -460,6 +525,16 @@ class MapperScene:
     def receive_grant(self, raw, lease, *, now_j_us):
         from xenova_drive_world.mapper_clock import ClockLease
         s, encode, decode = _codec(); grant = decode(raw, s.SceneGrant)
+        if grant.lifecycle_state in (3,4):
+            from .source_identity import known_scene_negative
+            uint(now_j_us)
+            if not known_scene_negative(raw,self._grant,source=self.source,
+                    pi_host_boot=self.context.pi_host_boot,gateway_instance=self.gateway_instance):
+                return False
+            if raw == self._grant:return True
+            self._grant=raw
+            self.revoke('REVOKED',now_j_us=now_j_us)
+            return True
         if type(lease) is not ClockLease or lease.source != self.source or lease.pi_host_boot != self.context.pi_host_boot:
             self.revoke('SOURCE'); raise SceneError('scene requires current original source clock lease')
         for name in ('vehicle', 'map_epoch', 'frame_epoch', 'odom_epoch', 'configuration', 'calibration', 'primitive'):
@@ -503,7 +578,7 @@ class MapperScene:
         else:
             frozen = self._frozen
             expected = grant.restore_checkpoint_sha256 if grant.purpose else grant.frozen_evidence_sha256
-            if (frozen is None or frozen.receipt is None or frozen.request.payload.sha256 != expected.hex()
+            if (frozen is None or frozen.receipt is None or frozen.checkpoint_sha256 != expected.hex()
                     or frozen.hazard_revision != grant.frozen_hazard_revision):
                 self.revoke('FROZEN_REFERENCE'); return False
             summary = decode(frozen.summary, s.SurveySummary)
@@ -534,10 +609,11 @@ class MapperScene:
                     <= stamp.captured_us[1] <= raw.captured_us[1] <= raw.bracket_us[1]):
             raise SceneError('observation time/pose/source provenance mismatch')
         lo, hi = raw.captured_us
+        collecting=grant.lifecycle_state in (0,1)
         if (now_j_us < stamp.available_us or now_j_us-lo > p.observation_max_age_us or
-                (not grant.purpose and (lo+trust.lower_offset_us < self._begin_pi
+                (collecting and not grant.purpose and (lo+trust.lower_offset_us < self._begin_pi
                     or hi+trust.upper_offset_us > self._begin_pi+SURVEY_US)) or
-                (grant.purpose and (self._validation_start_j is None or lo < self._validation_start_j
+                (collecting and grant.purpose and (self._validation_start_j is None or lo < self._validation_start_j
                     or hi+trust.upper_offset_us >= grant.survey_deadline_pi_us))):
             raise SceneError('original survey observation outside collection/freshness window')
         if (registration.status != 'BOUNDED' or registration.complete is not True or not registration.feasible
@@ -563,11 +639,15 @@ class MapperScene:
         self.hazard(observation.hazard_revision,now_j_us=now_j_us)
         if self._last_pose is not None:
             old = self._last_pose
-            if not old.at_us < sample.at_us <= old.at_us+p.max_pose_gap_us:
-                self.revoke('SOURCE'); raise SceneError('survey pose stream gap/order')
-            self._travel += math.hypot(sample.x-old.x, sample.y-old.y)+sample.position_error_m+old.position_error_m
-            if self._travel > 10.:
-                self.revoke('RESOURCE'); raise SceneError('survey supervised travel exceeds10m')
+            # Vehicle 정지창의 gap 상한은 station 검증이 소유한다. RGB 처리율과 같지 않다.
+            if not old.at_us < sample.at_us:
+                self.revoke('SOURCE'); raise SceneError('map capture pose order regressed')
+            if collecting and not grant.purpose:
+                travel=self._travel+math.hypot(sample.x-old.x,sample.y-old.y)+sample.position_error_m+old.position_error_m
+                if not math.isfinite(travel) or travel>10.:
+                    self.revoke('RESOURCE'); raise SceneError('survey supervised travel exceeds10m')
+                # 기존 감독 sampled displacement 정책이다. 실제 전체 주행거리 인증은 아니다.
+                self._travel=travel
         self._last_pose = sample; self._observation = observation
         if self._started_j is None: self._started_j = lo
         if grant.lifecycle_state == 0:
@@ -585,7 +665,8 @@ class MapperScene:
         return True
 
     def station(self, poses, *, now_j_us):
-        self._now(now_j_us); p = self.profile
+        grant,_=self._now(now_j_us); p = self.profile
+        if grant.lifecycle_state not in (0,1):return False
         # 운영 경로는 원 SensorState 등록 객체를 재검산하는 typed witness만 받는다.
         from .mapper_scene import SceneStationWitness
         if type(poses) is SceneStationWitness:
@@ -614,6 +695,8 @@ class MapperScene:
         return self._station_record(last,fields,p)
 
     def _station_record(self,last,fields,p):
+        s,_,decode=_codec()
+        if self._grant is None or decode(self._grant,s.SceneGrant).lifecycle_state not in (0,1):return False
         if self._validation_start_j is not None and fields['started_us']<self._validation_start_j:
             raise SceneError('restore stationary window predates validation start')
         if any(math.hypot(last.x-old.x,last.y-old.y)-last.position_error_m-old.position_error_m<p.station_distance_m
@@ -658,7 +741,7 @@ class MapperScene:
             if data[5]!=UUID(self.context.pi_host_boot).bytes or record.pi_upper>end_pi:
                 raise SceneError('foreign/future original survey provenance')
             if identity not in actual_masks:
-                actual_masks[identity]=self.evidence_scope.record_sources(record,contexts[record.context_sha256])
+                actual_masks[identity]=self.evidence_scope.record_sources(record,contexts[record.context_sha256],evidence=payload.evidence)
             return record,data,actual_masks[identity]
 
         def odom_parent(identity):
@@ -708,13 +791,15 @@ class MapperScene:
                         # REGISTRATION의 현재 RGB와 이전 frozen geometry는 다른 역할이다.
                         # 이전 기하만 붙여 새로운 정합을 주장할 수 없다.
                         current_rgb=[];anchor=False
-                        registration_scope,_=self.evidence_scope._record_scope(contexts[record.context_sha256])
+                        registration_scope,_=self.evidence_scope._record_scope(contexts[record.context_sha256],
+                            record=record,evidence=payload.evidence)
                         for parent in record.parents:
                             previous,parent_data,(parent_actual,_)=details(parent)
                             same_capture=(previous.pi_lower,previous.pi_upper,previous.observation_sequence)==(
                                 record.pi_lower,record.pi_upper,record.observation_sequence)
                             if parent_data[2]==0 and parent_actual==1 and parent_data[3]==1 and same_capture:
-                                rgb_scope,_=self.evidence_scope._record_scope(contexts[previous.context_sha256])
+                                rgb_scope,_=self.evidence_scope._record_scope(contexts[previous.context_sha256],
+                                    record=previous,evidence=payload.evidence)
                                 if (rgb_scope.raw_binding.sha256!=registration_scope.raw_binding.sha256
                                         or not same_catalog_geometry(rgb_scope.context,registration_scope.context,'SLOT')):
                                     raise SceneError('REGISTRATION current RGB belongs to a different original source')
@@ -794,7 +879,7 @@ class MapperScene:
         return json_bytes(canonical(scene),16384)
 
     def adopt_freeze(self,request,*,current_tile_references,current_hazard_revision,now_j_us,
-                     all_tiles=None,mapper_state=None):
+                     all_tiles=None,mapper_state=None,archive=None):
         """Catalog가 이미 고정한 동일 원 CP만 수락한다. 요청을 재생성하지 않는다.
 
         all_tiles는 실제 snapshot의 full128 사본이며 wire copy32 cap과 별개다.
@@ -815,6 +900,10 @@ class MapperScene:
         request.payload.validate_job(request.job)
         positive,valid_mask,slots=self._inspect(request.payload,begin_pi=self._begin_pi,
             end_pi=self._begin_pi+SURVEY_US,all_tiles=all_tiles)
+        _check_archive(archive,request.job,request.payload.manifest,request.payload.sha256,
+            request.digest,request.payload.tile_references)
+        full_tiles=request.payload.tiles if all_tiles is None else all_tiles
+        fixed_tiles=full_tiles if archive is None and len(full_tiles)<=4 else ()
         grant,_=self._now(now_j_us);observation=self._observation;payload=request.payload
         self._attempts += 1
         s, encode, _ = _codec(); lo,hi = observation.raw_pose.captured_us
@@ -829,7 +918,8 @@ class MapperScene:
             anchor_position_bound_m=observation.registration.position_error_m,
             anchor_heading_bound_rad=observation.registration.yaw_error_rad,evidence_flags=31,failure_flags=0,
             timestamp_error_us=(hi-lo+1)//2)
-        self._frozen = FrozenSurvey(request,encode(summary),self._hazard,grant.lifecycle_revision)
+        self._frozen = FrozenSurvey(request,encode(summary),self._hazard,grant.lifecycle_revision,
+            archive=archive,fixed_tiles=fixed_tiles)
         self._summary = None; self._eligible = False; self._blocked = 'FREEZE_PENDING'; return request
 
     def prepare_freeze(self,job,tiles,evidence,*,current_tile_references,current_hazard_revision,now_j_us,
@@ -848,7 +938,7 @@ class MapperScene:
         grant, trust = self._now(now_j_us); frozen = self._frozen
         s, encode, decode = _codec()
         original_summary=None if frozen is None else decode(frozen.summary,s.SurveySummary)
-        if (frozen is None or request is not frozen.request or type(receipt) is not CommitReceipt
+        if (type(frozen) is not FrozenSurvey or request is not frozen.request or type(receipt) is not CommitReceipt
                 or self._blocked != 'FREEZE_PENDING' or self._hazard != frozen.hazard_revision
                 or frozen.grant_revision != grant.lifecycle_revision
                 or now_j_us+trust.upper_offset_us >= grant.survey_deadline_pi_us
@@ -858,34 +948,54 @@ class MapperScene:
         summary = original_summary
         summary.completed_peer_us = now_j_us
         self._summary = encode(summary)
-        self._frozen = FrozenSurvey(request,self._summary,frozen.hazard_revision,frozen.grant_revision,receipt)
+        self._frozen = FrozenSurvey(request,self._summary,frozen.hazard_revision,frozen.grant_revision,receipt,
+            frozen.archive,frozen.fixed_tiles)
         return True
 
     def restore_ready(self, loaded, original_receipt, observation, *, now_j_us):
+        """단일 페이지 호환 포트다. 원 commit descriptor와 전체 material을 반드시 요구한다."""
+        from .map_checkpoint import CheckpointPages
+        if (type(loaded) is not LoadedCheckpoint or loaded.original_commit is None
+                or loaded.original_commit.receipt!=original_receipt):
+            raise SceneError('actual LOAD with its original checkpoint commit descriptor required')
+        pages=CheckpointPages(loaded.checkpoint_ref,loaded.request.job.context)
+        complete=pages.accept(loaded,now_us=now_j_us)
+        if complete is None:raise SceneError('all original selected checkpoint pages required')
+        return self.restore_complete(complete,observation,now_j_us=now_j_us)
+
+    def restore_complete(self, complete, observation, *, now_j_us,archive=None):
+        """전체 실제 LOAD·원 transaction·새 관측을 결박한다. 원 CP/셀의 시각은 갱신하지 않는다."""
+        from .map_checkpoint import SourceComplete
         grant, trust = self._now(now_j_us)
         if (grant.purpose != 1 or grant.lifecycle_state != 1 or not grant.scene.allow_restore_after_mapper_restart
-                or type(loaded) is not LoadedCheckpoint or type(original_receipt) is not CommitReceipt
-                or not loaded.current(loaded.request,self.context.sha256,now_j_us)
-                or loaded.payload.sha256 != grant.restore_checkpoint_sha256.hex()):
-            raise SceneError('actual current LOAD and exact selected checkpoint required')
-        old = loaded.original_job; receipt = original_receipt
-        if ((receipt.database_uuid,receipt.job_id,receipt.job_digest,receipt.origin_context_sha256) !=
-                (old.context.database_uuid,old.job_id,old.digest(loaded.payload),old.context.sha256)
-                or receipt.status not in ('COMMITTED','DUPLICATE') or not old.issued_us <= receipt.committed_j_us < old.expires_us):
-            raise SceneError('original checkpoint transaction receipt required')
+                or type(complete) is not SourceComplete or complete.original_commit is None
+                or self.evidence_scope is None):
+            raise SceneError('actual complete LOAD with original checkpoint commit descriptor required')
+        self.evidence_scope.complete_restore_head(complete,now_us=now_j_us)
+        original_sha=complete.original_commit.validate(complete.original_job,complete.manifest,complete.checkpoint_ref)
+        if original_sha!=grant.restore_checkpoint_sha256.hex():
+            raise SceneError('restore grant selected a different original full checkpoint SHA')
+        _check_archive(archive,complete.original_job,complete.manifest,original_sha,
+            complete.original_commit.receipt.job_digest,tuple(tile.reference for tile in complete.tiles))
+        old=complete.original_job;receipt=complete.original_commit.receipt
         if any(getattr(old.context,name) != getattr(self.context,name) for name in
                ('database_uuid','map_epoch','frame_epoch','odom_epoch','pi_host_boot','configuration','calibration','primitive_sha256')):
             raise SceneError('restore cannot cross Pi/odom/calibration/map identity')
-        scene = json_bytes(loaded.payload.manifest,16384)['scene']
+        scene = json_bytes(complete.manifest,16384)['scene']
         if (type(scene) is not dict or scene.get('survey_id') != grant.scene.survey_id.hex()
                 or scene.get('survey_revision') != grant.frozen_survey_revision
                 or scene.get('admission_id') != grant.scene.admission_id.hex()
                 or scene.get('coverage_profile_sha256') != self.profile.coverage_profile_sha256
-                or loaded.payload.sha256 != grant.frozen_evidence_sha256.hex()
+                or original_sha != grant.frozen_evidence_sha256.hex()
                    and scene.get('base_evidence_sha256') != grant.frozen_evidence_sha256.hex()):
             raise SceneError('checkpoint does not close over original frozen base')
-        positive, mask, slots = self._inspect(loaded.payload,begin_pi=scene['begin_pi_us'],end_pi=scene['collection_end_pi_us'])
+        # 이 사본의 SHA는 원 CP SHA가 아니다. inspect만 기존 bounded payload 포트로 전달한다.
+        inspection=CheckpointPayload(complete.manifest,complete.tiles[:32],complete.evidence)
+        positive, mask, slots = self._inspect(inspection,begin_pi=scene['begin_pi_us'],
+            end_pi=scene['collection_end_pi_us'],all_tiles=complete.tiles)
         self.observe(observation,now_j_us=now_j_us)
+        if self._observation is not observation:
+            raise SceneError('restore requires the exact accepted current observation')
         if (not self._stations or self._hazard != grant.frozen_hazard_revision
                 or now_j_us+trust.upper_offset_us >= grant.survey_deadline_pi_us):
             raise SceneError('restore validation changed hazard/deadline')
@@ -895,15 +1005,14 @@ class MapperScene:
             evidence_sequence=observation.world_sequence,started_peer_us=lo,last_observed_peer_us=(lo+hi)//2,
             completed_peer_us=now_j_us,positive_cell_count=positive,observed_slot_count=slots,
             required_sensor_mask=self.profile.required_sensor_mask,valid_sensor_mask=mask,
-            evidence_sha256=bytes.fromhex(loaded.payload.sha256),coverage_profile_sha256=grant.scene.coverage_profile_sha256,
+            evidence_sha256=bytes.fromhex(original_sha),coverage_profile_sha256=grant.scene.coverage_profile_sha256,
             observation_station_count=scene['observation_station_count'],hazard_revision=self._hazard,
             alignment_revision=observation.accepted_alignment.registration_revision,
             anchor_position_bound_m=observation.registration.position_error_m,
             anchor_heading_bound_rad=observation.registration.yaw_error_rad,evidence_flags=63,failure_flags=0,
             timestamp_error_us=(hi-lo+1)//2)
-        request = CheckpointRequest(old,loaded.payload)
         self._summary = encode(summary)
-        self._frozen = FrozenSurvey(request,self._summary,self._hazard,grant.lifecycle_revision,receipt)
+        self._frozen = RestoredSurvey(complete,self._summary,self._hazard,grant.lifecycle_revision,archive)
         return self._summary
 
     def summary_bytes(self, *, now_j_us):

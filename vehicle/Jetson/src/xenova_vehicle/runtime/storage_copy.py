@@ -2,6 +2,8 @@
 
 S가 full lease를 발급한다. 이 helper는 IPC를 생성/unlink하거나 S 원장을 대신하지 않는다.
 STORAGE SLOT의 producer/consumer는 channel+worker Endpoint object이며 RAW SLOT은 바꾸지 않는다.
+LOAD metadata는 legacy exact8 또는 원 commit descriptor를 포함한 exact9다. CHECKPOINT와
+기존 prefix/영역/제어 packet은 그대로이며 descriptor 부재를 원 commit 증명으로 채우지 않는다.
 """
 
 from dataclasses import asdict,dataclass,field,replace
@@ -16,7 +18,7 @@ from .resident_transport import j_us
 from ..storage.contracts import (CatalogHeadSnapshot,LoadRequest,PersistenceError,StorageJob,
     canonical,digest,json_bytes,uint,uuid)
 from ..storage.port import CheckpointRequest
-from ..storage.records import CheckpointPayload,EvidenceTable,LoadedCheckpoint,TileVersion
+from ..storage.records import CheckpointCommitOrigin,CheckpointPayload,EvidenceTable,LoadedCheckpoint,TileVersion
 
 
 TILE_REGION=8*1024*1024
@@ -162,9 +164,11 @@ def encode_checkpoint(request,lease):
 def encode_load(result,lease):
     if type(result) is not LoadedCheckpoint:raise PersistenceError('exact original LOAD response required')
     request=result.request
-    return _encode(lease,request.job,result.payload,request.digest,dict(direction='LOAD',job=request.job.fields,
+    metadata=dict(direction='LOAD',job=request.job.fields,
         original_job=result.original_job.fields,checkpoint_ref=json_bytes(request.checkpoint_ref,2048),
-        selection=json_bytes(request.selection,512),purpose=request.purpose,heads=asdict(result.heads),completed_us=result.completed_us))
+        selection=json_bytes(request.selection,512),purpose=request.purpose,heads=asdict(result.heads),completed_us=result.completed_us)
+    if result.original_commit is not None:metadata['original_commit']=result.original_commit.fields
+    return _encode(lease,request.job,result.payload,request.digest,metadata)
 
 
 def decode_copy(lease,ready,evidence,descriptors,manifest,tiles):
@@ -179,7 +183,9 @@ def decode_copy(lease,ready,evidence,descriptors,manifest,tiles):
     meta_raw=evidence[256:256+ml];table_raw=evidence[256+ml:]
     if sha256(meta_raw).digest()!=mh or sha256(table_raw).digest()!=eh:raise PersistenceError('DB_COPY metadata/evidence hash')
     metadata=json_bytes(meta_raw,_META_CAP)
-    if type(metadata) is not dict or set(metadata)!= {'direction','job','original_job','checkpoint_ref','selection','purpose','heads','completed_us'}:
+    names={'direction','job','original_job','checkpoint_ref','selection','purpose','heads','completed_us'}
+    if (type(metadata) is not dict or set(metadata)!=names
+            and not (direction==2 and set(metadata)==names|{'original_commit'})):
         raise PersistenceError('DB_COPY metadata exact fields')
     job=StorageJob.from_fields(metadata['job'])
     original=job if direction==1 else StorageJob.from_fields(metadata['original_job'])
@@ -203,7 +209,8 @@ def decode_copy(lease,ready,evidence,descriptors,manifest,tiles):
         if metadata['direction']!='LOAD':raise PersistenceError('LOAD direction mismatch')
         request=LoadRequest(job,canonical(metadata['checkpoint_ref']),canonical(metadata['selection']),metadata['purpose'])
         head=dict(metadata['heads']);head['heads']=tuple(tuple(item) for item in head['heads'])
-        result=LoadedCheckpoint(request,original,request.checkpoint_ref,payload,CatalogHeadSnapshot(**head),metadata['completed_us'])
+        origin=None if 'original_commit' not in metadata else CheckpointCommitOrigin.from_fields(metadata['original_commit'])
+        result=LoadedCheckpoint(request,original,request.checkpoint_ref,payload,CatalogHeadSnapshot(**head),metadata['completed_us'],origin)
         job_digest=request.digest
     expected=dict(database_uuid=job.context.database_uuid,job_id=job.job_id,job_digest=job_digest,copy_lease=lease.fields,
         manifest_length=len(manifest),manifest_sha256=sha256(manifest).hexdigest(),provenance_length=len(evidence),

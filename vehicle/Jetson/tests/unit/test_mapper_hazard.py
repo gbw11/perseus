@@ -168,7 +168,12 @@ class MapperHazardTests(unittest.TestCase):
         self.assertTrue(rejected.revoke_required)
         self.assertIsNone(rejected.revision)
         owner.cancel(rejected)
-        rejected = owner.restore_complete(complete)
+        with self.assertRaises(ValueError):
+            owner.restore_complete(complete,pipeline=f.pipeline,
+                scope=f.draft.frame.scope,now_us=at)
+        rejected=owner.prepare(original,now_us=at)
+        self.assertFalse(rejected.ready)
+        self.assertEqual(rejected.reason,'RESTORE_NOT_READY')
         self.assertFalse(owner.accept(rejected))
         self.assertIsNone(owner.snapshot)
 

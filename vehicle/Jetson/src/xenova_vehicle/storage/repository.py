@@ -12,7 +12,7 @@ import time
 from .contracts import (CatalogHeadSnapshot,CatalogReservation,CommitReceipt,LoadRequest,MAX_U63,PersistenceConflict,
     PersistenceCorrupt,PersistenceError,PersistenceUnknown,ProvenanceRange,StorageJob,canonical,
     decimal,digest,json_bytes,uint,uuid)
-from .records import (CELL,CheckpointPayload,ContextRecord,EvidenceTable,LoadedCheckpoint,ProvenanceRecord,TileVersion)
+from .records import (CELL,CheckpointCommitOrigin,CheckpointPayload,ContextRecord,EvidenceTable,LoadedCheckpoint,ProvenanceRecord,TileVersion)
 from .geometry_scope import CatalogGeometryScope
 
 
@@ -458,7 +458,8 @@ class PersistenceStore:
         original=StorageJob.from_fields(json_bytes(bytes(row[2]),8192))
         receipt=CommitReceipt.from_fields(json_bytes(bytes(row[3]),2048))
         if (original.job_id!=job_id or original.context.database_uuid!=self.database_uuid or receipt.status!='COMMITTED'
-                or receipt.job_id!=job_id or receipt.origin_context_sha256!=original.context.sha256 or receipt.job_digest!=row[0]):
+                or receipt.database_uuid!=self.database_uuid or receipt.job_id!=job_id
+                or receipt.origin_context_sha256!=original.context.sha256 or receipt.job_digest!=row[0]):
             raise PersistenceCorrupt('stored checkpoint receipt/source mismatch')
         refs=json_bytes(bytes(row[6]),8192)
         if type(refs) is not list or len(refs)>32:raise PersistenceCorrupt('stored copy descriptor cap')
@@ -520,7 +521,8 @@ class PersistenceStore:
             self._deadline(job.expires_us)
             if actual is None:return CommitReceipt(self.database_uuid,job.job_id,request.digest,'ABSENT',None,None,job.context.sha256)
             if actual!=reference:raise PersistenceConflict('LOAD ref differs from original selected checkpoint')
-            original,payload,_=self._stored_payload(reference['checkpoint_job_id'])
+            original,payload,receipt=self._stored_payload(reference['checkpoint_job_id'])
+            origin=CheckpointCommitOrigin(receipt,payload.evidence.sha256,tuple(tile.reference for tile in payload.tiles))
             if request.purpose=='CURRENT_MAP' and original.context.map_epoch!=job.context.map_epoch:
                 raise PersistenceConflict('current map LOAD crosses map epoch')
             selection=json_bytes(request.selection,512)
@@ -552,6 +554,6 @@ class PersistenceStore:
             copy=CheckpointPayload(payload.manifest,tiles,evidence)
             heads=self.catalog_heads(job,current_context_sha256=current_context_sha256)
             completed=self.clock();self._timely(job.expires_us)
-            return LoadedCheckpoint(request,original,request.checkpoint_ref,copy,heads,completed)
+            return LoadedCheckpoint(request,original,request.checkpoint_ref,copy,heads,completed,origin)
         except self.sqlite.DatabaseError as error:raise PersistenceUnknown('LOAD SQL outcome unconfirmed') from error
         finally:self.connection.set_progress_handler(None,0)

@@ -236,7 +236,7 @@ class JioSurveyPortTests(unittest.TestCase):
     def test_same_admission_revoke_cannot_roll_back_after_take_inputs_and_equal_revision_conflicts(self):
         _,owner,value=self.owner();token=owner._token
         revoked=schema.SceneGrant();revoked.CopyFrom(value)
-        revoked.lifecycle_state=3;revoked.lifecycle_revision+=1;revoked.scene.admission_revision+=1
+        revoked.lifecycle_state=3;revoked.lifecycle_revision+=1
         topic=f'{PREFIX}/mapper/oak-1/scene.pb'
         jio_fixture.deliver(owner,topic,revoked,qos=1)
         current=owner.take_inputs()[0]

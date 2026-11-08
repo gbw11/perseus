@@ -87,11 +87,12 @@ def _pipeline_state(pipeline,context):
     arrays={name:_pack_array(getattr(grid,name)) for name in ('state','observed_us','time_known','support','permission',
         'conflict','hit_origin','unordered_hit','hit_available_us')}
     reference=None if pipeline.reference is None else asdict(pipeline.reference)
-    labels=sorted(set(grid.hit_view.values()))
+    window=getattr(grid,'rolling_window',None)
+    labels=sorted(set(grid.hit_view.values()) if window is None else {str(value) for value in grid.hit_view.values()})
     if len(labels)>64:raise MapCheckpointNotReady('original hit-view inventory exceeds state capacity')
     view_codes=np.zeros(grid.state.shape,dtype=np.uint8);lookup={label:index+1 for index,label in enumerate(labels)}
-    for index,view in grid.hit_view.items():view_codes.reshape(-1)[index]=lookup[view]
-    return dict(profile='mapper-pipeline-state-1',storage_context=context.fields,
+    for index,view in grid.hit_view.items():view_codes.reshape(-1)[index]=lookup[view if window is None else str(view)]
+    state=dict(profile='mapper-pipeline-state-1',storage_context=context.fields,
         calibration_id=pipeline.calibration.sha256,pipeline_profile_sha256=sha256(canonical(asdict(pipeline.profile))).hexdigest(),
         clock_id=grid.clock_id,kind=grid.kind,frame_id=grid.frame_id,
         spec=asdict(grid.spec),free_ttl_us=grid.free_ttl_us,occupied_ttl_us=grid.occupied_ttl_us,
@@ -101,6 +102,11 @@ def _pipeline_state(pipeline,context):
         gates={name:_gate_fields(getattr(pipeline,name)) for name in ('rgb_gate','depth_gate','nn_gate')},
         map_from_odom_identity=bool(pipeline._alignment is None and not pipeline._restore_pending),
         alignment=None if pipeline._alignment is None else pipeline._alignment.fields(),reference=reference)
+    if window is not None:
+        from ..mapping.map_lattice import atlas_state_fields
+        try:state['atlas']=atlas_state_fields(window,getattr(pipeline,'_rolling_policy',None))
+        except ValueError as error:raise MapCheckpointNotReady('explicit original rolling policy/window required') from error
+    return state
 
 
 CLOCK_LEASE_FIELDS=frozenset(('trust_bytes','source_revision','time_lease_revision','completed_pi_us','probe_pi_send_us',
@@ -279,9 +285,15 @@ class MapSnapshot:
     durable_cutoff_pi_us: int
     generation: int
     grid_revision: int
+    atlas_snapshot: object=None
+    atlas_owner: object=None
 
     @property
     def mapper_state_ref(self):return json_bytes(self.mapper_state,8192)
+
+    def full_tiles(self):
+        """rolling 본문은 원 freeze lease 안에서 잠시만 빌린다. 전체 atlas를 상주 사본으로 두지 않는다."""
+        return self.all_tiles if self.atlas_owner is None else tuple(self.atlas_owner.iter_tiles(self.atlas_snapshot))
 
 
 class MapCheckpointCollector:
@@ -304,14 +316,46 @@ class MapCheckpointCollector:
         self._durable_tiles={};self._durable_catalog=();self._tile_revision_head=0;self._pending=None;self._retained=None
         self._draft_snapshot=None;self._generation=0
         self._durable_highwaters=(1,1);self._subsystem_state={}
+        self._atlas_proof=None;self._atlas_owner=None;self._atlas_checkpoint_snapshot=None
+
+    def reframe_atlas_proof(self,proof):
+        """root가 먼저 고정한 후보 grid/window에 원 proof를 묶는다. pool/본문은 복사하지 않는다."""
+        from .atlas_proof import AtlasProofWindow
+        grid=self._grid
+        if (type(proof) is not AtlasProofWindow or type(grid) is not EvidenceGrid
+                or grid.rolling_window!=proof.window or grid.spec!=proof.window.spec):
+            raise MapCheckpointNotReady('actual candidate rolling grid and matching proof window required')
+        cells={};unresolved=set()
+        for key,raw in proof.cells.items():
+            index=proof.window.global_to_local(*key)
+            if index is None:raise MapCheckpointNotReady('proof cell is outside original rolling window')
+            # 원 EVIDENCE는 helper에 남긴다. LIVE가 없는 복원/eviction 셀을 현재 관측으로 올리지 않는다.
+            if CELL.unpack(raw)[6] and int(grid.state.reshape(-1)[index])!=0:cells[index]=raw
+            if proof.is_unresolved(*key):unresolved.add(index)
+        changed=proof is not self._atlas_proof
+        self._atlas_proof=proof;self._cells=cells;self._unresolved=unresolved
+        if changed:self._generation+=1
 
     def _allocate(self,keep=()):
         if len(self._records)>=16384:self._trim(keep)
         if self._next>=self.grant.end_exclusive or len(self._records)>=16384:raise MapCheckpointNotReady('map provenance capacity exhausted')
         value=self._next;self._next+=1;return value
 
+    def _pin_atlas_owner(self,owner):
+        from ..mapping.atlas import AtlasResource
+        from .mapper_atlas import MapperAtlasNotReady
+        try:self._atlas_owner.retain_checkpoint_owner(self._atlas_checkpoint_snapshot,owner)
+        except (AtlasResource,MapperAtlasNotReady) as error:
+            raise MapCheckpointNotReady('original atlas payload owner cannot be retained') from error
+
     def _trim(self,keep=()):
-        pending=list(keep)+list(self._rgb_refs.values())+[CELL.unpack(raw)[6] for raw in self._cells.values()]
+        pending=list(keep)+list(self._rgb_refs.values())+[CELL.unpack(raw)[6] for raw in self._cells.values() if CELL.unpack(raw)[6]]
+        if self._atlas_owner is not None:
+            roots=self._atlas_owner.provenance_roots()
+            if type(roots) is not tuple or len(roots)>16384:raise MapCheckpointNotReady('bounded original atlas proof roots required')
+            for identity in roots:
+                uint(identity)
+                if identity:pending.append(identity)
         pending.extend(self._vehicle_refs.values())
         pending.extend(mapper_state_roots(self._subsystem_state))
         pending.extend(self._reference_geometry.values())
@@ -507,7 +551,12 @@ class MapCheckpointCollector:
         if request is not self._pending or type(receipt) is not CommitReceipt:
             raise MapCheckpointNotReady('original selected map checkpoint/receipt required')
         if not receipt.current(request.job,request.payload,self.scope.context.sha256,now_us):return False
-        for tile in request.payload.tiles:self._durable_tiles[(tile.tile_x,tile.tile_y)]=tile
+        if self._atlas_checkpoint_snapshot is not None:
+            self._atlas_owner.complete_checkpoint(self._atlas_checkpoint_snapshot)
+            self._atlas_checkpoint_snapshot=None
+            self._durable_tiles={reference[:2]:reference for reference in request.payload.tile_references}
+        else:
+            for tile in request.payload.tiles:self._durable_tiles[(tile.tile_x,tile.tile_y)]=tile
         self._durable_catalog=request.payload.evidence.catalog;self._pending=None
         self._durable_highwaters=request.payload.evidence.catalog_highwaters
         state,_=decode_mapper_state(json_bytes(request.payload.manifest,16384)['scene'],request.payload.evidence.contexts)
@@ -518,9 +567,22 @@ class MapCheckpointCollector:
     def retire_checkpoint(self,request):
         """원 actor가 terminal/history로 정리한 요청만 해제한다. durable refs/HWM을 발급하지 않는다."""
         if request is not self._pending:raise MapCheckpointNotReady('original pending map checkpoint required')
+        if self._atlas_checkpoint_snapshot is not None:
+            self._atlas_owner.retire_checkpoint(self._atlas_checkpoint_snapshot)
+            self._atlas_checkpoint_snapshot=None
         self._pending=self._draft_snapshot=None
 
     def _copy_tiles(self,grid,now_us,include_unchanged):
+        if getattr(grid,'rolling_window',None) is not None:
+            from .mapper_atlas import MapperAtlas,MapperAtlasNotReady
+            from ..mapping.atlas import AtlasResource
+            if type(self._atlas_owner) is not MapperAtlas:
+                raise MapCheckpointNotReady('rolling atlas checkpoint snapshot port is not connected')
+            try:snapshot=self._atlas_owner.checkpoint_snapshot(allow_clean=True)
+            except (MapperAtlasNotReady,AtlasResource) as error:
+                raise MapCheckpointNotReady('original atlas checkpoint is not ready') from error
+            self._atlas_checkpoint_snapshot=snapshot
+            return snapshot.tiles,(),snapshot.tile_references
         snapshot=grid.snapshot(now_us,clock_id=grid.clock_id);copied=[]
         all_tiles=dict(self._durable_tiles)
         empty=CELL.pack(255,0,0,0.,0.,0.,0,0,0,0,0,0)
@@ -589,6 +651,19 @@ class MapCheckpointCollector:
         delta=update.mutation;grid=update.grid
         if grid.frame_id!='odom:'+self.scope.context.odom_epoch:return
         if self._grid is not None and self._grid is not grid:raise MapCheckpointNotReady('collector cannot silently replace its grid')
+        window=getattr(grid,'rolling_window',None);proof=self._atlas_proof
+        if window is not None:
+            if (proof is None or proof.window!=window or grid.spec!=window.spec
+                    or delta.window_offset_xy!=window.offset_xy or delta.shape!=(window.height,window.width)):
+                raise MapCheckpointNotReady('mutation changed original rolling window/proof address')
+        elif delta.window_offset_xy is not None or proof is not None:
+            raise MapCheckpointNotReady('rolling proof cannot be applied to an unbound fixed grid')
+        def unresolved(indices):
+            self._unresolved.update(indices)
+            if proof is not None:
+                for index in indices:
+                    row,col=divmod(index,delta.shape[1])
+                    proof.mark_unresolved(delta.window_offset_xy[0]+col,delta.window_offset_xy[1]+row)
         self._grid=grid
         self._generation+=1
         affected=np.flatnonzero(np.frombuffer(delta.affected_mask,dtype=np.bool_)).tolist()
@@ -603,17 +678,17 @@ class MapCheckpointCollector:
                 or update.pose.sample.origin!='ODOMETRY'
                 or not update.pose.bracket_us[0]<=full[0]<=full[1]<=update.pose.bracket_us[1]
                 or grid.clock_id!=self.scope.raw_binding.fields['clock_epoch']):
-            self._unresolved.update(affected);return
+            unresolved(affected);return
         if (type(update.raw_pose) is not PoseEstimate or pipeline is None and update.raw_pose!=update.pose
                 or pipeline is not None and pipeline.grid is not grid):
-            self._unresolved.update(affected);return
-        self._unresolved.update(set(affected)-set(written))
+            unresolved(affected);return
+        unresolved(set(affected)-set(written))
         if not written:return
         if delta.kind=='FREE' and (update.certificate is None or not update.certificate.free
                 or not update.certificate.source_keys or any(key!=delta.stamp.key for key in update.certificate.source_keys)):
-            self._unresolved.update(written);return
+            unresolved(written);return
         try:parents=self._frame_roots(frame,pipeline,update.raw_pose)
-        except MapCheckpointNotReady:self._unresolved.update(written);return
+        except MapCheckpointNotReady:unresolved(written);return
         for item in frame.contexts:self._contexts[item.sha256]=item
         for item in (*frame.parents,*frame.ancestry):
             old=self._records.get(item.provenance_id)
@@ -635,15 +710,15 @@ class MapCheckpointCollector:
             lower=math.inf;upper=-math.inf;extent=radius=0.
             for box in update.depth.hit_boxes:
                 ground=plane_height_bounds(Interval(box.lower[0],box.upper[0]),Interval(box.lower[1],box.upper[1]),self.scope.calibration.plane)
-                if ground is None:self._unresolved.update(written);return
+                if ground is None:unresolved(written);return
                 lower=min(lower,box.lower[2]-ground.hi);upper=max(upper,box.upper[2]-ground.lo)
                 extent=max(extent,math.hypot(box.upper[0]-box.lower[0],box.upper[1]-box.lower[1]))
                 radius=max(radius,math.hypot(max(abs(box.lower[0]),abs(box.upper[0])),max(abs(box.lower[1]),abs(box.upper[1]))))
-            if not math.isfinite(lower+upper):self._unresolved.update(written);return
+            if not math.isfinite(lower+upper):unresolved(written);return
         else:
             # 실제 검산한 opaque core의 높이 band다. hit의 실측 높이라고 해석하지 않는다.
             targets=getattr(update,'targets',())
-            if not targets:self._unresolved.update(written);return
+            if not targets:unresolved(written);return
             lower=min(t.base_height_m[0] for t in targets);upper=max(t.base_height_m[1]+t.core_height_m for t in targets);extent=0.
             radius=max(math.hypot(x,y) for x in update.cell_bounds[::2] for y in update.cell_bounds[1::2])
         original=update.raw_pose if type(update.raw_pose) is PoseEstimate else update.pose
@@ -652,7 +727,11 @@ class MapCheckpointCollector:
         hmin,hmax,pad=_f32(lower,False),_f32(upper,True),_f32(bound,True)
         cell=CELL.pack(100 if delta.kind=='HIT' else 0,1,mask,hmin,hmax,pad,identity,*frame.pi_interval,
             frame.observation_sequence,grid.revision,0)
-        for index in written:self._cells[index]=cell;self._unresolved.discard(index)
+        for index in written:
+            if proof is not None:
+                row,col=divmod(index,delta.shape[1]);x=delta.window_offset_xy[0]+col;y=delta.window_offset_xy[1]+row
+                proof.write(x,y,cell);proof.clear_unresolved(x,y)
+            self._cells[index]=cell;self._unresolved.discard(index)
         self._last=frame
 
     def snapshot(self,pipeline,job,*,now_us,catalog_evidence=None,subsystem_state=None,include_unchanged=False):
@@ -668,13 +747,20 @@ class MapCheckpointCollector:
             raise MapCheckpointNotReady('one original map version capture is still pinned')
         if type(include_unchanged) is not bool:raise MapCheckpointNotReady('explicit copy policy required')
         grid=pipeline.grid
+        if self._atlas_proof is not None and self._atlas_proof.unresolved:
+            raise MapCheckpointNotReady('global atlas cell proof is unresolved outside or inside current ROI')
         if self._unresolved or any(index not in self._cells for index in np.flatnonzero(grid.state.reshape(-1)!=0)):
             raise MapCheckpointNotReady('unknown/untimed/blocked cell witness prevents complete checkpoint')
         for index,raw in self._cells.items():
             state=int(grid.state.reshape(-1)[index]);wire=CELL.unpack(raw)[0]
             if state not in (FREE,OCCUPIED) or wire!=(0 if state==FREE else 100):
                 raise MapCheckpointNotReady('actual cell state differs from original applied witness')
-        tiles,all_tiles,references=self._copy_tiles(grid,now_us,include_unchanged)
+        rolling=getattr(grid,'rolling_window',None) is not None
+        if rolling:
+            if self._atlas_owner is None:raise MapCheckpointNotReady('original rolling atlas owner required')
+            self._tile_revision_head=max(self._tile_revision_head,self._atlas_owner.tile_revision_highwater)
+            tiles=all_tiles=references=None
+        else:tiles,all_tiles,references=self._copy_tiles(grid,now_us,include_unchanged)
         state=_pipeline_state(pipeline,self.scope.context);state['tile_revision_highwater']=self._tile_revision_head
         needed=set() if pipeline.reference is None else {segment.capture_id for segment in pipeline.reference.segments}
         if not needed.issubset(self._reference_geometry):raise MapCheckpointNotReady('original reference RGB proof was not collected')
@@ -686,11 +772,11 @@ class MapCheckpointCollector:
             state['alignment_clock']=self._alignment_clock
         state.update(self._subsystem_state)
         if subsystem_state is not None:
-            if type(subsystem_state) is not dict or set(subsystem_state)-{'lane_catalog','parking_catalog','road_basis'}:
+            if type(subsystem_state) is not dict or set(subsystem_state)-{'lane_catalog','parking_catalog','road_basis','hazard'}:
                 raise MapCheckpointNotReady('unknown mapper subsystem state')
             for key,value in subsystem_state.items():
                 if type(value) is not dict or value.get('profile')!={'lane_catalog':'lane-catalog-state-1',
-                        'parking_catalog':'parking-catalog-state-1','road_basis':'road-basis-1'}[key]:
+                        'parking_catalog':'parking-catalog-state-1','road_basis':'road-basis-1','hazard':'mapper-hazard-state-1'}[key]:
                     raise MapCheckpointNotReady('unsupported original subsystem profile')
                 state[key]=value
         metadata,pages=encode_mapper_state(state)
@@ -705,7 +791,17 @@ class MapCheckpointCollector:
         evidence=EvidenceTable(tuple(records[k] for k in sorted(records)),tuple(contexts[k] for k in sorted(contexts)),
             base.catalog,base.reservations,base.catalog_highwaters)
         cutoff=max((record.pi_upper for record in records.values()),default=self._last.pi_interval[1])
-        self._draft_snapshot=MapSnapshot(job,tiles,all_tiles,evidence,canonical(metadata),references,cutoff,self._generation,grid.revision)
+        # rolling lease는 큰 META/증거 검산이 끝난 뒤에만 획득한다. 실패한 준비가 pool을 잡지 않는다.
+        if rolling:tiles,all_tiles,references=self._copy_tiles(grid,now_us,include_unchanged)
+        snapshot=MapSnapshot(job,tiles,all_tiles,evidence,canonical(metadata),references,cutoff,self._generation,grid.revision,
+            self._atlas_checkpoint_snapshot,self._atlas_owner if rolling else None)
+        if rolling:
+            try:self._pin_atlas_owner(snapshot)
+            except BaseException:
+                self._atlas_owner.retire_checkpoint(self._atlas_checkpoint_snapshot)
+                self._atlas_checkpoint_snapshot=None
+                raise
+        self._draft_snapshot=snapshot
         return self._draft_snapshot
 
     def current_tile_references(self,pipeline,snapshot):
@@ -729,23 +825,32 @@ class MapCheckpointCollector:
                 or manifest['durable_cutoff_pi_us']<snapshot.durable_cutoff_pi_us
                 or catalog_extension and manifest['durable_cutoff_pi_us']!=snapshot.durable_cutoff_pi_us):
             raise MapCheckpointNotReady('final checkpoint lost original mapper state/source cutoff')
+        if self._atlas_checkpoint_snapshot is not None:
+            self._pin_atlas_owner(request)
         self._pending=request
         return self._pending
 
     def discard_snapshot(self,snapshot):
         if snapshot is not self._draft_snapshot or self._pending is not None:raise MapCheckpointNotReady('original unpublished version capture required')
+        if self._atlas_checkpoint_snapshot is not None:
+            self._atlas_owner.retire_checkpoint(self._atlas_checkpoint_snapshot)
+            self._atlas_checkpoint_snapshot=None
         self._draft_snapshot=None
 
     def capture(self,pipeline,job,*,now_us,scene=None,catalog_evidence=None,subsystem_state=None):
         """일반 CP의 최종 원 request. SQL/fsync를 기다리거나 dirty를 clean으로 만들지 않는다."""
         if self._pending is not None and self._pending.job==job:return self._pending
-        snapshot=self.snapshot(pipeline,job,now_us=now_us,catalog_evidence=catalog_evidence,subsystem_state=subsystem_state)
         preserved={} if scene is None else dict(scene)
         if 'mapper_state' in preserved:raise MapCheckpointNotReady('mapper-state metadata cannot replace a different original snapshot')
+        snapshot=self.snapshot(pipeline,job,now_us=now_us,catalog_evidence=catalog_evidence,subsystem_state=subsystem_state)
         preserved['mapper_state']=snapshot.mapper_state_ref
-        payload=CheckpointPayload.build(job,snapshot.tiles,snapshot.evidence,tile_references=snapshot.tile_references,
-            scene=preserved,durable_cutoff_pi_us=snapshot.durable_cutoff_pi_us)
-        return self.track_checkpoint(CheckpointRequest(job,payload))
+        try:
+            payload=CheckpointPayload.build(job,snapshot.tiles,snapshot.evidence,tile_references=snapshot.tile_references,
+                scene=preserved,durable_cutoff_pi_us=snapshot.durable_cutoff_pi_us)
+            return self.track_checkpoint(CheckpointRequest(job,payload))
+        except BaseException:
+            if self._pending is None and self._draft_snapshot is snapshot:self.discard_snapshot(snapshot)
+            raise
 
 
 def _catalog_extension(original,expanded):
@@ -796,6 +901,7 @@ class SourceComplete:
     evidence: EvidenceTable
     state: bytes | None
     page_receipts: tuple
+    original_commit: object = None
 
     def __new__(cls):raise MapCheckpointNotReady('SourceComplete requires actual decoded complete LOAD pages')
 
@@ -805,10 +911,16 @@ class SourceComplete:
         return head if head.current(request.job,context_sha256,now_us) else None
 
     @classmethod
-    def _assembled(cls,ref,job,manifest,tiles,evidence,state,receipts):
+    def _assembled(cls,ref,job,manifest,tiles,evidence,state,receipts,original_commit=None):
+        if original_commit is not None:
+            from ..storage.records import CheckpointCommitOrigin
+            if type(original_commit) is not CheckpointCommitOrigin:
+                raise MapCheckpointNotReady('exact original checkpoint commit descriptor required')
+            original_commit.validate(job,manifest,ref)
         result=object.__new__(cls)
         for name,value in dict(checkpoint_ref=ref,original_job=job,manifest=manifest,tiles=tiles,evidence=evidence,
-                state=None if state is None else canonical(state),page_receipts=receipts).items():object.__setattr__(result,name,value)
+                state=None if state is None else canonical(state),page_receipts=receipts,
+                original_commit=original_commit).items():object.__setattr__(result,name,value)
         return result
 
 
@@ -842,7 +954,7 @@ class CheckpointPages:
             raise MapCheckpointNotReady('original selected ref/current restore context required')
         self.ref,self.context=checkpoint_ref,current_context;self._next=0;self._pages=[];self._tiles={};self._records={};self._contexts={}
         self._mode,self._load_scope=_load_scope(current_context,checkpoint_ref)
-        self._manifest=self._original=self._catalog=None;self._complete=None
+        self._manifest=self._original=self._catalog=self._original_commit=None;self._complete=None
 
     def accept(self,loaded,*,now_us):
         if self._complete is not None:raise MapCheckpointNotReady('complete source cannot consume another page')
@@ -863,7 +975,7 @@ class CheckpointPages:
                      ('configuration','configuration'),('calibration','calibration'),('primitive_sha256','primitive_sha256'),('origin_mapper_instance','origin_mapper_instance')))
                 or tuple(t.reference for t in payload.tiles)!=refs[self._next:self._next+32]
                 or self._manifest is not None and (payload.manifest!=self._manifest or loaded.original_job!=self._original
-                    or payload.evidence.catalog_bytes!=self._catalog)):
+                    or payload.evidence.catalog_bytes!=self._catalog or loaded.original_commit!=self._original_commit)):
             raise MapCheckpointNotReady('page differs from selected complete manifest/catalog/original job')
         records=dict(self._records);contexts=dict(self._contexts);tiles=dict(self._tiles)
         for item in payload.evidence.provenance:
@@ -892,6 +1004,7 @@ class CheckpointPages:
                     if cell[2]&record.source_mask!=cell[2] or cell[7:10]!=(record.pi_lower,record.pi_upper,record.observation_sequence):
                         raise MapCheckpointNotReady('loaded cell differs from actual immutable source/time')
         self._manifest,self._original,self._catalog=payload.manifest,loaded.original_job,payload.evidence.catalog_bytes
+        self._original_commit=loaded.original_commit
         self._records,self._contexts,self._tiles=records,contexts,tiles
         self._next+=len(payload.tiles);self._pages.append((loaded.request,loaded.completed_us,now_us,loaded.heads))
         if self._next!=len(refs):return None
@@ -899,7 +1012,7 @@ class CheckpointPages:
             payload.evidence.catalog,payload.evidence.reservations,payload.evidence.catalog_highwaters)
         state,_=decode_mapper_state(json_bytes(payload.manifest,16384)['scene'],evidence.contexts)
         self._complete=SourceComplete._assembled(self.ref,self._original,self._manifest,tuple(tiles[r] for r in refs),
-            evidence,state,tuple(self._pages))
+            evidence,state,tuple(self._pages),self._original_commit)
         return self._complete
 
 
@@ -923,7 +1036,7 @@ def restore_pipeline(pipeline,complete,current_scope):
         'reference_provenance','alignment_provenance'}
     fields.add('map_from_odom_identity')
     fields.add('tile_revision_highwater')
-    if type(state) is not dict or set(state)-{'lane_catalog','parking_catalog','road_basis','alignment_clock'}!=fields:raise MapCheckpointNotReady('unsupported exact mapper pipeline state')
+    if type(state) is not dict or set(state)-{'lane_catalog','parking_catalog','road_basis','alignment_clock','atlas','hazard'}!=fields:raise MapCheckpointNotReady('unsupported exact mapper pipeline state')
     context=StorageContext.from_fields(state['storage_context'])
     if (state['profile']!='mapper-pipeline-state-1' or context!=complete.original_job.context
             or any(getattr(context,name)!=getattr(current,name) for name in ('database_uuid','map_epoch','frame_epoch','odom_epoch','pi_host_boot','configuration','calibration','primitive_sha256'))
@@ -947,7 +1060,17 @@ def restore_pipeline(pipeline,complete,current_scope):
         for parent in record.parents:actual|=by_id[parent].source_mask
         if record.source_mask&actual!=record.source_mask:raise MapRestoreNotReady('original map source mask lacks actual raw/parent witness')
     spec=dict(state['spec']);spec['origin_xy']=tuple(spec['origin_xy']);spec=GridSpec(**spec)
-    if spec!=pipeline.profile.grid or state['frame_id']!='odom:'+current.odom_epoch:
+    window=None
+    if 'atlas' in state:
+        from ..mapping.map_lattice import MapLattice,read_atlas_window
+        policy=getattr(pipeline,'_rolling_policy',None)
+        if policy is None:raise MapRestoreNotReady('rolling checkpoint requires actual configured rolling policy')
+        try:window=read_atlas_window(state['atlas'],spec,policy=policy)
+        except ValueError as error:raise MapRestoreNotReady('original atlas window/policy metadata differs') from error
+        initial=pipeline.profile.grid
+        if (window.lattice!=MapLattice.from_spec(initial) or (spec.width,spec.height)!=(initial.width,initial.height)):
+            raise MapRestoreNotReady('original atlas anchor/resolution/shape differs from initial profile')
+    if (window is None and spec!=pipeline.profile.grid) or state['frame_id']!='odom:'+current.odom_epoch:
         raise MapCheckpointNotReady('original map spec/frame differs from active pipeline')
     shape=(spec.height,spec.width)
     if set(state['arrays'])!={'state','observed_us','time_known','support','permission','conflict','unordered_hit','hit_available_us','hit_origin'}:
@@ -1009,6 +1132,8 @@ def restore_pipeline(pipeline,complete,current_scope):
     if already:
         if pipeline.grid.clock_id!=current_scope.raw_binding.fields['clock_epoch']:
             raise MapRestoreNotReady('current restored source clock changed')
+        if window is not None and pipeline.grid.rolling_window!=window:
+            raise MapRestoreNotReady('current restored atlas window changed')
         return complete
     grid=EvidenceGrid(spec,frame_id=state['frame_id'],calibration_id=pipeline.calibration.sha256,
         clock_id=current_scope.raw_binding.fields['clock_epoch'],kind='LIVE',free_ttl_us=pipeline.profile.free_ttl_us,
@@ -1016,6 +1141,9 @@ def restore_pipeline(pipeline,complete,current_scope):
     # 원 revision은 보존하지만 관측 시각을 새 J now로 발급하지 않는다. 현재 state는 전부 UNKNOWN이다.
     for name in ('revision','applied_hits','applied_free'):uint(state[name])
     grid.revision=state['revision'];grid.applied_hits=state['applied_hits'];grid.applied_free=state['applied_free']
+    if window is not None:
+        from ..mapping.rolling_grid import configure_grid
+        configure_grid(grid,window)
     pipeline.grid=grid;pipeline.reference=reference;pipeline._alignment=None;pipeline._free_scheduler=None
     pipeline._restore_pending=not identity
     pipeline._context=('LIVE',pipeline.calibration.sha256,grid.clock_id,grid.frame_id)

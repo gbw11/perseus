@@ -77,6 +77,7 @@ class GridMutation:
     shape: tuple
     affected_mask: bytes
     source_written_mask: bytes
+    window_offset_xy: tuple | None = None
 
     def __post_init__(self):
         if (self.kind not in ('HIT','FREE') or type(self.stamp) is not FrameStamp or type(self.shape) is not tuple
@@ -88,6 +89,12 @@ class GridMutation:
             raise ValueError('mutation mask must preserve exact whole-cell bytes')
         if any(written and not affected for affected,written in zip(self.affected_mask,self.source_written_mask)):
             raise ValueError('source cannot be written outside the actual affected cells')
+        if self.window_offset_xy is not None:
+            from .map_lattice import tile_address
+            if type(self.window_offset_xy) is not tuple or len(self.window_offset_xy)!=2:
+                raise ValueError('immutable original global window offset required')
+            x,y=self.window_offset_xy
+            tile_address(x,y);tile_address(x+self.shape[1]-1,y+self.shape[0]-1)
 
 
 class EvidenceGrid:
@@ -118,6 +125,7 @@ class EvidenceGrid:
         self.unordered_hit = np.zeros(shape,dtype=np.bool_)
         self.hit_available_us = np.zeros(shape,dtype=np.uint64)
         self.hit_view = {}
+        self.rolling_window = None
         self.revision = 0
         self.applied_hits = self.applied_free = 0
 
@@ -151,7 +159,12 @@ class EvidenceGrid:
         import numpy as np
         if observer is not None and not callable(observer):raise ValueError('grid observer must be callable')
         observed = self._time(stamp)
-        if type(view_id) is not str or len(view_id)>128 or len(origin_xy)!=2 or any(not math.isfinite(v) for v in origin_xy):
+        if self.rolling_window is None:
+            if type(view_id) is not str or len(view_id)>128:raise ValueError('hit view identity/origin missing')
+        else:
+            from .rolling_grid import view_key
+            view_id=view_key(view_id)
+        if len(origin_xy)!=2 or any(not math.isfinite(v) for v in origin_xy):
             raise ValueError('hit view identity/origin missing')
         touched = self._hit_mask(boxes_xy)
         count = int(np.count_nonzero(touched))
@@ -180,7 +193,8 @@ class EvidenceGrid:
             self.revision += 1
             self.applied_hits += count
             if observer is not None:
-                observer(GridMutation('HIT',stamp,self.state.shape,touched.tobytes(),updated.tobytes()))
+                observer(GridMutation('HIT',stamp,self.state.shape,touched.tobytes(),updated.tobytes(),
+                    None if self.rolling_window is None else self.rolling_window.offset_xy))
         return count
 
     def _hit_mask(self, boxes_xy):
@@ -225,6 +239,9 @@ class EvidenceGrid:
         if observer is not None and not callable(observer):raise ValueError('grid observer must be callable')
         if not certificate_complete or observed is None:
             return 0
+        if self.rolling_window is not None:
+            from .rolling_grid import view_key
+            view_id=view_key(view_id)
         applied = 0
         if observer is not None:
             import numpy as np
@@ -238,6 +255,9 @@ class EvidenceGrid:
             if self.state[row,col] == OCCUPIED:
                 if self.unordered_hit[row,col]:
                     self.conflict[row,col] = True
+                    continue
+                if self.rolling_window is not None and self.hit_view.get(row*self.spec.width+col)==view_id:
+                    self.conflict[row,col]=True
                     continue
                 baseline = math.hypot(*(a-b for a,b in zip(origin_xy,self.hit_origin[row,col])))
                 if baseline < self.independent_view_m:
@@ -255,7 +275,8 @@ class EvidenceGrid:
             self.applied_free += applied
             if observer is not None:
                 mask=written.tobytes()
-                observer(GridMutation('FREE',stamp,self.state.shape,mask,mask))
+                observer(GridMutation('FREE',stamp,self.state.shape,mask,mask,
+                    None if self.rolling_window is None else self.rolling_window.offset_xy))
         return applied
 
     def snapshot(self, now_us, *, clock_id):

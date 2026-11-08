@@ -283,6 +283,8 @@ class JetsonJio:
         received = self.clock()
         with self._lock:
             source, token, lease = self._source, self._token, self._lease
+            known_scene, known_scene_head = self._current_scene, self._heads.get('scene')
+        known_negative = False
         if message.retain or len(message.payload) > 1024:
             self._reject('RETAINED_OR_SIZE'); return
         raw = bytes(message.payload); p = self.profile.source_policy
@@ -334,18 +336,25 @@ class JetsonJio:
                 sequence = value.source_sample; destination = sensor
             elif topic == f'{PREFIX}/mapper/{self.profile.device}/scene.pb' and message.qos == 1:
                 value = decode(raw, schema.SceneGrant)
-                if (source is None or (value.vehicle, value.pi_host_boot, value.gateway_instance, value.mapper_device) != (
+                if value.lifecycle_state in (3, 4):
+                    from ..runtime.source_identity import known_scene_negative
+                    if (source is None or known_scene is None or not known_scene_negative(raw, known_scene.raw,
+                            source=source.fields, pi_host_boot=source.pi_host_boot, gateway_instance=source.gateway_instance)):
+                        raise ValueError('SCENE_UNKNOWN_NEGATIVE')
+                    known_negative = True
+                elif (source is None or (value.vehicle, value.pi_host_boot, value.gateway_instance, value.mapper_device) != (
                         p.vehicle, source.pi_host_boot, source.gateway_instance, self.profile.device)
                         or any(getattr(value, key) != source.fields[key] for key in ('map_epoch', 'frame_epoch', 'odom_epoch', 'configuration', 'calibration', 'primitive'))
                         or lease is None or value.source_admission_revision != lease.source_revision):
                     raise ValueError('SCENE_ORIGIN')
-                lease.pi_interval_to_j((lease.probe_pi_send_us, lease.probe_pi_send_us), received)
-                from xenova_drive_world import decode as decode_trust
-                trust = decode_trust(lease.trust_bytes, schema.WorldTrust)
-                if (value.issued_pi_us > received + trust.lower_offset_us
-                        or received + trust.upper_offset_us >= value.valid_until_pi_us):
-                    raise ValueError('SCENE_EXPIRED')
-                item = JioInput('SCENE', raw, received, lease=lease)
+                if not known_negative:
+                    lease.pi_interval_to_j((lease.probe_pi_send_us, lease.probe_pi_send_us), received)
+                    from xenova_drive_world import decode as decode_trust
+                    trust = decode_trust(lease.trust_bytes, schema.WorldTrust)
+                    if (value.issued_pi_us > received + trust.lower_offset_us
+                            or received + trust.upper_offset_us >= value.valid_until_pi_us):
+                        raise ValueError('SCENE_EXPIRED')
+                item = JioInput('SCENE', raw, received, lease=None if known_negative else lease)
                 head = ('SCENE', value.scene.admission_id, value.scene.admission_revision)
                 sequence = value.lifecycle_revision; destination = 'scene'
             else:
@@ -354,6 +363,8 @@ class JetsonJio:
             self._reject('INVALID_SOURCE_OR_WIRE'); return
         with self._lock:
             if token is not self._token:
+                self._counts['rejected'] += 1; return
+            if known_negative and (self._current_scene is not known_scene or self._heads.get('scene') is not known_scene_head):
                 self._counts['rejected'] += 1; return
             # 한 kind/sensor당 마지막 source만 보유한다. 무한 publisher registry는 만들지 않는다.
             key = destination

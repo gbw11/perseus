@@ -10,7 +10,7 @@ import json
 class ResidentPerception:
     """단일 M에서 명시한 보정이 있을 때 사용한다. 출력 파일 I/O는 finish 때 호출자 소유다."""
 
-    def __init__(self, profile_bytes, binding, *, pipeline_profile=None, targets=()):
+    def __init__(self, profile_bytes, binding, *, pipeline_profile=None, targets=(),rolling_policy=None):
         from ..perception.calibration import CalibrationProfile
         from ..perception.pipeline import PerceptionPipeline,PipelineProfile
         from ..perception.tape import TapeProfile
@@ -25,7 +25,7 @@ class ResidentPerception:
         profile=(PipelineProfile(tape=TapeProfile(cell_m=.01,x_max_m=1.5,y_min_m=-.8,y_max_m=.8),
             depth=DepthConfig(max_patches=0,max_hit_boxes=1024)) if pipeline_profile is None else pipeline_profile)
         self.calibration,self.binding=calibration,binding
-        self.pipeline=PerceptionPipeline(calibration,profile,targets=targets)
+        self.pipeline=PerceptionPipeline(calibration,profile,targets=targets,rolling_policy=rolling_policy)
         self.latest_summary=None
         self.processed=0
 

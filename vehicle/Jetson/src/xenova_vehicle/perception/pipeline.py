@@ -115,7 +115,7 @@ class MapEvidenceUpdate:
 class PerceptionPipeline:
     """단일 M 또는 offline runner 소유. 원본 1개와 유한 grid/reference만 유지한다."""
 
-    def __init__(self, calibration, profile=None, *, targets=()):
+    def __init__(self, calibration, profile=None, *, targets=(),rolling_policy=None):
         from .calibration import CalibrationProfile
         if type(calibration) is not CalibrationProfile:
             raise ValueError('pipeline requires CalibrationProfile')
@@ -124,6 +124,11 @@ class PerceptionPipeline:
         if type(self.profile) is not PipelineProfile or type(targets) is not tuple or len(targets)>4:
             raise ValueError('invalid pipeline or target profile')
         self.targets=targets
+        self._rolling_policy=rolling_policy
+        if rolling_policy is not None:
+            from ..mapping.map_lattice import GridWindow,RollingPolicy
+            if type(rolling_policy) is not RollingPolicy:raise ValueError('explicit frozen rolling policy required')
+            rolling_policy.check_window(GridWindow.from_spec(self.profile.grid))
         self.rgb_gate,self.depth_gate,self.nn_gate = SourceGate(),SourceGate(),SourceGate()
         self.grid = self.reference = self._context = None
         self._alignment = None
@@ -223,7 +228,7 @@ class PerceptionPipeline:
     def process(self, observation, *, now_us=None, pose=None, checkpoint=None, completed_clock=None,
                 motion_qualified=False,needed_mask=None,cycle_bound_us=None,completion_bound_us=None,diagnostics=None,
                 needed_region_factory=None,evidence_observer=None,localization_valid_for_us=None,
-                localization_position_drift_mps=None,localization_yaw_drift_rps=None):
+                localization_position_drift_mps=None,localization_yaw_drift_rps=None,roi_reframe=None):
         """원 관측을 처리한다. 선택 clock은 입력과 같은 domain의 실제 완료시각이다.
 
         checkpoint는 계산 owner의 취소/진전 callback이다. 부분 상태를 변경하므로
@@ -233,6 +238,8 @@ class PerceptionPipeline:
         needed_mask는 원 grid bool mask 또는 수락한 Vehicle에서 만든 StoppingRegion이다.
         factory는 domain/정합 뒤 정확히 한 번 호출한다. observer는 실제 cell mutation만 받으며
         두 callback 모두 동일 compute owner의 순수 계산용이다. I/O/scene 승인 역할은 없다.
+        roi_reframe는 수락한 MAP pose에서 mutation 전에 후보 창과 proof만 함께 옮기는
+        내부 계산 port다. 격리 입력/중복 관측에서는 호출하지 않으며 atlas를 소유하지 않는다.
         """
         from .depth import analyze_depth
         from .free_space import certify_cell
@@ -247,6 +254,7 @@ class PerceptionPipeline:
         if needed_region_factory is not None and (not callable(needed_region_factory) or needed_mask is not None):
             raise ValueError('choose explicit needed mask or one bounded region factory')
         if evidence_observer is not None and not callable(evidence_observer):raise ValueError('evidence observer must be callable')
+        if roi_reframe is not None and not callable(roi_reframe):raise ValueError('optional compute-local ROI port required')
         limits=(localization_valid_for_us,localization_position_drift_mps,localization_yaw_drift_rps)
         localization_configured=all(value is not None for value in limits)
         if any(value is not None for value in limits) and not localization_configured:
@@ -414,6 +422,13 @@ class PerceptionPipeline:
             grid=EvidenceGrid(self.profile.grid,frame_id='quarantine:'+capture,calibration_id=self.calibration.sha256,
                 clock_id=observation.rgb.stamp.clock_id,kind=observation.kind,free_ttl_us=self.profile.free_ttl_us)
             pose=None
+        elif roi_reframe is not None and pose is not None and (rgb_new or depth_new):
+            moved=roi_reframe(self,pose)
+            if type(moved) is not bool:raise ValueError('ROI port must report its actual window change')
+            if moved:
+                self._domain_cache=None
+                self._free_scheduler=None
+                self._free_cursor=0
         if rgb_new or depth_new:
             self._domain(pose,grid)
         registration_done=perf_counter_ns()

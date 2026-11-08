@@ -66,6 +66,35 @@ def current_scene_grant(raw, lease, source, origin, now_us):
     return grant, expires
 
 
+def known_scene_negative(raw, known_raw, *, source, pi_host_boot, gateway_instance):
+    """알려진 원 grant의 terminal 진술만 lease 없이 식별한다. positive 승인은 없다.
+
+    lifecycle state/revision 이외 원 nonce/full SceneRef/source revision/수명을 고정한다.
+    미등록·외부·옛 nonce·충돌은 False이며 같은 revision은 원 bytes 동일 때만 허용한다.
+    """
+    from xenova_drive_world import decode, encode, schema
+    if (type(raw) is not bytes or type(known_raw) is not bytes
+            or not 0 < len(raw) <= 1024 or not 0 < len(known_raw) <= 1024 or type(source) is not dict):
+        return False
+    try:
+        value = decode(raw, schema.SceneGrant); known = decode(known_raw, schema.SceneGrant)
+        if value.lifecycle_state not in (3, 4):
+            return False
+        if ((known.vehicle, known.mapper_device, known.pi_host_boot, known.gateway_instance)
+                != (source['vehicle'], source['device'], pi_host_boot, gateway_instance)
+                or any(getattr(known, name) != source[name] for name in
+                    ('map_epoch', 'frame_epoch', 'odom_epoch', 'configuration', 'calibration', 'primitive'))
+                or value.lifecycle_revision < known.lifecycle_revision):
+            return False
+        if value.lifecycle_revision == known.lifecycle_revision:
+            return raw == known_raw
+        expected = schema.SceneGrant(); expected.CopyFrom(known)
+        expected.lifecycle_state = value.lifecycle_state; expected.lifecycle_revision = value.lifecycle_revision
+        return encode(expected) == encode(value)
+    except (ValueError, TypeError, KeyError, OverflowError):
+        return False
+
+
 def validate_survey_summary(raw, grant_raw, lease, source, origin, *, issued_us, expires_us, now_us):
     """보고 수명과 현재 grant를 확인한다. M의 실제 기하/자료 COMPLETE를 대신 승인하지 않는다."""
     from xenova_drive_world import decode, encode, schema
