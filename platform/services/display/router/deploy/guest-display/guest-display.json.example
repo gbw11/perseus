@@ -1,0 +1,17 @@
+{
+  "guest": {
+    "host": "192.168.77.20",
+    "port": 8090,
+    "width": 1280,
+    "height": 720,
+    "max_fps": 5,
+    "stale_ms": 2000
+  },
+  "guest_stream_token_file": "/etc/xenova/guest-display/guest-stream.token",
+  "relay_token_file": "/etc/xenova/guest-display/relay.token",
+  "guest_data_token_file": "/etc/xenova/guest-display/guest-data.token",
+  "relay_port": 8084,
+  "data_bind": "192.168.77.1",
+  "data_port": 8085,
+  "feed_port": 8082
+}

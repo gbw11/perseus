@@ -191,6 +191,19 @@ def test_guest_data_is_one_read_only_path_with_its_own_token():
     assert feed.paths == ["/api/v1/display/presentation"]
 
 
+def test_relay_config_example_is_valid_and_guest_data_stays_on_the_bridge():
+    from pathlib import Path
+    from xenova_display.guest_frames import GuestRelayConfig
+    example = Path(__file__).resolve().parents[1]/"deploy/guest-display/guest-display.json.example"
+    config = GuestRelayConfig.model_validate_json(example.read_text(encoding="utf-8"))
+    assert str(config.guest.host) == "192.168.77.20" and str(config.data_bind) == "192.168.77.1"
+    raw = config.model_dump(mode="json")
+    for change in ({"data_bind": "0.0.0.0"}, {"data_bind": "127.0.0.1"}, {"data_bind": "8.8.8.8"},
+                   {"data_port": 8084}, {"relay_token_file": "relative.token"}):
+        with pytest.raises(ValueError):
+            GuestRelayConfig.model_validate({**raw, **change})
+
+
 @pytest.mark.parametrize("feed,code", [
     (FakeFeed(error=FeedUnavailable("DISPLAY_FEED_AUTHENTICATION_FAILED")), "DISPLAY_FEED_AUTHENTICATION_FAILED"),
     (FakeFeed(FeedResponse(200, "text/html", b"<html>")), "DISPLAY_FEED_UNAVAILABLE"),

@@ -59,3 +59,53 @@ class JPEGEncoder:
 
     def __enter__(self): return self
     def __exit__(self, *_): self.close()
+
+
+class JPEGDecoder:
+    """411: decode one bounded JPEG straight into a caller-owned BGRX buffer.
+
+    The output buffer (e.g. the HDMI presenter's MIT-SHM segment) is reused;
+    nothing is allocated per frame. The JPEG must have exactly the output size.
+    """
+    def __init__(self, library, width, height, *, loader=C.CDLL):
+        if not PurePosixPath(library).is_absolute() or '\0' in library:
+            raise ValueError('native JPEG library must be an absolute POSIX path')
+        if not (1 <= width <= 1920 and 1 <= height <= 1080):
+            raise ValueError('invalid JPEG dimensions')
+        self.width, self.height = width, height
+        self.handle = None
+        self.lib = loader(library)
+        integer = C.POINTER(C.c_int)
+        for name, args, result in [
+            ('tjInitDecompress', [], C.c_void_p),
+            ('tjDecompressHeader3', [C.c_void_p,C.c_char_p,C.c_ulong,integer,integer,integer,integer], C.c_int),
+            ('tjDecompress2', [C.c_void_p,C.c_char_p,C.c_ulong,C.c_void_p,C.c_int,C.c_int,C.c_int,C.c_int,C.c_int], C.c_int),
+            ('tjDestroy', [C.c_void_p], C.c_int),
+        ]:
+            fn = getattr(self.lib, name); fn.argtypes, fn.restype = args, result
+        self.handle = self.lib.tjInitDecompress()
+        if not self.handle: raise RuntimeError('JPEG decompressor initialization failed')
+
+    def decode(self, jpeg, target, pitch):
+        if not self.handle: raise RuntimeError('JPEG decoder is closed')
+        if not isinstance(jpeg, (bytes, bytearray)) or not 0 < len(jpeg) <= MAX_JPEG:
+            raise ValueError('JPEG frame outside bound')
+        if not target or not self.width*4 <= pitch <= self.width*4+256:
+            raise ValueError('invalid BGRX target or stride')
+        data = bytes(jpeg)
+        width, height, sampling, colorspace = C.c_int(), C.c_int(), C.c_int(), C.c_int()
+        if self.lib.tjDecompressHeader3(self.handle, data, len(data), C.byref(width), C.byref(height),
+                                        C.byref(sampling), C.byref(colorspace)):
+            raise RuntimeError('JPEG header rejected')
+        if (width.value, height.value) != (self.width, self.height):
+            raise ValueError('JPEG size does not match the output')
+        # TJPF_BGRX=3 matches the X11 TrueColor layout; flags 0.
+        if self.lib.tjDecompress2(self.handle, data, len(data), target, self.width, pitch, self.height, 3, 0):
+            raise RuntimeError('native JPEG decode failed')
+
+    def close(self):
+        if self.handle:
+            self.lib.tjDestroy(self.handle); self.handle = None
+
+    def __enter__(self): return self
+    def __exit__(self, *_): self.close()

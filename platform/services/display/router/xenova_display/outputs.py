@@ -37,6 +37,25 @@ class RuntimeConfig(BaseModel):
     encoder: Literal['ffmpeg', 'native_jpeg'] = 'ffmpeg'
     native_jpeg_quality: int = Field(default=85, ge=1, le=100)
     native_jpeg_library: str | None = Field(default=None, min_length=1, max_length=4096)
+    # 411 Plan B: "guest_frames" shows frames rendered by the display domU instead of
+    # running Chromium on dom0. The default keeps the existing Chromium kiosk.
+    renderer: Literal['chromium', 'guest_frames'] = 'chromium'
+    guest_relay_port: int = Field(default=8084, ge=1, le=65535)
+    guest_relay_token_file: str | None = Field(default=None, min_length=1, max_length=4096)
+    frame_decoder: Literal['turbojpeg', 'ffmpeg'] = 'turbojpeg'
+    guest_stale_ms: int = Field(default=2000, ge=500, le=5000)
+
+    @model_validator(mode="after")
+    def validate_guest_frames(self):
+        if self.renderer != 'guest_frames':
+            return self
+        def absolute(value):
+            return value and PurePosixPath(value).is_absolute() and '\0' not in value
+        if not absolute(self.guest_relay_token_file):
+            raise ValueError('guest_frames requires an absolute relay token file path')
+        if self.frame_decoder == 'turbojpeg' and not absolute(self.native_jpeg_library):
+            raise ValueError('turbojpeg frame decoder requires an absolute native_jpeg_library')
+        return self
 
     @model_validator(mode="after")
     def validate_mapping(self):
