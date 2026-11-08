@@ -106,15 +106,17 @@ class Framer:
 
 class FeedbackSerialSink(SerialSink):
     """One serial handle, polled only by OutputOwner; no RX thread/second writer."""
-    def __init__(self,port,baudrate=115200,*,timeout_ms,clock=time.monotonic,odometry=None):
+    def __init__(self,port,baudrate=115200,*,timeout_ms,clock=time.monotonic,odometry=None,development_fd=None):
         if type(timeout_ms) is not int or not 1<=timeout_ms<=2**31-1:
             raise ValueError('approved feedback timeout_ms required')
-        super().__init__(port,baudrate)
+        super().__init__(port,baudrate,development_fd=development_fd)
         # Only the unmodified native POSIX backend has this raw-fd contract.
         # Decide before optional trial proxies wrap the serial object. URL and
         # custom backends retain their public read/cancel implementation.
         self._owned_read_fd=None
-        if os.name=='posix' and self._write_fd is not None:
+        if self._development_fd:
+            self._owned_read_fd=self._write_fd
+        elif os.name=='posix' and self._write_fd is not None:
             from serial.serialposix import Serial
             if type(self._serial) is Serial:self._owned_read_fd=self._write_fd
         self.clock=clock;self.timeout=timeout_ms/1000
@@ -196,6 +198,7 @@ class FeedbackSerialSink(SerialSink):
         owner's prior readable observation turns an empty read into EOF.
         No pyserial cancellation pipe or second reader is accessed here.
         """
+        if self._development_fd:self._serial.check_open()
         try:data=os.read(self._owned_read_fd,4096)
         except OSError as exc:
             if exc.errno in (errno.EAGAIN,errno.EWOULDBLOCK,errno.EALREADY,errno.EINPROGRESS,errno.EINTR):return b''
