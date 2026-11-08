@@ -63,6 +63,14 @@ class DisplayGuestAccountTest(unittest.TestCase):
         self.assertEqual(result["web"]["revision"], "abcdef1")
         self.assertEqual(set(result["web"]["files"]), {"index.html", "assets/index-test.js"})
         self.assertRegex(result["web"]["tree_sha256"], r"^[0-9a-f]{64}$")
+        config = self.root / "etc/xenova/guest-display-domu.json"
+        self.assertEqual(json.loads(config.read_text()), {
+            "web_root": "/opt/xenova/display-web", "bind": "192.168.77.20", "app_port": 8086,
+            "allowed_clients": ["192.168.77.1"], "data_host": "192.168.77.1", "data_port": 8085,
+            "data_token_file": "/etc/xenova/guest-display/guest-data.token", "page": "/display/mobile",
+        })
+        self.assertEqual(result["config"]["path"], "/etc/xenova/guest-display-domu.json")
+        self.assertEqual(result["config"]["mode"], "0644")
         self.assertFalse((self.root / "nonexistent").exists())
 
     def test_existing_account_or_instance_is_rejected(self):
@@ -91,7 +99,8 @@ class DisplayGuestAccountTest(unittest.TestCase):
                 "files": [{"source": "files/motd", "target": "etc/motd", "mode": 420}],
                 "guest_display": {"account": "xenova-display",
                                   "python_modules": list(display_guest.MODULES),
-                                  "web_assets": "external-vm-screens-dist"}}
+                                  "web_assets": "external-vm-screens-dist",
+                                  "config": "/etc/xenova/guest-display-domu.json"}}
         path = source / "recipe.json"
         path.write_text(json.dumps(meta))
         info = recipe.source_info(path.resolve(), meta["source_id"])
@@ -101,6 +110,8 @@ class DisplayGuestAccountTest(unittest.TestCase):
         locked = {Path(item).as_posix() for item in info["preparer_files"]}
         for name in display_guest.MODULES:
             self.assertIn("platform/services/display/router/xenova_display/" + name, locked)
+        self.assertIn("platform/services/display/router/deploy/guest-display/domu/guest-display-domu.json.example",
+                      locked)
         meta["guest_display"]["account"] = "root"
         path.write_text(json.dumps(meta))
         with self.assertRaisesRegex(ValueError, "display guest policy"):

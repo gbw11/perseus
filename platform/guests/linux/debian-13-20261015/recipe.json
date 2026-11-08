@@ -23,6 +23,7 @@
       "guest_sender.py",
       "guest_app.py"
     ],
-    "web_assets": "external-vm-screens-dist"
+    "web_assets": "external-vm-screens-dist",
+    "config": "/etc/xenova/guest-display-domu.json"
   }
 }

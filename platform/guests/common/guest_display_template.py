@@ -1,5 +1,6 @@
 """새 Linux 템플릿에 display domU 계정과 Plan A Python 모듈을 준비한다."""
 import hashlib
+import json
 from pathlib import Path
 import re
 import subprocess
@@ -9,9 +10,12 @@ from prepare_rootfs import inside
 
 ROOT = Path(__file__).resolve().parents[3]
 SOURCE = ROOT / "platform/services/display/router/xenova_display"
+DEPLOY = ROOT / "platform/services/display/router/deploy/guest-display/domu"
+CONFIG_SOURCE = DEPLOY / "guest-display-domu.json.example"
 MODULES = ("__init__.py", "capture_limits.py", "mjpeg.py", "guest_sender.py", "guest_app.py")
 POLICY = {"account": "xenova-display", "python_modules": list(MODULES),
-          "web_assets": "external-vm-screens-dist"}
+          "web_assets": "external-vm-screens-dist",
+          "config": "/etc/xenova/guest-display-domu.json"}
 ACCOUNT = "xenova-display"
 HOME = "/nonexistent"
 SHELL = "/usr/sbin/nologin"
@@ -24,10 +28,30 @@ def validate_policy(policy):
 
 def source_files():
     """VM3에 복사하는 Plan A Python 입력을 source lock에 포함한다."""
-    files = [SOURCE / name for name in MODULES]
+    files = [SOURCE / name for name in MODULES] + [CONFIG_SOURCE]
     if any(path.is_symlink() or not path.is_file() or path.resolve() != path for path in files):
         raise ValueError("display guest Python input must be a canonical regular file")
     return files
+
+
+def install_config(root):
+    """Plan A VM3 주소·허용 클라이언트·데이터 경로를 고정한 비밀 없는 설정을 설치한다."""
+    raw = CONFIG_SOURCE.read_bytes()
+    config = json.loads(raw)
+    expected = {
+        "web_root": "/opt/xenova/display-web", "bind": "192.168.77.20", "app_port": 8086,
+        "allowed_clients": ["192.168.77.1"], "data_host": "192.168.77.1", "data_port": 8085,
+        "data_token_file": "/etc/xenova/guest-display/guest-data.token", "page": "/display/mobile",
+    }
+    if config != expected:
+        raise ValueError("display guest config example differs from the approved Plan A contract")
+    target = inside(root, "etc/xenova/guest-display-domu.json", follow_final=False)
+    if target.is_symlink() or (target.exists() and not target.is_file()):
+        raise ValueError("display guest config target is linked or non-regular")
+    target.write_bytes(raw)
+    target.chmod(0o644)
+    return {"path": "/etc/xenova/guest-display-domu.json",
+            "sha256": hashlib.sha256(raw).hexdigest(), "mode": "0644"}
 
 
 def install_web_assets(root, source, revision):
@@ -126,7 +150,7 @@ def prepare(root, policy, *, web_assets=None, web_revision=None, command=subproc
     destination.mkdir(parents=True, exist_ok=True)
     destination.chmod(0o755)
     installed = {}
-    for source in source_files():
+    for source in (SOURCE / name for name in MODULES):
         target = destination / source.name
         if target.is_symlink() or (target.exists() and not target.is_file()):
             raise ValueError("display guest Python target is linked or non-regular")
@@ -135,5 +159,6 @@ def prepare(root, policy, *, web_assets=None, web_revision=None, command=subproc
         target.chmod(0o644)
         installed[source.name] = {"sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)}
     web = install_web_assets(root, web_assets, web_revision)
+    config = install_config(root)
     return {"account": account, "python_root": "/opt/xenova/display-guest",
-            "python_modules": installed, "web": web}
+            "python_modules": installed, "web": web, "config": config}
