@@ -22,7 +22,7 @@ from .raw_binding_messages import RawBindAck, RawBindContext, RawBindMessage
 from .raw_leases import RawScope
 from .raw_recovery import RawControlMessage, control_payload
 from .raw_slot import ExpectedSlot, P0Context
-from .resident_samples import CaptureAssembler, decode_sample_slot, encode_sample
+from .resident_samples import CaptureAssembler, decode_sample_slot, encode_sample, p0_stream_ids
 from .resident_transport import ResidentLink, j_us
 from .slot_cleanup import CleanupTimeLimits, ReleaseMessage
 from .slot_messages import ReaderSlotContext, SlotMessage, SlotTimeLimits, WriterSlotContext
@@ -53,6 +53,7 @@ class WorkerBoot:
     clock_policy: object = None
     mapper_profile_bytes: bytes | None = None
     mapper_profile_sha256: str | None = None
+    jpeg_endpoint: object = None
 
     def __post_init__(self):
         for value, expected in ((self.peer, LifecyclePeer), (self.profile, YolopBenchProfile),
@@ -63,9 +64,16 @@ class WorkerBoot:
                 raise ValueError('worker boot requires exact registered values')
         if (self.peer.role not in ('A', 'M') or self.peer.service_instance != self.raw_scope.service_instance
                 or type(self.startup_deadline_us) is not int or not 0 < self.startup_deadline_us < 2**64
-                or type(self.diagnostic_directory) is not str or not self.raw_profile.nn_enabled
-                or self.raw_profile.jpeg_enabled):
+                or type(self.diagnostic_directory) is not str or not self.raw_profile.nn_enabled):
             raise ValueError('invalid resident worker scope/deadline')
+        if (self.peer.role == 'A' and self.raw_profile.jpeg_enabled != (self.jpeg_endpoint is not None)
+                or self.peer.role == 'M' and self.jpeg_endpoint is not None):
+            raise ValueError('only the selected A JPEG graph receives its separate video channel')
+        if self.jpeg_endpoint is not None:
+            import socket
+            if (type(self.jpeg_endpoint) is not socket.socket or self.jpeg_endpoint.family != socket.AF_UNIX
+                    or self.jpeg_endpoint.getsockopt(socket.SOL_SOCKET, socket.SO_TYPE) != socket.SOCK_STREAM):
+                raise ValueError('video requires its original local stream endpoint')
         if self.peer.role == 'M' and type(self.writer_bind) is not RawBindMessage:
             raise ValueError('M needs the original A BIND, not a synthesized writer context')
         if self.perception_profile_bytes is not None and (type(self.perception_profile_bytes) is not bytes
@@ -414,7 +422,7 @@ def acquisition_main(endpoint, boot):
     import numpy
 
     actor = _Actor(endpoint, boot)
-    source = writer = None
+    source = writer = video = None
     failed = False
     try:
         bind = actor.await_bind()
@@ -427,7 +435,12 @@ def acquisition_main(endpoint, boot):
         device_lease_fd = _hold_device_lease(boot.profile.device_mxid)
         actor.save('device-owner.json', dict(device_mxid=boot.profile.device_mxid,
                                             owner_pid=os.getpid(), lease_fd=device_lease_fd))
-        source = YolopOakSource(boot.profile, context_key=bind.binding.sha256)
+        if boot.jpeg_endpoint is not None:
+            from .resident_video import AcquisitionVideo
+            video = AcquisitionVideo(bind.binding, boot.jpeg_endpoint)
+            source = YolopOakSource(boot.profile, context_key=bind.binding.sha256, jpeg_enabled=True)
+        else:
+            source = YolopOakSource(boot.profile, context_key=bind.binding.sha256)
         actor.device_closed = False
 
         def stage(name):
@@ -469,6 +482,10 @@ def acquisition_main(endpoint, boot):
                 assembler.bridge.update(source.sample_clock())
                 next_clock = j_us() + 100_000
             for item in source.poll():
+                if item.stream == 'jpeg':
+                    if video is not None:
+                        video.offer_jpeg(item)
+                    continue
                 if item.stream in last_raw:
                     last_raw[item.stream] = item.received_j_us
                 if item.stream == 'nn_output':
@@ -484,6 +501,12 @@ def acquisition_main(endpoint, boot):
                     warmup.observe(proof, now_us=complete)
                     if proof.checks_passed:
                         actor.progress('CAPTURE_PAIR', sample.rgb.sequence, completed=complete)
+                if video is not None and item.stream == 'rgb_video':
+                    original_clock = assembler.clocks.get(assembler._key(item))
+                    if original_clock is not None:
+                        video.observe_rgb(item, original_clock)
+            if video is not None:
+                video.step()
             now = j_us()
             if not warmup.ready and warmup.poll(now):
                 raise TimeoutError('capture30 original warmup deadline elapsed')
@@ -569,6 +592,11 @@ def acquisition_main(endpoint, boot):
             pass
     finally:
         actor.state = 'DRAINING'
+        if video is not None:
+            try:
+                video.close()
+            except OSError:
+                pass
         if source is not None:
             actor.state = 'CLOSING'
             try:
@@ -727,7 +755,7 @@ def mapper_main(endpoint, boot):
                     acquired = SlotMessage(packet, context, acquire, limits=boot.slot_limits)
                     acquired.record.read_request.request.check(j_us())
                     expected = ExpectedSlot(P0Context(acquired.record.key.write_key,
-                        bind.binding.fields['stream_instances'], boot.raw_profile.nn_enabled),
+                        p0_stream_ids(bind.binding), boot.raw_profile.nn_enabled),
                         acquired.record.read_request.offer.content)
                     actor.leases_released = False
                     owned, returned = reader.copy_owned(acquired.record, expected)

@@ -24,7 +24,10 @@ SOURCE_FIELDS = frozenset(('vehicle', 'device', 'mapper_boot', 'mapper_instance'
     'map_epoch', 'frame_epoch', 'odom_epoch', 'configuration', 'calibration', 'primitive'))
 COUNTERS = ('received', 'rejected', 'duplicate', 'replaced', 'sent', 'expired', 'source_replaced',
     'connect_failed', 'network_failed', 'oversize', 'reply_failed', 'world_rejected',
-    'world_fenced', 'world_dispatch_started')
+    'world_fenced', 'world_dispatch_started', 'runtime_offered', 'runtime_replaced',
+    'runtime_rejected', 'runtime_expired', 'runtime_fenced', 'runtime_published')
+RUNTIME_INTERVAL_US = 1_000_000
+RUNTIME_ENVELOPE_BYTES = 4096
 
 
 def j_us():
@@ -116,6 +119,17 @@ class _Survey:
     token: object
 
 
+@dataclass(frozen=True)
+class _Runtime:
+    """원 상태 payload/E다. MQTT 봉투와 seq는 S-jio owner가 전송 직전에 만든다."""
+    payload: bytes
+    snapshot_us: int
+    expires_us: int
+    mapper_boot: str
+    service_instance: str
+    token: object
+
+
 def _new_paho(profile, oversize):
     """고정2.1 parser의 body 첫 recv 앞에서 remaining-length를 제한한다."""
     from importlib.metadata import version
@@ -159,6 +173,9 @@ class JetsonJio:
         self._heads = {}; self._counts = Counter({key: 0 for key in COUNTERS})
         self._connected = False; self._failure = self._last_rejection = None
         self._inflight = False; self._world_head = None; self._pi_revision = 0
+        self._runtime = self._runtime_head = self._runtime_identity = None
+        self._runtime_since = 0; self._runtime_last_send_us = None; self._runtime_sequence = 0
+        self._runtime_error = None
 
     def _count(self, key):
         with self._lock:
@@ -185,6 +202,7 @@ class JetsonJio:
             if source == self._source:
                 return False
             self._source = source; self._token = object(); self._world = self._probe = self._lease = None
+            self._runtime = self._runtime_head = None; self._runtime_since = self.clock()
             self._publication = self._clock_window = self._scene_window = None
             self._current_scene = self._summary = None
             self._vehicle = self._scene = self._probe_input = None; self._tof = {0: (), 1: ()}; self._heads = {}
@@ -315,10 +333,78 @@ class JetsonJio:
             self._summary = item
         return True
 
+    def offer_runtime(self, status):
+        """I/O 없이 원 RuntimeStatus 최신1만 보유한다. source/clock 준비와 독립이다.
+
+        원 snapshot+1초는 queue/reconnect로 연장하지 않는다. 빠진 S identity를
+        read_boot_id/UUID로 채우지 않으며 동일 J snapshot의 충돌도 새 상태로 쓰지 않는다.
+        """
+        from ..runtime.runtime_status import RuntimeStatus, MAX_PAYLOAD_BYTES
+        if type(status) is not RuntimeStatus:
+            raise ValueError('exact original RuntimeStatus required')
+        payload, fields = status.canonical_bytes, status.fields
+        if (len(payload) > MAX_PAYLOAD_BYTES or fields['device'] != self.profile.device
+                or fields['vehicle'] != self.profile.source_policy.vehicle):
+            raise ValueError('runtime status differs from independent device/vehicle profile')
+        identity = fields['mapper_boot'], fields['service_instance']
+        snapshot = int(fields['snapshot_j_us'])
+        with self._lock:
+            now = self.clock()
+            if (type(now) is not int or not 0 <= now < 2**64):
+                raise ValueError('actual runtime publication clock must be u64')
+            if (self._stop.is_set() or any(value is None for value in identity)
+                    or snapshot > (1 << 64) - 1 - RUNTIME_INTERVAL_US
+                    or snapshot < self._runtime_since or not snapshot <= now < snapshot + RUNTIME_INTERVAL_US
+                    or self._runtime_identity is not None and self._runtime_identity != identity):
+                self._counts['runtime_rejected'] += 1
+                return False
+            if self._runtime_head is not None and snapshot <= self._runtime_head[0]:
+                self._counts['runtime_rejected'] += 1
+                return False
+            self._runtime_identity = identity
+            self._runtime_head = snapshot, payload
+            if self._runtime is not None:self._counts['runtime_replaced'] += 1
+            self._runtime = _Runtime(payload, snapshot, snapshot + RUNTIME_INTERVAL_US,
+                identity[0], identity[1], self._token)
+            self._counts['runtime_offered'] += 1
+        return True
+
+    def _runtime_packet(self, item):
+        # 기존 package를 자동 설치하거나 main의 offer에서 import하지 않는다.
+        from xenova_mqtt.envelope import Identity, build, validate
+        sequence = self._runtime_sequence + 1
+        if sequence >= 2**63:raise ValueError('runtime topic sequence exhausted')
+        topic = f'{PREFIX}/mapper/{self.profile.device}/runtime'
+        envelope = build(Identity(source_id='jetson', boot_id=item.mapper_boot,
+            agent_instance_id=item.service_instance), 'mapper.runtime', json.loads(item.payload), sequence)
+        validate(topic, envelope)
+        raw = _canonical(envelope)
+        if len(raw) > RUNTIME_ENVELOPE_BYTES:
+            raise ValueError('runtime envelope exceeds4096 bytes')
+        return topic, raw, sequence
+
+    def _claim_runtime(self, item, sequence):
+        """원 pending/current/기한과1Hz의 선형화 지점이다. 그 뒤 network I/O는 lock 밖이다."""
+        with self._lock:
+            now = self.clock()
+            if (self._stop.is_set() or item.token is not self._token
+                    or self._runtime_head != (item.snapshot_us, item.payload)):
+                self._counts['runtime_fenced'] += 1;return False
+            if not item.snapshot_us <= now < item.expires_us:
+                self._counts['runtime_expired'] += 1;return False
+            if self._runtime_last_send_us is not None and now < self._runtime_last_send_us + RUNTIME_INTERVAL_US:
+                self._counts['runtime_rejected'] += 1;return False
+            if sequence != self._runtime_sequence + 1:raise ValueError('original runtime topic sequence changed')
+            self._runtime_sequence = sequence
+            # 전송 불명도 보수적으로 간격을 소비한다. seq/E를 환불해 같은 상태를 재포장하지 않는다.
+            self._runtime_last_send_us = now
+            return True
+
     def fence_source(self):
         """실제 source 철회 사건. 원 pending publish를 새 source의 결과로 재사용하지 않는다."""
         with self._lock:
             self._source=None;self._token=object();self._world=self._probe=self._lease=None
+            self._runtime=self._runtime_head=None;self._runtime_since=self.clock()
             self._publication=self._clock_window=self._scene_window=None
             self._current_scene=self._summary=None
             self._vehicle=self._scene=self._probe_input=None;self._tof={0:(),1:()};self._heads={}
@@ -338,6 +424,7 @@ class JetsonJio:
                 stopped=self._stop.is_set(), source_bound=self._source is not None, world_pending=self._world is not None,
                 publication_sha256=None if self._publication is None else self._publication.sha256,
                 probe_pending=self._probe is not None, publish_inflight=self._inflight,
+                runtime_pending=self._runtime is not None, runtime_error=self._runtime_error,
                 inputs=(self._vehicle is not None) + len(self._tof[0]) + len(self._tof[1]) + (self._scene is not None) + (self._probe_input is not None),
                 counts=dict(self._counts), failure=self._failure, last_rejection=self._last_rejection)
 
@@ -352,6 +439,7 @@ class JetsonJio:
 
     def stop(self):
         self._stop.set()
+        with self._lock:self._runtime=self._runtime_head=None
 
     def join(self, timeout=1.):
         if type(timeout) not in (int, float) or not 0 <= timeout <= 5:
@@ -588,13 +676,28 @@ class JetsonJio:
                             with self._lock:
                                 if self._probe is not None:
                                     selected = self._probe; self._probe = None; kind = 'reply'
-                                else:
+                                elif self._world is not None:
                                     selected = self._world; self._world = None; kind = 'world'
+                                elif (self._runtime is not None and (self._runtime_last_send_us is None
+                                        or now >= self._runtime_last_send_us + RUNTIME_INTERVAL_US)):
+                                    selected = self._runtime; self._runtime = None; kind = 'runtime'
+                                else:
+                                    selected = None
                             if selected is not None:
                                 expires = selected.expires_us
                                 if kind=='world':
                                     raw=selected.raw;topic=WORLD_TOPIC
                                     dispatch=self._claim_world(selected)
+                                elif kind=='runtime':
+                                    try:
+                                        topic,raw,sequence=self._runtime_packet(selected)
+                                        dispatch=self._claim_runtime(selected,sequence)
+                                    except Exception as error:
+                                        with self._lock:
+                                            self._runtime_error=('CODEC_UNAVAILABLE' if isinstance(error,ImportError)
+                                                else 'ENCODE_OR_CAP_REJECTED')
+                                            self._counts['runtime_rejected']+=1
+                                        dispatch=False
                                 else:
                                     dispatch=selected.token is self._token and now<expires
                                     if dispatch:
@@ -608,6 +711,10 @@ class JetsonJio:
                                     info = client.publish(topic, raw, qos=0, retain=False)
                                     if info.rc != 0:
                                         raise OSError('J_MQTT_PUBLISH')
+                                    if kind=='runtime':
+                                        with self._lock:
+                                            self._runtime_last_send_us=max(self._runtime_last_send_us,self.clock())
+                                            self._runtime_error=None;self._counts['runtime_published']+=1
                                     inflight = info, min(expires, self.clock() + TIMEOUT_US), selected.token
                     except ValueError:
                         self._count('reply_failed')

@@ -16,7 +16,8 @@ from xenova_vehicle.oak.yolop_frames import NNInputStamp, NNPacket, RuntimeTenso
 from xenova_vehicle.runtime.raw_binding import RawBinding
 from xenova_vehicle.runtime.raw_leases import FilledInfo, WriteKey
 from xenova_vehicle.runtime.raw_slot import ExpectedSlot, decode_owned
-from xenova_vehicle.runtime.resident_samples import CaptureAssembler, CaptureSample, decode_sample_slot, encode_sample
+from xenova_vehicle.runtime.resident_samples import (
+    CaptureAssembler, CaptureSample, decode_sample_slot, encode_sample, p0_stream_ids)
 from xenova_vehicle.runtime import resident_workers
 
 
@@ -58,6 +59,32 @@ class ResidentSamplesTests(unittest.TestCase):
         self.assertEqual(restored.rgb.sequence, 10)
         self.assertEqual(encoded.context.stream_ids['nn_input0'], binding.fields['stream_instances']['nn_input0'])
         self.assertNotIn('nn_input', owned.descriptor()['streams'])
+
+    def test_separate_jpeg_binding_keeps_full_hash_but_has_no_p0_plane(self):
+        binding, original = sample()
+        fields = binding.fields
+        fields['stream_instances']['jpeg'] = identifier(9000)
+        binding = RawBinding(fields)
+        original = replace(original, nn_input=replace(original.nn_input, context_key=binding.sha256),
+            nn_output=replace(original.nn_output, context_key=binding.sha256))
+        encoded, owned = self.encode(original, binding)
+        restored = decode_sample_slot(owned, binding)
+        self.assertEqual(encoded.context.write_key.scope.raw_binding_sha256, binding.sha256)
+        self.assertEqual(set(encoded.context.stream_ids), {'rgb_video', 'depth_right', 'nn_input0', 'nn_output0'})
+        self.assertNotIn('jpeg', owned.descriptor()['streams'])
+        self.assertNotIn('jpeg', owned.descriptor()['planes'])
+        self.assertEqual(restored.rgb, original.rgb)
+        self.assertEqual(restored.depth, original.depth)
+        self.assertEqual(restored.nn_output.payload, original.nn_output.payload)
+        self.assertEqual(restored.nn_output.context_key, binding.sha256)
+
+    def test_p0_subset_is_owned_and_requires_the_validated_full_binding(self):
+        binding, _ = sample()
+        streams = p0_stream_ids(binding)
+        streams['rgb_video'] = identifier(9001)
+        self.assertNotEqual(p0_stream_ids(binding)['rgb_video'], streams['rgb_video'])
+        with self.assertRaises(ValueError):
+            p0_stream_ids(binding.fields)
 
     def test_configured_nn_can_be_absent_during_capture_warmup(self):
         binding, original = sample(nn=False)
