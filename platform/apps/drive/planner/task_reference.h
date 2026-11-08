@@ -22,4 +22,7 @@ bool tr_basis_accept(struct tr_basis *,const dw_world *);
 bool tr_basis_compatible(const struct tr_basis *,const dw_world *);
 /* 명시 선택 slot의 approach lane/관측 기하만 검사한다. slot 선택·추진·빈칸 승인은 없다. */
 bool tr_parking_approach(const struct tr_view *,uint32_t slot_id);
+/* Aisle plus one selected slot. Internal shared edges are not outer walls. */
+bool tr_parking_contains(const struct tr_view *,const dw_point slot[4],float slot_pad,
+ dw_pose,float extra,const struct lp_config *);
 #endif

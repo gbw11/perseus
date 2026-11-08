@@ -139,7 +139,7 @@ def command_probe(tmp_path_factory):
         platform/'apps/manual/zephyr/src',platform/'guests/zephyr/diagnostics/include')
     command=['cc','-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-ffunction-sections','-fdata-sections',
         '-Wl,--gc-sections','-fsanitize=address,undefined','-include',str(include/'shim.h'),
-        *['-I'+str(p) for p in includes],str(source),*[str(HOME/'planner'/name) for name in ('task_reference.c','lattice.c','engine.c','generated/primitives.c')],str(platform/'apps/manual/zephyr/src/manual.c'),
+        *['-I'+str(p) for p in includes],str(source),*[str(HOME/'planner'/name) for name in ('task_reference.c','behavior.c','parking.c','lattice.c','engine.c','generated/primitives.c')],str(platform/'apps/manual/zephyr/src/manual.c'),
         str(world/'world.c'),str(world/'generated/world.pb.c'),*[str(world/'nanopb'/name) for name in ('pb_common.c','pb_decode.c','pb_encode.c')],
         *map(str,sorted((mqtt/'src').glob('*.c'))),'-lm' ,'-o',str(binary)]
     result=subprocess.run(command,capture_output=True,text=True,timeout=120)

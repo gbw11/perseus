@@ -21,7 +21,7 @@ def refresh_probe(tmp_path_factory):
     planner = HOME / "planner"
     sources = [world / "world.c", world / "generated/world.pb.c",
                *(world / "nanopb" / name for name in ("pb_common.c", "pb_decode.c", "pb_encode.c")),
-               planner / "task_reference.c", planner / "lattice.c", planner / "engine.c", planner / "generated/primitives.c",
+               planner / "task_reference.c", planner / "behavior.c", planner / "parking.c", planner / "lattice.c", planner / "engine.c", planner / "generated/primitives.c",
                HOME / "tests/trust_refresh_probe.c"]
     command = ["cc", "-std=c11", "-O2", "-g", "-Wall", "-Wextra", "-Werror",
                "-fsanitize=address,undefined", '-DTEST_PRIMITIVE_SHA="' + fixture.PRIMITIVE + '"',

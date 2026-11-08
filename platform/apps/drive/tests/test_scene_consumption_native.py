@@ -54,7 +54,7 @@ def scene_probe(tmp_path_factory):
     world=HOME/'world';planner=HOME/'planner'
     sources=[world/'world.c',world/'generated/world.pb.c',
         *[world/'nanopb'/name for name in ('pb_common.c','pb_decode.c','pb_encode.c')],
-        planner/'task_reference.c',planner/'lattice.c',planner/'engine.c',planner/'generated/primitives.c',
+        planner/'task_reference.c',planner/'behavior.c',planner/'parking.c',planner/'lattice.c',planner/'engine.c',planner/'generated/primitives.c',
         HOME/'tests/scene_consumption_probe.c']
     command=['cc','-std=c11','-O2','-g','-Wall','-Wextra','-Werror',
         '-fsanitize=address,undefined',

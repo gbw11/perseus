@@ -148,3 +148,56 @@ bool tr_parking_approach(const struct tr_view *v,uint32_t id){
  }
  return false;
 }
+static bool in_slot(const dw_point p[4],dw_point q){
+ float sign=0;
+ for(unsigned k=0;k<4;k++){
+  float cross=orient(p[k],p[(k+1)%4],q);
+  if(fabsf(cross)<1e-7f)continue;
+  if(sign&&sign*cross<0)return false;
+  sign=cross;
+ }
+ return sign!=0;
+}
+static bool body_inside(dw_pose center,float half,float width,dw_point p){
+ float dx=p.x-center.x,dy=p.y-center.y;
+ return fabsf(dx*cosf(center.yaw)+dy*sinf(center.yaw))<half-1e-6f&&
+        fabsf(-dx*sinf(center.yaw)+dy*cosf(center.yaw))<width-1e-6f;
+}
+/* Split an exterior edge at intersections with the other region. A portion
+ * inside the body is legal only when it is internal to that other region. */
+static bool union_edge(const struct tr_view *v,const dw_point slot[4],dw_point a,dw_point b,
+ bool road_edge,dw_pose center,float half,float width){
+ float t[132]={0,1};unsigned count=2,n=road_edge?4:2*v->count;
+ for(unsigned k=0;k<n;k++){
+  dw_point c=road_edge?slot[k]:vertex(v,k),d=road_edge?slot[(k+1)%4]:vertex(v,(k+1)%n);
+  float ax=b.x-a.x,ay=b.y-a.y,bx=d.x-c.x,by=d.y-c.y,den=ax*by-ay*bx;
+  if(fabsf(den)<1e-9f)continue;
+  float u=((c.x-a.x)*by-(c.y-a.y)*bx)/den,z=((c.x-a.x)*ay-(c.y-a.y)*ax)/den;
+  if(u>0&&u<1&&z>=0&&z<=1)t[count++]=u;
+ }
+ for(unsigned k=1;k<count;k++){float value=t[k];unsigned j=k;while(j&&t[j-1]>value){t[j]=t[j-1];j--;}t[j]=value;}
+ for(unsigned k=1;k<count;k++){
+  float at=.5f*(t[k-1]+t[k]);dw_point q={a.x+(b.x-a.x)*at,a.y+(b.y-a.y)*at};
+  if(body_inside(center,half,width,q)&&!(road_edge?in_slot(slot,q):inside(v,q)))return false;
+ }
+ return true;
+}
+bool tr_parking_contains(const struct tr_view *v,const dw_point slot[4],float slot_pad,
+ dw_pose pose,float extra,const struct lp_config *c){
+ if(!v||!slot||!c||v->selected!=v->from||!dw_pose_finite(pose)||!isfinite(extra)||extra<0||
+    !isfinite(slot_pad)||slot_pad<0)return false;
+ const xenova_drive_LaneModel *m=&v->world->lane_model;
+ float radius=hypotf(fmaxf(c->front,c->rear)+c->margin,c->half_width+c->margin);
+ float error=fmaxf(slot_pad,2*v->selected->position_bound_m+m->divider_position_bound_m+
+  radius*(2*v->selected->heading_bound_rad+m->divider_heading_bound_rad));
+ float half=.5f*(c->front+c->rear)+c->margin+extra+error,width=c->half_width+c->margin+extra+error;
+ dw_pose center=pose;center.x+=.5f*(c->front-c->rear)*cosf(pose.yaw);center.y+=.5f*(c->front-c->rear)*sinf(pose.yaw);
+ for(unsigned k=0;k<4;k++){
+  float x=k&1?half:-half,y=k&2?width:-width;
+  dw_point p={center.x+cosf(pose.yaw)*x-sinf(pose.yaw)*y,center.y+sinf(pose.yaw)*x+cosf(pose.yaw)*y};
+  if(!inside(v,p)&&!in_slot(slot,p))return false;
+ }
+ for(unsigned k=0;k<2*v->count;k++)if(!union_edge(v,slot,vertex(v,k),vertex(v,(k+1)%(2*v->count)),true,center,half,width))return false;
+ for(unsigned k=0;k<4;k++)if(!union_edge(v,slot,slot[k],slot[(k+1)%4],false,center,half,width))return false;
+ return true;
+}
