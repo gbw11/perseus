@@ -15,6 +15,7 @@ from .feedback import FeedbackSerialSink,FeedbackError,packet,HELLO,HELLO_ACK,ST
 from .frame import DriveFrame,StopFrame,encode as legacy_encode
 from .scene_authority import MatchedStop,StationaryPolicy,COMMAND3,FEEDBACK3,check_stationary_window
 from .sink import SinkError
+from .tof_feedback3 import TOF_FRAGMENT,TOF_FRAGMENT3,TOF_CAPABILITY,TofSelection,TofClock,TofInbox
 
 CLOCK_PROBE=0x0f10;CLOCK_REPLY=0x0f11;CLOCK_INSTALL=0x0f12;CLOCK_ACK=0x0f13
 COMMAND=0x0111;REPORT=0x0f14;SENSOR=0x0f15
@@ -62,6 +63,7 @@ class Feedback3SerialSink(FeedbackSerialSink):
         self.stop_pin=None;self.report_hwm=0;self.gate_revision=0;self.last_motion=False
         self._matched_stop_snapshot=None;self._direction_snapshot=None;self.phase_key=None;self.phase_end=0
         self.hold_row=None;self.hold_start=None
+        self.tof_inbox=TofInbox();self._tof_selection=None;self._tof_context_snapshot=None
         super().__init__(*args,**kwargs)
         self.protocol_version=3;self.odometry.clock_profile3=True
 
@@ -87,7 +89,25 @@ class Feedback3SerialSink(FeedbackSerialSink):
             value['stop_facts_source']=self._direction_snapshot
             lease=self._lease(int(self.clock()*1e6))
             value['clock_valid_until_pi_us']=0 if lease is None else lease['expires']
+            self._tof_context_snapshot=(UUID(self.pi_session).bytes,UUID(self.device_session).bytes,
+                UUID(self.clock_epoch).bytes,bool(self.ready and self._sensor_available()
+                    and self.capabilities&TOF_CAPABILITY and self._tof_selection is not None
+                    and self._tof_selection.profiles and lease is not None)) if self.device_session is not None else None
         return value
+
+    def configure_tof(self,selection):
+        """기존 actor의 설치 profile을 한 번 선택한다. public 장치 상태/출력 권한은 변경하지 않는다."""
+        if type(selection) is not TofSelection:raise ValueError('TOF explicit selection')
+        if self._tof_selection is not None and self._tof_selection!=selection:raise ValueError('TOF selection already fixed')
+        self._tof_selection=selection
+
+    def tof_inputs(self):
+        loss,items=self.tof_inbox.drain()
+        return loss,items,self._tof_context_snapshot
+
+    def _fail(self,code):
+        if code!='DEVICE_APPLY_TIMEOUT':self.tof_inbox.reject(reason='device_source_lost')
+        return super()._fail(code)
 
     def _lease(self,now):
         for lease in reversed(tuple(self.leases.values())):
@@ -101,7 +121,9 @@ class Feedback3SerialSink(FeedbackSerialSink):
     def _poll(self,now,*,owned_ready=None):
         if self.started is None:
             self.started=now;self._send(packet(HELLO,HELLO3.pack(3,UUID(self.pi_session).bytes,bytes.fromhex(self.profile.vehicle_config_sha256))))
+        invalid=self.framer.invalid+self.framer.oversize
         super()._poll(now,owned_ready=owned_ready)
+        if self.framer.invalid+self.framer.oversize!=invalid:self.tof_inbox.reject(reason='outer_frame_loss')
         at=int(self.clock()*1e6)
         if self.ready and self._sensor_available():
             if self.outstanding is not None and at>=self.outstanding[1]+self.profile.probe_timeout_us:
@@ -131,6 +153,23 @@ class Feedback3SerialSink(FeedbackSerialSink):
             if self.device_session is not None and self.device_session!=session:
                 self._fail('DEVICE_RESTARTED');self.ready=False;return
             self.device_session=session;self.capabilities=caps;self.ready=True;self.odometry.device_session(session);return
+        if kind==TOF_FRAGMENT:
+            # No assembly/CRC32/protobuf/J work on the serial owner. Optional
+            # source failure never calls _fail() or changes encoder/STOP state.
+            selected=self._tof_selection
+            if selected is None or not selected.profiles:return
+            try:
+                if len(payload)!=TOF_FRAGMENT3.size or not self.ready or not self._sensor_available() or not self.capabilities&TOF_CAPABILITY:
+                    raise FeedbackError('ToF unready/unsupported')
+                pi,device=payload[:16],payload[16:32];self._session(pi,device)
+                if payload[76] not in {row[0] for row in selected.profiles}:return
+                epoch=payload[52:68];seq=struct.unpack_from('<Q',payload,68)[0];lease=self.leases.get(seq)
+                if (epoch!=UUID(self.clock_epoch).bytes or lease is None or not lease['ack']
+                        or not 0<seq<2**63 or at>=lease['expires']):raise FeedbackError('ToF original installed clock')
+                clock=TofClock(epoch,seq,lease['lower'],lease['upper'],lease['reference'],lease['expires'],p.drift_ppm)
+                self.tof_inbox.offer(bytes(payload),at,clock)
+            except (FeedbackError,ValueError,struct.error):self.tof_inbox.reject(payload)
+            return
         if not self.ready:raise FeedbackError('feedback3 handshake required')
         if kind==CLOCK_REPLY:
             pi,device,seq,p1,d2,latch,d3,sample,left,right,quality,steer,error=CLOCK3.unpack(payload);self._session(pi,device)

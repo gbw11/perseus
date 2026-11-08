@@ -49,6 +49,7 @@ class VerifiedGatewayRunner(GatewayRunner):
         self._provider_queues=[queue.Queue(maxsize=n) for n in (4,4,8)]
         self._provider_turn=0;self.provider_calls=0;self.provider_high_water=0
         self._state_messages=queue.Queue(maxsize=4);self.state_message_dropped=0
+        self._tof_assembler=None
 
     def submit_provider(self,call):
         import queue
@@ -519,6 +520,7 @@ class VerifiedGatewayRunner(GatewayRunner):
         for event in events:self.handover_evidence.feedback(event,self.machine)
         self.handover_evidence.tick(int(self._clock()*1000000))
         self._manual_observe(events)
+        self._mapper_tof_once()  # Optional observation work follows STOP/control/feedback handling.
         if not self._durable_available():
             for event in events:
                 if len(self._durable_feedback)==self._durable_feedback.maxlen:self.durable_feedback_dropped+=1
@@ -605,6 +607,33 @@ class VerifiedGatewayRunner(GatewayRunner):
     def submit_mapper_tof(self,raw):
         """실제 센서 owner의 원 bytes용 유한 입력. source/clock 승인은 actor 회차에서 한다."""
         return False if self.mapper_uplink is None else self.mapper_uplink.submit_tof(raw)
+
+    def configure_mapper_tof(self,profile):
+        """명시 J 선택만 실제 feedback3 원천에 연결한다. 빈 목록은 독립적으로 정상이다."""
+        if self._tof_assembler is not None:raise ValueError('one ToF actor owner')
+        device=getattr(self._sink,'device',None)
+        if device is None or not callable(getattr(device,'configure_tof',None)):
+            return not profile.tof_profiles
+        from .tof_feedback3 import TofSelection,TofAssembler
+        config=device.odometry.config
+        if config.vehicle!=profile.policy.vehicle:raise ValueError('ToF selected vehicle differs')
+        selected=TofSelection(profile.tof_profiles,profile.tof_max_age_us,config.maximum_clock_error_us,
+            config.vehicle,self.authority.host,self._client.identity.agent_instance_id)
+        device.configure_tof(selected)
+        self._tof_assembler=TofAssembler(selected)
+        return True
+
+    def _mapper_tof_once(self):
+        owner=self._tof_assembler
+        if owner is None:return
+        source=getattr(self._sink,'device',None)
+        if source is None:return
+        loss,items,context=source.tof_inputs()
+        observations,revoked=owner.process(loss,items,context,int(self._clock()*1000000))
+        uplink=self.mapper_uplink
+        if uplink is None:return
+        for sensor in revoked:uplink.revoke_tof(sensor)
+        for raw in observations:self.submit_mapper_tof(raw)
 
     def publish_mapper_scene_after_commit(self,raw):
         """내구 scene owner의 완료 뒤 actor에서 호출한다. 여기서 scene 권한을 발급하지 않는다."""

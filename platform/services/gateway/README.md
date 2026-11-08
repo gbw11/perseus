@@ -603,8 +603,14 @@ feedback3 profile exact fields는 `Feedback3Profile`의 등록 config/firmware S
 `steering_tolerance_rad`, `steering_settle_us`다. `stationary`는 Scene의
 `StationaryPolicy`와 같은 exact 단위·필드를 쓴다. 실제 firmware와 hash/capability를
 검산하고, 원 CLOCK_INSTALL ACK 전에는 DRIVE를 전달하지 않는다. STOP은 별도다.
-ToF source가 없는 구성은 유효하다. 이 adapter는 TOF_FRAGMENT3를 지원한다고 광고하지
-않으며 수신 fragment를 거절한다. 등록 ToF assembler는 독립 센서 연결부가 담당한다.
+ToF source가 없는 `tof_profiles: []` 구성은 유효하다. 선택된 source만 feedback-3의
+기존 `TOF_FRAGMENT3(0x0f16/209B)`를 소비하며 실제 MCU cap0x200과 원 INSTALL ACK를
+검사한다. cap 부족·센서 오류·조립 실패는 ToF만 폐기하고 clock/encoder/STOP을 막지 않는다.
+단일 RX의 queue8 뒤 기존 Gateway actor가 센서별393B partial/latest를 조립해 원 capture
+시각·CRC·generation/instance와 TTL을 보존한 `TofObservation`을 기존 J port로 보낸다.
+새 thread/serial handle/상태 응답 필드는 없다. 원 고정 vector41 결과와 새 consumer의
+동적 검증·MCU/실측 보정·FREE/460800 line 수락은 구분한다.
+[정확 계약과 시험 경계](../../../docs/contracts/gateway-feedback-3.md#91-optional-tof의-합의-wire와-선택형-pi-연결)를 따른다.
 
 actor는 권한·입력·기한을 판정하고, serial owner 하나가 실제 출력/feedback을 소유한다.
 Scene과 operator의 내구 쓰기는 worker1/job1/result1 하나를 공유한다. operator/keyboard
