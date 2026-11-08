@@ -9,7 +9,7 @@ from collections import Counter
 import queue
 import struct
 from uuid import UUID
-import zlib
+from binascii import crc32
 
 from xenova_drive_world import schema,encode
 from xenova_drive_world.mapper_clock import drift_pad
@@ -268,7 +268,7 @@ class TofAssembler:
         partial['body'][offset:offset+64]=data;partial['mask']|=1<<index
         if partial['mask']!=15:return
         body=bytes(partial['body'])
-        if len(body)!=393 or zlib.crc32(body)&0xffffffff!=crc:
+        if len(body)!=393 or crc32(body)&0xffffffff!=crc:
             self._clear(sensor,sample=sample);raise ValueError('TOF whole CRC32')
         for offset in range(137,393,4):
             distance,status,quality=struct.unpack_from('<HBB',body,offset)
