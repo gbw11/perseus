@@ -11,7 +11,7 @@ import time
 
 from .contracts import (CatalogHeadSnapshot,CatalogReservation,CommitReceipt,LoadRequest,MAX_U63,PersistenceConflict,
     PersistenceCorrupt,PersistenceError,PersistenceUnknown,ProvenanceRange,StorageJob,canonical,
-    digest,json_bytes,uint,uuid)
+    decimal,digest,json_bytes,uint,uuid)
 from .records import (CELL,CheckpointPayload,ContextRecord,EvidenceTable,LoadedCheckpoint,ProvenanceRecord,TileVersion)
 from .geometry_scope import CatalogGeometryScope
 
@@ -35,6 +35,17 @@ _DDL=(
 
 
 def _now():return time.monotonic_ns()//1000
+
+
+def _context_dependencies(context):
+    """알려진 parking-originals-1의 ContextRecord edge만 읽는다. asset SHA는 추적하지 않는다."""
+    value=json_bytes(context.payload,4096);body=value['body']
+    if body.get('profile')!='parking-originals-1':return ()
+    names={'profile','method_context_sha256','storage_context_sha256','catalog_revision','sources','entries'}
+    if (value['kind']!='METRIC' or set(body)!=names or type(body['sources']) is not list
+            or type(body['entries']) is not list):raise PersistenceCorrupt('invalid exact parking originals context dependency')
+    digest(body['method_context_sha256']);digest(body['storage_context_sha256']);decimal(body['catalog_revision'],positive=True)
+    return ((body['method_context_sha256'],body['storage_context_sha256']),)
 
 
 class PersistenceStore:
@@ -289,12 +300,36 @@ class PersistenceStore:
                     context=ContextRecord(bytes(row[0]))
                 if context.sha256!=key or len(used_contexts)>=64:raise PersistenceConflict('context closure mismatch/cap')
                 used_contexts[key]=context
+        # Provenance가 참조한 context의 명시 ContextRecord edge도 같은64개 상한에서 닫는다.
+        pending=list(used_contexts)
+        while pending:
+            source=used_contexts[pending.pop()]
+            for key,storage_sha in _context_dependencies(source):
+                context=used_contexts.get(key) or contexts.get(key)
+                if context is None:
+                    size=self.connection.execute('SELECT length(payload) FROM source_contexts WHERE context_sha256=?',(key,)).fetchone()
+                    if size is not None and (size[0] is None or not 0<size[0]<=4096):raise PersistenceCorrupt('stored dependent context size cap')
+                    row=self.connection.execute('SELECT payload FROM source_contexts WHERE context_sha256=?',(key,)).fetchone()
+                    if row is None:raise PersistenceConflict('missing original method context closure')
+                    context=ContextRecord(bytes(row[0]))
+                value=json_bytes(context.payload,4096);body=value['body']
+                names={'profile','method_manifest_sha256','storage_context_sha256','calibration_profile_sha256',
+                       'vehicle_bundle_sha256','coordinate','map_frame_id','body','geometry_profile','association_profile'}
+                if (context.sha256!=key or value['kind']!='METRIC' or set(body)!=names
+                        or body.get('profile')!='parking-method-1' or body['storage_context_sha256']!=storage_sha):
+                    raise PersistenceCorrupt('original method context hash/profile/source differs')
+                if key not in used_contexts:
+                    if len(used_contexts)>=64:raise PersistenceConflict('context dependency closure exceeds copy cap')
+                    used_contexts[key]=context;pending.append(key)
         return records,used_contexts
 
     def _write_payload(self,job,payload):
         evidence=payload.evidence;provided={record.provenance_id:record for record in evidence.provenance}
         contexts={record.sha256:record for record in evidence.contexts}
         identities=set(provided)
+        from .mapper_state import decode_mapper_state,mapper_state_roots
+        state,_=decode_mapper_state(json_bytes(payload.manifest,16384)['scene'],evidence.contexts)
+        identities.update(mapper_state_roots(state))
         for tile in payload.tiles:identities.update(tile.provenance_ids)
         identities.update(record.provenance_id for record in evidence.catalog)
         records,_=self._closure(identities,provided,contexts)
@@ -440,6 +475,10 @@ class PersistenceStore:
             except PersistenceConflict as error:raise PersistenceCorrupt('selected checkpoint provenance/context closure is incomplete') from error
         try:self._closure({record.provenance_id for record in payload.evidence.catalog},{},{})
         except PersistenceConflict as error:raise PersistenceCorrupt('selected catalog provenance/context closure is incomplete') from error
+        from .mapper_state import decode_mapper_state,mapper_state_roots
+        state,_=decode_mapper_state(json_bytes(payload.manifest,16384)['scene'],payload.evidence.contexts)
+        try:self._closure(set(mapper_state_roots(state)),{},{})
+        except PersistenceConflict as error:raise PersistenceCorrupt('selected mapper metadata proof closure is incomplete') from error
         return original,payload,receipt
 
     def selected_checkpoint(self,job_id,*,expires_us):
@@ -500,7 +539,14 @@ class PersistenceStore:
                         for x,y,revision,key in refs)
             identities={record.provenance_id for record in payload.evidence.catalog}
             for tile in tiles:identities.update(tile.provenance_ids)
+            # META는 original manifest의 exact SHA 참조로만 LOAD에 포함한다.
+            # unreferenced context를 임의 복구하거나 현재 source 사실로 승격하지 않는다.
+            from .mapper_state import decode_mapper_state,mapper_state_roots
+            scene=json_bytes(payload.manifest,16384)['scene']
+            state,metadata=decode_mapper_state(scene,payload.evidence.contexts)
+            identities.update(mapper_state_roots(state))
             records,contexts=self._closure(identities,{},{})
+            for item in metadata:contexts[item.sha256]=item
             evidence=EvidenceTable(tuple(records[key] for key in sorted(records)),tuple(contexts[key] for key in sorted(contexts)),
                 payload.evidence.catalog,payload.evidence.reservations,payload.evidence.catalog_highwaters)
             copy=CheckpointPayload(payload.manifest,tiles,evidence)

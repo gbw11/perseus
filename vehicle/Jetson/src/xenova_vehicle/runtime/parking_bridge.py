@@ -28,6 +28,39 @@ class ParkingNotReady(RuntimeError):
     """원 pose/저장 범위/parent closure나 유한 사본 공간이 아직 준비되지 않았다."""
 
 
+def _context_closure_keys(contexts, required):
+    """직접 source와 알려진 originals→method edge만 보존한다. asset SHA는 edge가 아니다."""
+    required = set(required)
+    for key in tuple(required):
+        context = contexts.get(key)
+        if context is None or context.sha256 != key:
+            raise ParkingNotReady('original context closure is missing')
+        value = json_bytes(context.payload, 4096); body = value['body']
+        if body.get('profile') != 'parking-originals-1':
+            continue
+        names = {'profile', 'method_context_sha256', 'storage_context_sha256',
+            'catalog_revision', 'sources', 'entries'}
+        if (value['kind'] != 'METRIC' or set(body) != names
+                or type(body['sources']) is not list or type(body['entries']) is not list):
+            raise ParkingNotReady('invalid exact parking originals context')
+        method_sha = digest(body['method_context_sha256'])
+        storage_sha = digest(body['storage_context_sha256'])
+        method = contexts.get(method_sha)
+        if method is None or method.sha256 != method_sha:
+            raise ParkingNotReady('original method context closure is missing')
+        original = json_bytes(method.payload, 4096); method_body = original['body']
+        method_names = {'profile', 'method_manifest_sha256', 'storage_context_sha256',
+            'calibration_profile_sha256', 'vehicle_bundle_sha256', 'coordinate',
+            'map_frame_id', 'body', 'geometry_profile', 'association_profile'}
+        if (original['kind'] != 'METRIC' or set(method_body) != method_names
+                or method_body['profile'] != 'parking-method-1'
+                or method_body['storage_context_sha256'] != storage_sha):
+            raise ParkingNotReady('original method context does not match originals')
+        # method에는 추가 ContextRecord edge가 없다. 과거 원문을 현재 method로 바꾸지 않는다.
+        required.add(method_sha)
+    return required
+
+
 @dataclass(frozen=True)
 class MetricEvidence:
     """실제 원 입력 key/부모와 이미 환산한 Pi 구간. constructor 자체는 시계 승인이 아니다."""
@@ -322,8 +355,7 @@ class ParkingBridge:
         method = ContextRecord(canonical(value))
         contexts = dict(self._contexts); contexts[method.sha256] = method
         required = {record.context_sha256 for record in self._records.values()} | {method.sha256}
-        if not required <= contexts.keys():
-            raise ParkingNotReady('original context closure is missing')
+        required = _context_closure_keys(contexts, required)
         if len(required) > 64:
             self.context_transition_wait_reason = 'ORIGINAL_CONTEXT_CLOSURE_CAP'
             return False
@@ -365,6 +397,9 @@ class ParkingBridge:
             kept[identity] = self._records[identity]; pending.extend(kept[identity].parents)
         self._records = kept
         needed = {p.context_sha256 for p in kept.values()} | {self.method.sha256}
+        needed = _context_closure_keys(self._contexts, needed)
+        if len(needed) > 64:
+            raise ParkingNotReady('original context closure exceeds64 records')
         self._contexts = {k: v for k, v in self._contexts.items() if k in needed}
 
     def prepare_provenance(self, job, reservation_nonce, *, block_count=1 << 20):
@@ -731,6 +766,13 @@ class ParkingBridge:
             kept[identity] = records[identity]; pending.extend(records[identity].parents)
         records = kept
         needed_contexts = {p.context_sha256 for p in records.values()}
+        if scene is not None:
+            from ..storage.mapper_state import decode_mapper_state
+            _, state_pages = decode_mapper_state(scene, tuple(contexts.values()))
+            needed_contexts.update(page.sha256 for page in state_pages)
+        needed_contexts = _context_closure_keys(contexts, needed_contexts)
+        if len(needed_contexts) > 64:
+            raise ParkingNotReady('checkpoint context closure exceeds64 records')
         contexts = {k: v for k, v in contexts.items() if k in needed_contexts}
         if any(PROVENANCE.unpack(p.payload)[5] != UUID(self.context.pi_host_boot).bytes for p in records.values()):
             raise ParkingNotReady('checkpoint cutoff cannot merge different original Pi clock epochs')
