@@ -15,6 +15,9 @@ MEDIA_COUNT=4
 IDENTITY_CAP=16
 SCHEMA='jetson-viewer-snapshot-1'
 PANELS=frozenset(('rgb','yolop','depth','grid'))
+REPRESENTATIVE_KIND='HISTORICAL_OAK_REPRESENTATIVE'
+DISPLAY_CROPS={'REPRESENTATIVE_YOLOP_TOP_LEFT':('yolop',(0,0,640,360)),
+               'REPRESENTATIVE_GRID_BOTTOM_LEFT':('grid',(0,360,640,720))}
 
 
 class SnapshotError(ValueError):
@@ -144,8 +147,11 @@ def validate(body):
     source=body.get('source')
     if type(source) is not dict:raise SnapshotError('SOURCE_REQUIRED')
     key=(_text(source.get('id'),'source id'),_text(source.get('epoch'),'source epoch'))
-    sequence=_integer(source.get('sequence'),'source sequence');stamp(source.get('stamp'))
-    if source.get('kind') not in ('DIAGNOSTIC','OFFLINE_SYNTHETIC'):raise SnapshotError('UNKNOWN_SOURCE_KIND')
+    recording=body.get('recording')
+    historical_unexecuted=(source.get('kind')==REPRESENTATIVE_KIND and source.get('sequence') is None and
+        type(recording) is dict and recording.get('status')=='NOT_EXECUTED' and source.get('stamp') is None and not body.get('media'))
+    sequence=None if historical_unexecuted else _integer(source.get('sequence'),'source sequence');stamp(source.get('stamp'))
+    if source.get('kind') not in ('DIAGNOSTIC','OFFLINE_SYNTHETIC',REPRESENTATIVE_KIND):raise SnapshotError('UNKNOWN_SOURCE_KIND')
     operation=body.get('operation')
     if operation is not None:
         if type(operation) is not dict:raise SnapshotError('INVALID_OPERATION')
@@ -179,6 +185,15 @@ def validate(body):
         if encoding not in ('JPEG','PNG','NV12','RAW16_LE'):raise SnapshotError('UNSUPPORTED_MEDIA_ENCODING')
         if encoding=='NV12' and (width%2 or height%2 or item['byte_length']!=width*height*3//2):raise SnapshotError('NV12_LAYOUT')
         if encoding=='RAW16_LE' and item['byte_length']!=width*height*2:raise SnapshotError('DEPTH_LAYOUT')
+        role=item.get('display_crop')
+        if role is not None:
+            if (source.get('kind')!=REPRESENTATIVE_KIND or type(role) is not str or role not in DISPLAY_CROPS or
+                    (encoding,width,height)!=('PNG',1280,720) or DISPLAY_CROPS[role][0]!=item['panel']):
+                raise SnapshotError('INVALID_DISPLAY_CROP')
+        if source.get('kind')==REPRESENTATIVE_KIND:
+            expected={'rgb':('NV12',640,360),'depth':('RAW16_LE',640,480),'yolop':('PNG',1280,720),'grid':('PNG',1280,720)}
+            if (encoding,width,height)!=expected[item['panel']] or (item['panel'] in ('yolop','grid') and role is None):
+                raise SnapshotError('REPRESENTATIVE_GT_CROP_REQUIRED')
         stamp(item.get('stamp'));_text(item.get('path'),'media path',512)
     raw=body.get('raw_payload')
     if raw is not None:

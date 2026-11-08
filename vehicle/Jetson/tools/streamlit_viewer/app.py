@@ -6,6 +6,8 @@ from uuid import uuid4
 import streamlit as st
 
 from adapter import OfflineDataset
+from course_catalog import load_catalog,plan_bytes,NATIVE,LEGACY
+from representative_adapter import RepresentativeDataset
 from render import map_svg,preview
 from snapshot import Result,SnapshotReader,age
 
@@ -15,12 +17,43 @@ st.title('RC 주행 관측')
 st.caption('PC 별도 읽기 전용 · 터미널 조작 유지 · LIVE observer 미연결 · 화면 종료는 제품에 신호를 보내지 않음')
 with st.sidebar:
     st.subheader('관측 입력')
-    mode=st.selectbox('형식',('snapshot.json','SyntheticDatasetWriter offline'))
+    mode=st.selectbox('형식',('snapshot.json','SyntheticDatasetWriter offline','실제 OAK 대표 장면 기록 (HISTORICAL)'))
     folder=st.text_input('PC 관측 폴더',placeholder=r'C:\drive-observations')
     ordinal=int(st.number_input('Offline ordinal (-1 = 마지막)',min_value=-1,max_value=255,value=-1,disabled=mode=='snapshot.json'))
     show_gt=st.checkbox('snapshot의 GT 층 표시',value=False)
     st.caption('GT는 뷰어 표시용입니다. oracle.jsonl은 읽지 않으며 GT를 제품에 전달하지 않습니다.')
     st.caption('화면 갱신2Hz · 주행 계산과 독립인 진단 표시 주기')
+
+    st.divider()
+    st.subheader('새 실행 코스 준비')
+    st.caption('코스 정의 / 과거 장면 기록 / Jetson 저장 지도는 서로 다릅니다. 이 선택은 현재 실행에 적용되지 않습니다.')
+    catalog=load_catalog(Path(__file__).resolve().parents[4])
+    families={'Jetson native-depth (권장)':NATIVE,'기존 MJPEG simulator (별도 legacy)':LEGACY}
+    selected_family=st.radio('코스 계열',tuple(families),key='course-family')
+    available={entry.key:entry for entry in catalog.entries if entry.family==families[selected_family]}
+    course_plan=None
+    if not available:st.warning('UNAVAILABLE · 이 계열의 지원 코스 정의를 검산하지 못했습니다.')
+    else:
+        course_key=st.selectbox('새 실행 코스',tuple(available),format_func=lambda key:available[key].name,key='new-run-course')
+        requested_laps=int(st.number_input('목표 바퀴 수 (요청 기록만)',min_value=1,max_value=16,value=2,key='course-laps'))
+        st.caption(available[course_key].description)
+        try:
+            course_plan=catalog.prepare(course_key,requested_laps=requested_laps)
+            st.info('PREPARED · 실행·적용 NOT_EXECUTED / simulator 시작 IPC 미연결')
+            st.download_button('새 실행 준비설정 내려받기',plan_bytes(course_plan),file_name='course-preparation.json',mime='application/json',key='course-download')
+        except (OSError,ValueError) as error:st.error('INVALID · '+str(error))
+    st.caption('같은 코스 두 바퀴는 같은 run/map을 유지합니다. 이 화면은 지도·NN·source를 초기화하거나 race/track 변경 명령을 보내지 않습니다.')
+    for error in catalog.unavailable:st.caption(error)
+
+if course_plan is not None:
+    with st.expander('선택 코스의 원 정의 · 새 실행 준비 명령 (미실행)'):
+        st.json(course_plan['definition'])
+        recipe=course_plan['manual_recipe']
+        st.caption(recipe['note'])
+        st.caption('실행 위치: '+recipe['cwd']+' · 환경: '+str(recipe['environment']))
+        st.code(' '.join(recipe['argv']),language='powershell')
+        st.caption('목표 바퀴 수는 준비 기록이며 자동 실행/랩 종료가 연결된 기능은 아닙니다. 현재 관측 입력과 장면 ordinal은 그대로입니다.')
+        st.json(course_plan)
 
 
 def value(item):return 'UNKNOWN' if item is None else str(item)
@@ -33,7 +66,8 @@ def observe():
         old=st.session_state.get('reader')
         if old is not None:old.close()
         st.session_state.input_key=key
-        st.session_state.reader=(SnapshotReader(folder) if mode=='snapshot.json' else OfflineDataset(folder)) if folder else None
+        factory=SnapshotReader if mode=='snapshot.json' else OfflineDataset if mode=='SyntheticDatasetWriter offline' else RepresentativeDataset
+        st.session_state.reader=factory(folder) if folder else None
         st.session_state.previews={}
     reader=st.session_state.get('reader')
     result=(reader.read() if mode=='snapshot.json' else reader.read(ordinal)) if reader is not None else Result('UNAVAILABLE',None,'관측 폴더를 지정하세요',None,None)
@@ -41,13 +75,17 @@ def observe():
     if result.state=='INVALID':st.error('INVALID · '+str(result.reason))
     elif result.state=='STALE':st.warning('STALE · 같은 파일 재조회는 원 수신 시각과 순번을 갱신하지 않습니다')
     elif result.state=='UNAVAILABLE':st.info('UNAVAILABLE · '+str(result.reason))
-    elif result.state=='HISTORICAL':st.info('HISTORICAL · 합성 offline 기록. 현재 차량·LIVE 상태가 아닙니다')
+    elif result.state=='HISTORICAL':st.info('HISTORICAL · 과거 진단 기록. 현재 차량·LIVE 상태가 아닙니다')
     else:st.caption('파일 형식·선택 media 해시 검사 통과. 제품 제어/READY 수락 증거와 별개입니다')
     if body.get('source',{}).get('kind')=='OFFLINE_SYNTHETIC' and result.state!='HISTORICAL':
         st.info('HISTORICAL · 합성 기록 또는 표시 자료입니다. 현재 차량의 관측값이 아닙니다')
     if 'clock_epoch' not in st.session_state:st.session_state.clock_epoch=str(uuid4())
     local=dict(domain='viewer-monotonic-us',epoch=st.session_state.clock_epoch,us=time.monotonic_ns()//1000)
     source=body.get('source',{});source_age=age(source.get('stamp'),local)
+    recording=body.get('recording')
+    if recording:
+        st.subheader(f"{recording['case_name']} · {recording['status']}")
+        st.caption(f"ordinal={recording['ordinal']} / {recording['case_count']}개 · {recording['input_scope']}")
     st.caption(f"source={value(source.get('id'))} · epoch={value(source.get('epoch'))} · seq={value(source.get('sequence'))}")
     st.caption(f"뷰어 최초 수신 후={value(round(result.received_age_s,3) if result.received_age_s is not None else None)}s · "
                f"입력 age={source_age['state']} / {value(source_age['age_us'])}µs · 서로 다른 clock은 빼지 않습니다")
@@ -68,12 +106,13 @@ def observe():
             with tab:
                 item=media.get(name)
                 if item is None:st.info('UNKNOWN · 원 artifact 없음');continue
-                d=item.descriptor;cache_key=(name,d['sha256'])
+                d=item.descriptor;cache_key=(name,d['sha256'],d.get('display_crop'))
                 try:
                     png=cached.get(cache_key)
                     if png is None:png=preview(item)
                     next_cache[cache_key]=png;st.image(png,width='stretch')
                     st.caption(f"{d['encoding']} {d['width']}×{d['height']} · seq={value(d.get('source_sequence'))} · sha256={d['sha256']}")
+                    if d.get('display_crop'):st.caption('DISPLAYCROP · '+d['display_crop']+' · 표시640×360, 원PNG 보존 · GT 사분면 미표시')
                     original_stamp=d.get('original_stamp',d.get('stamp'))
                     if original_stamp is None:st.caption('원 시각: UNKNOWN')
                     else:st.json(original_stamp)
@@ -107,7 +146,7 @@ def observe():
     if result.last_error:
         with st.expander('최근 원 오류 (복구 뒤에도 보존)'):
             st.json(result.last_error)
-            owner=reader.reader if isinstance(reader,OfflineDataset) else reader
+            owner=reader.reader if isinstance(reader,(OfflineDataset,RepresentativeDataset)) else reader
             if owner is not None and owner.error_raw is not None:
                 st.download_button('최근 거절 원 bytes',owner.error_raw,file_name='rejected-input.bin',key='raw-rejected')
     if result.snapshot:

@@ -3,7 +3,7 @@ from html import escape
 import struct
 import zlib
 
-from snapshot import SnapshotError
+from snapshot import SnapshotError,DISPLAY_CROPS
 
 
 COLORS={'GT':'#b08aff','ESTIMATE':'#5eb7ff','UNCERTAINTY':'#ffca6c','PATH':'#63e6b7'}
@@ -65,6 +65,18 @@ def preview(media,max_width=320):
     d=media.descriptor;raw=media.raw;width=d['width'];height=d['height'];encoding=d['encoding']
     if encoding in ('PNG','JPEG'):
         if encoded_dimensions(raw,encoding)!=(width,height):raise SnapshotError('ENCODED_MEDIA_DIMENSIONS_DIFFER')
+        role=d.get('display_crop')
+        if role is not None:
+            if (type(role) is not str or role not in DISPLAY_CROPS or DISPLAY_CROPS[role][0]!=d.get('panel') or
+                    (encoding,width,height)!=('PNG',1280,720)):raise SnapshotError('INVALID_DISPLAY_CROP')
+            # Only the two left quadrants are displayable. Right-bottom GT is
+            # never included; the original bytes/SHA remain in Media unchanged.
+            from io import BytesIO
+            from PIL import Image
+            with Image.open(BytesIO(raw)) as image:
+                if image.format!='PNG' or image.size!=(1280,720):raise SnapshotError('INVALID_DISPLAY_CROP_PNG')
+                image.load();cropped=image.crop(DISPLAY_CROPS[role][1]);output=BytesIO()
+                cropped.save(output,format='PNG');return output.getvalue()
         return raw
     stride=max(1,(width+max_width-1)//max_width);xs=range(0,width,stride);ys=range(0,height,stride)
     rows=bytearray()
