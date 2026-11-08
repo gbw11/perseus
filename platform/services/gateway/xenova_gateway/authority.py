@@ -127,6 +127,8 @@ class AuthorityStore:
             canonical(row['execution_id'])
             if row['vm_id'] in seen:raise ValueError('duplicate distrusted VM')
             seen.add(row['vm_id'])
+            # MEMORY_PRESSURE is read-only compatibility for durable records
+            # written by older firmware; new wire evidence no longer accepts it.
             if (row.get('reason') not in ('AUTO_DEADLINE_MISS','MEMORY_PRESSURE') or not isinstance(row.get('command_id'),str) or
                 not 0<len(row['command_id'])<=128 or type(row.get('generation')) is not int or
                 not 1<=row['generation']<=0xffffffff or type(row.get('observed_monotonic_ms')) is not int or

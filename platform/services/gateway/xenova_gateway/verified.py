@@ -11,7 +11,7 @@ from .authority import AuthorityError,AuthorityStore
 from .machine import (ControlMachine,Mode,Timing,DRIVE_APPS,AUTONOMOUS,MANUAL_APP,
     AppTrack,ForwardDrive,ForwardStop,PublishControl,PublishEvent,Measure,valid_command)
 
-TRUST_REASONS=frozenset(('AUTO_DEADLINE_MISS','MEMORY_PRESSURE'))
+TRUST_REASONS=frozenset(('AUTO_DEADLINE_MISS',))
 INPUT_FAILURES=frozenset(('INPUT_UNAVAILABLE','INPUT_STALE','INPUT_INVALID','MAP_UNAVAILABLE',
                          'WORLD_UNAVAILABLE','OBSERVATION_EXPIRED'))
 
@@ -20,13 +20,7 @@ def valid_untrusted_payload(payload):
     if not isinstance(payload,dict) or payload.get('trust')!='UNTRUSTED' or payload.get('reason') not in TRUST_REASONS:return False
     command_id=payload.get('command_id')
     if not isinstance(command_id,str) or not command_id or len(command_id)>128:return False
-    if payload['reason']=='AUTO_DEADLINE_MISS':
-        return type(payload.get('consecutive_misses')) is int and payload['consecutive_misses']>=5
-    return (payload.get('metric')=='memory.kernel_heap.used_bytes' and
-            type(payload.get('used_percent')) is int and 0<=payload['used_percent']<=100 and
-            type(payload.get('threshold_percent')) is int and 50<=payload['threshold_percent']<=99 and
-            payload['used_percent']>=payload['threshold_percent'] and
-            type(payload.get('consecutive_samples')) is int and payload['consecutive_samples']>=2)
+    return type(payload.get('consecutive_misses')) is int and payload['consecutive_misses']>=5
 
 @dataclass
 class Prepared:
@@ -134,18 +128,16 @@ class VerifiedDriveMachine(ControlMachine):
     def on_vm_untrusted(self,vm,app,payload,t):
         """Interpret deployed FW32 reports at the scope their evidence proves.
 
-        Heap occupancy is a warning. AUTO deadline evidence revokes that
-        function, never the same execution's normal MANUAL qualification.
+        AUTO deadline evidence revokes that function, never the same
+        execution's normal MANUAL qualification.
         Historical durable VM distrust remains guarded by recovery completion.
         """
         if (vm not in self.nodes or app!=AUTONOMOUS or not valid_untrusted_payload(payload) or
                 not 0<=self.clock()-t<=self.readiness_lease_s or not self._bound(vm,t,app)):return []
         binding=self.bindings.current(vm,self.clock())
         if binding is None:return []
-        evidence={key:payload[key] for key in ('trust','reason','command_id','consecutive_misses',
-            'metric','used_percent','threshold_percent','consecutive_samples') if key in payload}
+        evidence={key:payload[key] for key in ('trust','reason','command_id','consecutive_misses') if key in payload}
         fields={'vm_id':vm,'execution_id':binding['execution_id'],**evidence,'gen':self.generation,'t':t}
-        if payload['reason']=='MEMORY_PRESSURE':return [Measure('resource_warning',fields)]
         key=(vm,binding['execution_id'],self.sessions.get((vm,app)),payload['command_id'])
         if key in self._legacy_faults:return []
         self._legacy_faults.append(key)

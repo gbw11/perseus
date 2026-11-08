@@ -4,7 +4,6 @@
 #include <xenova/diagnostics.h>
 #include "workers.h"
 #include <xenova/auto_delay.h>
-#include <xenova/cpu_stress.h>
 #include <assert.h>
 #include <errno.h>
 #include <stdio.h>
@@ -383,26 +382,6 @@ int main(void)
 		puts("PASS AUTO delay: real busy wait, five consecutive misses, normal completion resets");
 		exit(0);
 	}
- if(!strcmp(scenario,"cpu-stress-policy")){
-  struct drive_cpu_stress_status status;
-  assert(drive_cpu_stress_start(2,50,1)==-EINVAL);
-  assert(drive_cpu_stress_start(1,9,1)==-EINVAL);
-  assert(drive_cpu_stress_start(1,101,1)==-EINVAL);
-  assert(drive_cpu_stress_start(1,50,0)==-EINVAL);
-  assert(!drive_cpu_stress_start(1,50,1));
-  assert(drive_cpu_stress_start(1,50,1)==-EBUSY);
-  drive_cpu_stress_status_get(&status);
-  assert(status.state==DRIVE_CPU_STRESS_RUNNING&&status.load_percent==50&&!status.error);
-  k_sleep(K_MSEC(30));drive_cpu_stress_stop();drive_cpu_stress_status_get(&status);
-  assert(status.state==DRIVE_CPU_STRESS_IDLE&&status.error==-ECANCELED);
-  assert(!drive_cpu_stress_start(1,100,1));
-  int64_t deadline=k_uptime_get()+1200;
-  do{drive_cpu_stress_status_get(&status);if(status.state==DRIVE_CPU_STRESS_RUNNING)k_sleep(K_MSEC(10));}
-  while(status.state==DRIVE_CPU_STRESS_RUNNING&&k_uptime_get()<deadline);
-  assert(status.state==DRIVE_CPU_STRESS_SUCCEEDED&&!status.error);
-  puts("PASS CPU stress: one worker, bounded duty cycle, stop and timed completion");
-  exit(0);
- }
  if(!strcmp(scenario,"memory-manual"))manual_memory();
  if(!strncmp(scenario,"local-",6)||!strcmp(scenario,"restart-fail"))local_lifetime(scenario);
  if(!strcmp(scenario,"not-started")){

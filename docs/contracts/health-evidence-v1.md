@@ -141,27 +141,23 @@ operation/attempt·의도 revision·미완료 소유·원 deadline·예산을 �
 
 ### 시연 부하와 장애 범위
 
-부하 명령의 접수·실행 결과와 주행 기능의 건강 판정은 별개다. `cpu_stress`는 AUTO·MANUAL보다
-낮은 우선순위에서 CPU를 사용한다. `auto_delay`는 실제 AUTO 계산 뒤에 busy wait를 더하므로
+부하 명령의 접수·실행 결과와 주행 기능의 건강 판정은 별개다. `auto_delay`는 실제 AUTO 계산 뒤에 busy wait를 더하므로
 그 작업의 원 deadline을 넘길 수 있다. 계산이 없는 WAITING·SAFE_STOP에서 명령 시간이 끝난
 것만으로 계산 지연이나 승계 성공을 주장하지 않는다.
 
 | 실제 관측 | 허용하는 판단·행동 |
 |---|---|
-| CPU 사용률 증가, 높은 heap 점유 또는 free=0 | 원 구간·영역의 계측과 기존 경고를 보존. 정상 계산을 제한하거나 VM 복구를 시작하지 않음 |
-| 부하 주입기 자신의 `k_malloc` 실패 | 원 명령의 `FAILED/RESOURCE_UNAVAILABLE`. 주행 앱의 필수 자원이 실패했다는 증거로 사용하지 않음 |
+| AUTO 지연 중 CPU 사용률 증가 | 원 구간의 계측을 보존. 사용률만으로 VM 복구를 시작하지 않음 |
 | 주행 어댑터의 실제 필수 할당·pool 확보 실패 | 해당 기능의 원 실패와 NOT_READY·출력 제한. 기존 유효 자료로 계속 수행할 수 있는지 먼저 구분 |
 | AUTO 작업의 실제 원 deadline 위반 | 해당 결과를 즉시 제한하고 기존 앱별 lifecycle로 전달. 준비된 다른 AUTO·정상 MANUAL·SAFE_STOP 선택은 Gateway가 담당 |
 | 현재 실행의 fatal·손상·정책상 확정된 생존 실패 | 현재 실행·의도·원 기한과 Gateway 보호 아래 기존 Worker/Engine 복구 경로 사용 |
 
-현재 lattice의 map/search/path/odom은 고정 예약 풀이다. 별도 system-heap 부하가 이 풀의
-필수 확보 실패를 대신하지 않는다. 풀 소진 시험은 실제 예약·lease를 유한하게 보유하고 해제하며,
+현재 lattice의 map/search/path/odom은 고정 예약 풀이다. 풀 소진 시험은 실제 예약·lease를 유한하게 보유하고 해제하며,
 실패 뒤 새 정상 입력의 실제 계산·반환과 정상 MANUAL 진행을 함께 확인한다.
 
-현재 소스의 FW1.0.33 후보는 `io.c`에서 heap 비율과 AUTO 지연을 `vm.trust`로 승격하지 않는다.
-`workers.c`의 원 health와 `main.c:warm_report`의 `app.lifecycle`을 사용한다. FW1.0.32 등 구형
-송신자의 `MEMORY_PRESSURE`는 점유 경고, `AUTO_DEADLINE_MISS`는 AUTO 기능 실패로 호환 소비한다.
-구형 85%·5표본/5회 계수는 새 운영 승계 문턱이 아니며, 같은 원 표본을 다시 읽어 지속 위반을 늘리지 않는다.
+현재 소스는 `io.c`에서 AUTO 지연 자체를 VM 불신으로 승격하지 않는다.
+`workers.c`의 원 health와 `main.c:warm_report`의 `app.lifecycle`을 사용한다. `AUTO_DEADLINE_MISS`는 AUTO 기능 실패로 소비한다.
+같은 원 표본을 다시 읽어 지속 위반을 늘리지 않는다.
 원 사유·명령 식별자·실행 문맥은 진단에 남기고 이 보고만으로 Worker의 VM 불신 latch나 새 시도를 만들지 않는다.
 
 과거 Authority의 `distrusted` 기록은 기존 형식으로 읽는다. 새 보고의 분류가 바뀌었다고 기록을

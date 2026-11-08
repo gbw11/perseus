@@ -19,13 +19,13 @@ Worker는 현재 실행의 정책상 VM 장애를 기존 Engine/Manager로 복�
 
 | 관측·흐름 | 제공 코드와 담당 수락 |
 |---|---|
-| 높은 CPU·heap 점유, 부하 주입기 자신의 할당 실패 | 경고·원 명령 결과와 실제 주행 기능 실패를 구분. 필수 app pool은 별도 실제 소유 경로에서 실패·해제·정상 회복을 확인하며, 점유율이나 주입기 ENOMEM만으로 새 recovery attempt를 만들지 않음 |
-| FW1.0.32 구형 `vm.trust` | `recovery/rejoin.py:on_trust/legacy_fault_reports`가 현재 binding·boot·app 검증 뒤 `MEMORY_PRESSURE`를 warning, `AUTO_DEADLINE_MISS`를 function 진단으로 보관. `worker.py:run_once`가 이 보고를 `Watcher.report_untrusted`로 승격하지 않음. 담당자는 실제 설치본의 같은 소비도 확인 |
+| AUTO 지연 중 높은 CPU 점유 | 원 명령 결과와 실제 주행 기능 실패를 구분하며, 점유율만으로 새 recovery attempt를 만들지 않음 |
+| `AUTO_DEADLINE_MISS` | `recovery/rejoin.py:on_trust/legacy_fault_reports`가 현재 binding·boot·app 검증 뒤 function 진단으로 보관. `worker.py:run_once`가 이 보고를 `Watcher.report_untrusted`로 승격하지 않음 |
 | A AUTO 기능 실패 | 기존 앱별 lifecycle을 Gateway가 소비해 현재 준비된 B AUTO 또는 정상 MANUAL·SAFE_STOP을 선택. A의 같은 실행은 기능 회복 후 Standby 자격을 되찾음. Worker 새 시도·새 boot·부하 자동 재주입 0 |
 | Jetson 입력 상실·회복 | 한 VM의 `WORLD_UNAVAILABLE`만으로 공통 장애를 확정하지 않음. 양쪽 현재 입력 근거와 정상 MANUAL을 확인. 회복 뒤 현재 Active의 준비·명시적 재개·제어 적용을 사용하고 `manual_hold`를 보존. 입력 장애를 반복 VM 복구로 처리하지 않음 |
 | 실제 VM 장애 | 현재 intent/host/execution·원 attempt/deadline·Gateway 보호·E4를 확인해 기존 복구 실행. 새 receipt/binding·준비·정당한 보호 종결 뒤 Standby로 합류하고, 다음 장애에서 정상 후보로 선택되는지 확인 |
 
-현재 소스의 FW1.0.33 후보는 두 사유를 `vm.trust`로 발행하지 않고 기존 health/lifecycle을 사용한다.
+현재 소스는 지연 명령 자체를 `vm.trust`로 발행하지 않고 기존 health/lifecycle을 사용한다.
 구형 보고의 의미를 바로잡더라도 과거 Authority `distrusted`·원 시도·보호 기록을 삭제하거나 자동 해제하지 않는다.
 경고와 기능 제한이 실제 fatal·실행 손상·생존 실패의 기존 복구 경로를 막아서도 안 된다.
 

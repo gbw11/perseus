@@ -32,13 +32,6 @@ import test_xenova_network_zephyr as network
 from xenova_drive_binding import observe
 import xenova_vm
 
-def test_legacy_memory_pressure_wire_is_readable_without_granting_recovery():
-    payload={'trust':'UNTRUSTED','reason':'MEMORY_PRESSURE','metric':'memory.kernel_heap.used_bytes',
-        'used_percent':89,'threshold_percent':85,'consecutive_samples':5,'command_id':'memory-1'}
-    assert valid_vm_trust_payload(payload)
-    assert not valid_vm_trust_payload({**payload,'used_percent':80})
-    assert not valid_vm_trust_payload({**payload,'consecutive_samples':1})
-
 @pytest.fixture
 def fixture():
     f=network.NetworkPlatformTest('runTest');f.setUp()
@@ -310,16 +303,14 @@ def test_successful_probe_keeps_its_release_cadence_and_original_observation(cad
     assert coordinator._futures[c.vm] is c.calls[1][2]
 
 
-@pytest.mark.parametrize('reason,scope', [('MEMORY_PRESSURE','warning'),('AUTO_DEADLINE_MISS','function')])
-def test_fw32_advisory_keeps_original_evidence_without_vm_recovery(cadence,reason,scope):
+def test_fw32_auto_deadline_keeps_original_evidence_without_vm_recovery(cadence):
+    reason='AUTO_DEADLINE_MISS';scope='function'
     c=cadence;coordinator=c.coordinator
     coordinator.cache.install({'schema_version':'1.0-drive-bindings','host_boot_id':coordinator.host,
         'observed_monotonic_ms':int(c.now[0]*1000),'expires_monotonic_ms':int(c.now[0]*1000)+3000,
         'vms':{c.vm:c.row}})
     payload={'trust':'UNTRUSTED','reason':reason,'command_id':'original-command'}
-    if reason=='MEMORY_PRESSURE':payload.update(metric='memory.kernel_heap.used_bytes',used_percent=88,
-        threshold_percent=85,consecutive_samples=5)
-    else:payload['consecutive_misses']=5
+    payload['consecutive_misses']=5
     envelope=build(Identity(vm_id=c.vm,app_id='autonomous',boot_id=c.row['boot_id'],
         agent_instance_id=c.row['app_instance_id']),'vm.trust',payload,1)
     message=Message(topics.vm_app_events(c.vm,'autonomous'),envelope,c.now[0])
