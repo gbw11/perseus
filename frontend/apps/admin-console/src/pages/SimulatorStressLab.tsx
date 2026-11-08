@@ -6,6 +6,7 @@ import {
   useCommandStatus,
   useMetrics,
   useProcesses,
+  useStartAgentExit,
   useStartAutoDelay,
   useStartStress,
   useThreads,
@@ -178,25 +179,27 @@ export function SimulatorStressLab() {
   );
   const stress = useStartStress(vm?.vm_id ?? '');
   const autoDelay = useStartAutoDelay(vm?.vm_id ?? '');
+  const agentExit = useStartAgentExit(vm?.vm_id ?? '');
   const metrics = useMetrics(vm?.vm_id ?? '', Boolean(vm), 5);
   const [commandId, setCommandId] = useState<string | null>(null);
-  const command = useCommandStatus(vm?.vm_id ?? '', commandId);
+  const [agentExitCommand, setAgentExitCommand] = useState(false);
+  const command = useCommandStatus(vm?.vm_id ?? '', commandId, agentExitCommand);
   const [feedback, setFeedback] = useState<string | null>(null);
-  const [cpuAmount, setCpuAmount] = useState(80);
+  const [cpuAmount, setCpuAmount] = useState(1);
   const [cpuDuration, setCpuDuration] = useState(30);
-  const [memoryMib, setMemoryMib] = useState(4);
+  const [memoryMib, setMemoryMib] = useState(256);
   const [memoryDuration, setMemoryDuration] = useState(30);
   const [delayMs, setDelayMs] = useState(20);
   const [delayDuration, setDelayDuration] = useState(30);
   const toast = useToast();
 
   function selectVm(nextVmId: string) {
-    const nextVm = vms.data?.items.find((item) => item.vm_id === nextVmId);
     setVmId(nextVmId);
     setCommandId(null);
+    setAgentExitCommand(false);
     setFeedback(null);
-    setCpuAmount(nextVm?.guest_kind === 'zephyr' ? 80 : 1);
-    setMemoryMib(nextVm?.guest_kind === 'zephyr' ? 4 : 256);
+    setCpuAmount(1);
+    setMemoryMib(256);
   }
 
   const samples = metrics.data?.items ?? [];
@@ -206,16 +209,24 @@ export function SimulatorStressLab() {
     vm && vm.state === 'running' && (vm.guest_kind === 'zephyr' || vm.agent_status === 'ONLINE'),
   );
   const busy =
-    stress.isPending || autoDelay.isPending || Boolean(command.data && !terminal.has(command.data.status));
-  const cpuMin = vm?.guest_kind === 'zephyr' ? 10 : 1;
-  const cpuMax = vm?.guest_kind === 'zephyr' ? 100 : 4;
-  const memoryMax = vm?.guest_kind === 'zephyr' ? 8 : 512;
+    stress.isPending ||
+    autoDelay.isPending ||
+    agentExit.isPending ||
+    Boolean(
+      command.data &&
+      !terminal.has(command.data.status) &&
+      !(agentExitCommand && command.data.status === 'ACCEPTED'),
+    );
+  const cpuMin = 1;
+  const cpuMax = 4;
+  const memoryMax = 512;
 
   async function sendStress(input: StressRequest) {
     if (!vm) return;
     try {
       setFeedback(null);
       const result = await stress.mutateAsync(input);
+      setAgentExitCommand(false);
       setCommandId(result.command_id);
       setFeedback('명령을 전송했습니다. telemetry 변화를 확인하세요.');
       toast.show(`${vm.name}: 부하 명령 전송`, 'ok');
@@ -230,9 +241,25 @@ export function SimulatorStressLab() {
     try {
       setFeedback(null);
       const result = await autoDelay.mutateAsync({ delay_ms: delayMs, duration_s: delayDuration });
+      setAgentExitCommand(false);
       setCommandId(result.command_id);
       setFeedback('주행 연산 지연 명령을 전송했습니다.');
       toast.show(`${vm.name}: 연산 지연 명령 전송`, 'ok');
+    } catch (error) {
+      setFeedback(errorMessage(error));
+      toast.show(errorMessage(error), 'fault', 5000);
+    }
+  }
+
+  async function sendAgentExit() {
+    if (!vm) return;
+    try {
+      setFeedback(null);
+      const result = await agentExit.mutateAsync();
+      setAgentExitCommand(true);
+      setCommandId(result.command_id);
+      setFeedback('Agent 종료 명령을 전송했습니다. heartbeat 손실과 자동복구 상태를 확인하세요.');
+      toast.show(`${vm.name}: Agent 종료 명령 전송`, 'ok');
     } catch (error) {
       setFeedback(errorMessage(error));
       toast.show(errorMessage(error), 'fault', 5000);
@@ -300,116 +327,131 @@ export function SimulatorStressLab() {
                 <div>
                   <h2 id="stress-actions-title">부하 시나리오</h2>
                   <p>
-                    {vm.guest_kind === 'zephyr' ? 'Zephyr 전용 3종' : 'Linux Agent 2종'} · 한 번에 하나씩 실행
+                    {vm.guest_kind === 'zephyr' ? 'Zephyr 연산 지연' : 'Linux Agent 부하·종료'} · 한 번에
+                    하나씩 실행
                   </p>
                 </div>
               </div>
             </div>
-            <div className={styles.stressScenarioGrid} data-count={vm.guest_kind === 'zephyr' ? 3 : 2}>
-              <div className={styles.stressControlCard}>
-                <div className={styles.stressSubhead}>
-                  <div className={styles.stressScenarioIcon}>CPU</div>
-                  <div>
-                    <strong>CPU 부하</strong>
-                    <p>
-                      {vm.guest_kind === 'zephyr' ? '단일 vCPU duty cycle 점유' : '워커 프로세스로 CPU 점유'}
-                    </p>
+            <div className={styles.stressScenarioGrid} data-count={vm.guest_kind === 'zephyr' ? 1 : 3}>
+              {vm.guest_kind === 'linux' && (
+                <>
+                  <div className={styles.stressControlCard}>
+                    <div className={styles.stressSubhead}>
+                      <div className={styles.stressScenarioIcon}>CPU</div>
+                      <div>
+                        <strong>CPU 부하</strong>
+                        <p>워커 프로세스로 CPU 점유</p>
+                      </div>
+                    </div>
+                    <div className={styles.stressFields}>
+                      <NumberField
+                        label="워커 수"
+                        value={cpuAmount}
+                        min={cpuMin}
+                        max={cpuMax}
+                        unit="개"
+                        disabled={!ready || busy}
+                        onChange={setCpuAmount}
+                      />
+                      <NumberField
+                        label="지속 시간"
+                        value={cpuDuration}
+                        min={1}
+                        max={120}
+                        unit="초"
+                        disabled={!ready || busy}
+                        onChange={setCpuDuration}
+                      />
+                    </div>
+                    <Button
+                      disabled={
+                        !ready ||
+                        busy ||
+                        cpuAmount < cpuMin ||
+                        cpuAmount > cpuMax ||
+                        cpuDuration < 1 ||
+                        cpuDuration > 120
+                      }
+                      onClick={() =>
+                        void sendStress({
+                          kind: 'cpu',
+                          body: {
+                            workers: cpuAmount,
+                            duration_s: cpuDuration,
+                          },
+                        })
+                      }
+                    >
+                      CPU 부하 시작
+                    </Button>
                   </div>
-                </div>
-                <div className={styles.stressFields}>
-                  <NumberField
-                    label={vm.guest_kind === 'zephyr' ? '부하 정도' : '워커 수'}
-                    value={cpuAmount}
-                    min={cpuMin}
-                    max={cpuMax}
-                    unit={vm.guest_kind === 'zephyr' ? '%' : '개'}
-                    disabled={!ready || busy}
-                    onChange={setCpuAmount}
-                  />
-                  <NumberField
-                    label="지속 시간"
-                    value={cpuDuration}
-                    min={1}
-                    max={120}
-                    unit="초"
-                    disabled={!ready || busy}
-                    onChange={setCpuDuration}
-                  />
-                </div>
-                <Button
-                  disabled={
-                    !ready ||
-                    busy ||
-                    cpuAmount < cpuMin ||
-                    cpuAmount > cpuMax ||
-                    cpuDuration < 1 ||
-                    cpuDuration > 120
-                  }
-                  onClick={() =>
-                    void sendStress({
-                      kind: 'cpu',
-                      body: {
-                        workers: vm.guest_kind === 'zephyr' ? 1 : cpuAmount,
-                        load_percent: vm.guest_kind === 'zephyr' ? cpuAmount : undefined,
-                        duration_s: cpuDuration,
-                      },
-                    })
-                  }
-                >
-                  CPU 부하 시작
-                </Button>
-              </div>
-              <div className={styles.stressControlCard}>
-                <div className={styles.stressSubhead}>
-                  <div className={styles.stressScenarioIcon}>MEM</div>
-                  <div>
-                    <strong>메모리 부하</strong>
-                    <p>
-                      {vm.guest_kind === 'zephyr'
-                        ? '커널 heap에 메모리 할당'
-                        : 'Agent 프로세스에 메모리 할당'}
-                    </p>
+                  <div className={styles.stressControlCard}>
+                    <div className={styles.stressSubhead}>
+                      <div className={styles.stressScenarioIcon}>MEM</div>
+                      <div>
+                        <strong>메모리 부하</strong>
+                        <p>Agent 부하 프로세스에 메모리 할당</p>
+                      </div>
+                    </div>
+                    <div className={styles.stressFields}>
+                      <NumberField
+                        label="할당량"
+                        value={memoryMib}
+                        min={1}
+                        max={memoryMax}
+                        unit="MiB"
+                        disabled={!ready || busy}
+                        onChange={setMemoryMib}
+                      />
+                      <NumberField
+                        label="지속 시간"
+                        value={memoryDuration}
+                        min={1}
+                        max={120}
+                        unit="초"
+                        disabled={!ready || busy}
+                        onChange={setMemoryDuration}
+                      />
+                    </div>
+                    <Button
+                      disabled={
+                        !ready ||
+                        busy ||
+                        memoryMib < 1 ||
+                        memoryMib > memoryMax ||
+                        memoryDuration < 1 ||
+                        memoryDuration > 120
+                      }
+                      onClick={() =>
+                        void sendStress({
+                          kind: 'memory',
+                          body: { memory_mib: memoryMib, duration_s: memoryDuration },
+                        })
+                      }
+                    >
+                      메모리 부하 시작
+                    </Button>
                   </div>
-                </div>
-                <div className={styles.stressFields}>
-                  <NumberField
-                    label="할당량"
-                    value={memoryMib}
-                    min={1}
-                    max={memoryMax}
-                    unit="MiB"
-                    disabled={!ready || busy}
-                    onChange={setMemoryMib}
-                  />
-                  <NumberField
-                    label="지속 시간"
-                    value={memoryDuration}
-                    min={1}
-                    max={120}
-                    unit="초"
-                    disabled={!ready || busy}
-                    onChange={setMemoryDuration}
-                  />
-                </div>
-                <Button
-                  disabled={
-                    !ready ||
-                    busy ||
-                    memoryMib < 1 ||
-                    memoryMib > memoryMax ||
-                    memoryDuration < 1 ||
-                    memoryDuration > 120
-                  }
-                  onClick={() =>
-                    void sendStress({
-                      kind: 'memory',
-                      body: { memory_mib: memoryMib, duration_s: memoryDuration },
-                    })
-                  }
-                >
-                  메모리 부하 시작
-                </Button>
-              </div>
+                  <div className={styles.stressControlCard}>
+                    <div className={styles.stressSubhead}>
+                      <div className={styles.stressScenarioIcon}>EXIT</div>
+                      <div>
+                        <strong>Agent 강제 종료</strong>
+                        <p>heartbeat를 끊어 플랫폼 자동복구 흐름 확인</p>
+                      </div>
+                    </div>
+                    <div className={styles.stressFields}>
+                      <p className={styles.dim}>
+                        실행하면 Agent가 결과 전달 후 종료됩니다. 대상 이미지에 데모 명령 설정이 필요합니다.
+                      </p>
+                    </div>
+                    <Button disabled={!ready || busy} onClick={() => void sendAgentExit()}>
+                      Agent 종료 실행
+                    </Button>
+                  </div>
+                </>
+              )}
               {vm.guest_kind === 'zephyr' && (
                 <div className={styles.stressControlCard}>
                   <div className={styles.stressSubhead}>

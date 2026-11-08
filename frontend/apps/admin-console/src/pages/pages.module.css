@@ -185,6 +185,9 @@
 .stressScenarioGrid[data-count='2'] {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
+.stressScenarioGrid[data-count='1'] {
+  grid-template-columns: minmax(0, 1fr);
+}
 .stressScenarioGrid .stressControlCard {
   padding: var(--x-space-4);
   background: var(--x-surface);
@@ -361,6 +364,7 @@
   }
   .stressScenarioGrid,
   .stressScenarioGrid[data-count='2'],
+  .stressScenarioGrid[data-count='1'],
   .stressObservationGrid {
     grid-template-columns: 1fr;
   }
