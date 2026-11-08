@@ -61,6 +61,6 @@ python tests/probe_guest_render_path.py --seconds 6 --save /tmp/relayed-frame.jp
 
 - 실제 VM3(512 MiB, vCPU 1, pCPU {0,3}를 dom0와 공유)에서 Xvfb + Chromium + ffmpeg의 CPU·메모리.
 - xenbr0 위 192.168.77.20 → 192.168.77.1 실제 전송, 브리지 위 다른 domU 영향.
-- dom0 HDMI 프레임 출력기(미구현), 휴대폰 중계(미구현), `display_mode` 연동.
+- dom0 HDMI 프레임 출력기(411에서 진행), HDMI 1대 구성에서의 `display_mode` 판정. 휴대폰 선택지는 폰 직접 렌더링이라 이 경로 대상이 아니다.
 - 10분 연속, domU 재시작·모드 전환·케이블 분리 복귀.
 - 출발지 제한 방화벽 규칙(미적용).

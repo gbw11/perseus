@@ -2,8 +2,9 @@
 
 dom0 does not build or render the vehicle UI on this path. It pulls one
 authenticated MJPEG stream from the display domU (`guest_sender`), validates
-every frame, keeps only the latest one and republishes it to local consumers
-(HDMI frame output, phone relay).
+every frame, keeps only the latest one and republishes it to the dom0-local
+HDMI frame output. (The phone option renders the UI on the phone itself and
+does not use this path.)
 
 The domU is untrusted: frame size, JPEG structure, dimensions and rate are
 bounded, and a stalled, closed or misbehaving guest is reported as
@@ -191,7 +192,7 @@ class Login(BaseModel):
 
 
 def create_relay_app(receiver, token, *, start_receiver=True):
-    """dom0-local consumers (HDMI frame output, phone relay) read the latest guest frame here."""
+    """dom0-local consumers (the HDMI frame output) read the latest guest frame here."""
     token = valid_token(token)
     sessions = {}
 
