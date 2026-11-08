@@ -86,4 +86,4 @@ python tests/probe_hdmi_frame_output.py --save-dir /tmp
 - TurboJPEG 실제 디코드와 dom0 CPU·메모리 (Chromium kiosk 대비 비교).
 - HDMI 1대만 연결된 상태에서 `display_mode hdmi` 판정. 지금 코드는 출력 2개를 모두 요구한다 (379/380/390).
 - 표시 domU 이미지(Xvfb·Chromium·ffmpeg·`guest_sender`)와 실제 차량 UI 화면.
-- 휴대폰(S24) 프레임 중계.
+- (휴대폰 선택지는 폰이 직접 렌더링하므로 이 HDMI 프레임 출력기의 대상이 아니다.)
