@@ -15,6 +15,13 @@
     ]
   },
   "guest_display": {
-    "account": "xenova-display"
+    "account": "xenova-display",
+    "python_modules": [
+      "__init__.py",
+      "capture_limits.py",
+      "mjpeg.py",
+      "guest_sender.py",
+      "guest_app.py"
+    ]
   }
 }

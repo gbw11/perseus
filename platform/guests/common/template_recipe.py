@@ -62,7 +62,7 @@ def source_info(recipe, source_id):
     if 'guest_agent' in meta:
         common += [Path(guest_agent_template.__file__).resolve(), *guest_agent_template.source_files()]
     if 'guest_display' in meta:
-        common += [Path(guest_display_template.__file__).resolve()]
+        common += [Path(guest_display_template.__file__).resolve(), *guest_display_template.source_files()]
     preparation = {'platform': 'xenova', 'recipe': meta, 'recipe_files': sources,
                    'preparer_files': {str(p.relative_to(ROOT)): sha(p) for p in common}}
     preparation['source_sha256'] = hashlib.sha256(

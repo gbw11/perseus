@@ -1,5 +1,6 @@
 """Debian display domU 템플릿의 전용 계정 정책 회귀."""
 import json
+import hashlib
 from pathlib import Path
 import sys
 import tempfile
@@ -38,10 +39,18 @@ class DisplayGuestAccountTest(unittest.TestCase):
             stream.write("xenova-display:!:20766::::::\n")
 
     def test_prepare_creates_locked_system_account_without_home(self):
-        result = display_guest.prepare(self.root, {"account": "xenova-display"}, command=self.useradd)
-        self.assertEqual(result, {"account": "xenova-display", "uid": 998, "gid": 998,
-                                  "home": "/nonexistent", "shell": "/usr/sbin/nologin",
-                                  "password_locked": True})
+        result = display_guest.prepare(self.root, display_guest.POLICY, command=self.useradd)
+        self.assertEqual(result["account"], {"account": "xenova-display", "uid": 998, "gid": 998,
+                                             "home": "/nonexistent", "shell": "/usr/sbin/nologin",
+                                             "password_locked": True})
+        self.assertEqual(result["python_root"], "/opt/xenova/display-guest")
+        self.assertEqual(tuple(result["python_modules"]), display_guest.MODULES)
+        target = self.root / "opt/xenova/display-guest/xenova_display"
+        for name in display_guest.MODULES:
+            source = ROOT / "platform/services/display/router/xenova_display" / name
+            self.assertEqual((target / name).read_bytes(), source.read_bytes())
+            self.assertEqual(result["python_modules"][name]["sha256"],
+                             hashlib.sha256(source.read_bytes()).hexdigest())
         self.assertFalse((self.root / "nonexistent").exists())
 
     def test_existing_account_or_instance_is_rejected(self):
@@ -50,13 +59,13 @@ class DisplayGuestAccountTest(unittest.TestCase):
                       "/usr/sbin/nologin", "--password", "!", "xenova-display"],
                      check=True, timeout=60)
         with self.assertRaisesRegex(ValueError, "already exists"):
-            display_guest.prepare(self.root, {"account": "xenova-display"}, command=self.useradd)
+            display_guest.prepare(self.root, display_guest.POLICY, command=self.useradd)
         (self.root / "etc/passwd").write_text("root:x:0:0:root:/root:/bin/bash\n")
         (self.root / "etc/group").write_text("root:x:0:\n")
         (self.root / "etc/shadow").write_text("root:!:19000:0:99999:7:::\n")
         (self.root / "etc/xenova/instance-id").write_text("fixture\n")
         with self.assertRaisesRegex(ValueError, "new prepared template"):
-            display_guest.prepare(self.root, {"account": "xenova-display"}, command=self.useradd)
+            display_guest.prepare(self.root, display_guest.POLICY, command=self.useradd)
 
     def test_recipe_policy_is_source_locked(self):
         source = self.root / "recipe"
@@ -64,16 +73,20 @@ class DisplayGuestAccountTest(unittest.TestCase):
         (source / "files/motd").write_text("fixture\n")
         meta = {"schema": 1, "source_id": "debian-13-20261015", "version": "1.0.6",
                 "files": [{"source": "files/motd", "target": "etc/motd", "mode": 420}],
-                "guest_display": {"account": "xenova-display"}}
+                "guest_display": {"account": "xenova-display",
+                                  "python_modules": list(display_guest.MODULES)}}
         path = source / "recipe.json"
         path.write_text(json.dumps(meta))
         info = recipe.source_info(path.resolve(), meta["source_id"])
-        self.assertEqual(info["recipe"]["guest_display"], {"account": "xenova-display"})
+        self.assertEqual(info["recipe"]["guest_display"], display_guest.POLICY)
         self.assertIn("platform/guests/common/guest_display_template.py",
                       {Path(item).as_posix() for item in info["preparer_files"]})
+        locked = {Path(item).as_posix() for item in info["preparer_files"]}
+        for name in display_guest.MODULES:
+            self.assertIn("platform/services/display/router/xenova_display/" + name, locked)
         meta["guest_display"]["account"] = "root"
         path.write_text(json.dumps(meta))
-        with self.assertRaisesRegex(ValueError, "display guest account policy"):
+        with self.assertRaisesRegex(ValueError, "display guest policy"):
             recipe.source_info(path.resolve(), meta["source_id"])
 
 

@@ -1,11 +1,15 @@
-"""새 Linux 템플릿에 display domU 전용 시스템 계정을 준비한다."""
+"""새 Linux 템플릿에 display domU 계정과 Plan A Python 모듈을 준비한다."""
+import hashlib
 from pathlib import Path
 import subprocess
 
 from prepare_rootfs import inside
 
 
-POLICY = {"account": "xenova-display"}
+ROOT = Path(__file__).resolve().parents[3]
+SOURCE = ROOT / "platform/services/display/router/xenova_display"
+MODULES = ("__init__.py", "capture_limits.py", "mjpeg.py", "guest_sender.py", "guest_app.py")
+POLICY = {"account": "xenova-display", "python_modules": list(MODULES)}
 ACCOUNT = "xenova-display"
 HOME = "/nonexistent"
 SHELL = "/usr/sbin/nologin"
@@ -13,7 +17,15 @@ SHELL = "/usr/sbin/nologin"
 
 def validate_policy(policy):
     if policy != POLICY:
-        raise ValueError("unsupported display guest account policy")
+        raise ValueError("unsupported display guest policy")
+
+
+def source_files():
+    """VM3에 복사하는 Plan A Python 입력을 source lock에 포함한다."""
+    files = [SOURCE / name for name in MODULES]
+    if any(path.is_symlink() or not path.is_file() or path.resolve() != path for path in files):
+        raise ValueError("display guest Python input must be a canonical regular file")
+    return files
 
 
 def _records(root, relative):
@@ -43,7 +55,7 @@ def verify(root):
 
 
 def prepare(root, policy, *, command=subprocess.run):
-    """새 템플릿 rootfs 안에서 useradd를 한 번 실행하고 생성 결과를 검증한다."""
+    """새 템플릿에 계정을 만들고 고정한 Plan A Python 모듈을 설치한다."""
     validate_policy(policy)
     root = Path(root)
     if (not inside(root, "etc/xenova/template-prepared", create_parents=False).is_file()
@@ -56,4 +68,20 @@ def prepare(root, policy, *, command=subprocess.run):
     command(["chroot", str(root), "/usr/sbin/useradd", "--system", "--user-group",
              "--home-dir", HOME, "--no-create-home", "--shell", SHELL,
              "--password", "!", ACCOUNT], check=True, timeout=60)
-    return verify(root)
+    account = verify(root)
+    destination = inside(root, "opt/xenova/display-guest/xenova_display")
+    if destination.exists() and (destination.is_symlink() or not destination.is_dir()):
+        raise ValueError("display guest Python destination is not a directory")
+    destination.mkdir(parents=True, exist_ok=True)
+    destination.chmod(0o755)
+    installed = {}
+    for source in source_files():
+        target = destination / source.name
+        if target.is_symlink() or (target.exists() and not target.is_file()):
+            raise ValueError("display guest Python target is linked or non-regular")
+        data = source.read_bytes()
+        target.write_bytes(data)
+        target.chmod(0o644)
+        installed[source.name] = {"sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)}
+    return {"account": account, "python_root": "/opt/xenova/display-guest",
+            "python_modules": installed}
