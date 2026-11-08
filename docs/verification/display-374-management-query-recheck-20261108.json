@@ -1,0 +1,579 @@
+{
+  "issue": "S15P31E110-374",
+  "date": "2026-11-08",
+  "source_base": "8f57b71f746af99c1aa23f65752828afcc115521",
+  "previous_mr": "https://lab.ssafy.com/s15-final/S15P31E110/-/merge_requests/481",
+  "scope": "SSH-only diagnostic: baseline 60s, list every10s for120s, recovery60s; one presentation consumer and one .25s file sampler in every phase; not a browser/physical display acceptance",
+  "summary": {
+    "baseline": {
+      "phase": "baseline",
+      "duration_s": 60.00344736498664,
+      "file_samples": 236,
+      "file_statuses": {
+        "fresh": 236
+      },
+      "max_file_age_ms": 2647,
+      "file_nonfresh_episodes": [],
+      "presentation_requests": 60,
+      "presentation_http": {
+        "200": 60
+      },
+      "presentation_bad_samples": 0,
+      "presentation_source_statuses": {
+        "de113a23-d80e-4333-94b8-788babe0e41e": {
+          "fresh": 60
+        },
+        "5002a22d-63d6-4f7a-9106-193b14499898": {
+          "fresh": 60
+        },
+        "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": {
+          "fresh": 60
+        }
+      },
+      "bad_presentation_samples": [],
+      "mqtt_connected_samples": 60,
+      "drive_sources": {
+        "fresh": 60
+      },
+      "expired_vm_with_current_app": 0,
+      "management_requests": 0,
+      "management_http": {},
+      "management_latency_ms": null,
+      "management_results": [],
+      "nonfresh_file_samples_during_request_or_next_2s": 0,
+      "nonfresh_file_samples_outside_request_window": 0,
+      "run_free_bytes": 527798272,
+      "formal_acceptance_trial": false
+    },
+    "management": {
+      "phase": "management",
+      "duration_s": 120.00335782501497,
+      "file_samples": 472,
+      "file_statuses": {
+        "fresh": 470,
+        "expired": 2
+      },
+      "max_file_age_ms": 3150,
+      "file_nonfresh_episodes": [
+        {
+          "start_s": 57.4786,
+          "samples": 1,
+          "statuses": [
+            "expired"
+          ],
+          "max_age_ms": 3143,
+          "recovered_s": 57.7308,
+          "observed_duration_s": 0.2522
+        },
+        {
+          "start_s": 66.8698,
+          "samples": 1,
+          "statuses": [
+            "expired"
+          ],
+          "max_age_ms": 3150,
+          "recovered_s": 67.1356,
+          "observed_duration_s": 0.2658
+        }
+      ],
+      "presentation_requests": 120,
+      "presentation_http": {
+        "200": 120
+      },
+      "presentation_bad_samples": 0,
+      "presentation_source_statuses": {
+        "de113a23-d80e-4333-94b8-788babe0e41e": {
+          "fresh": 120
+        },
+        "5002a22d-63d6-4f7a-9106-193b14499898": {
+          "fresh": 120
+        },
+        "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": {
+          "fresh": 120
+        }
+      },
+      "bad_presentation_samples": [],
+      "mqtt_connected_samples": 120,
+      "drive_sources": {
+        "fresh": 120
+      },
+      "expired_vm_with_current_app": 0,
+      "management_requests": 12,
+      "management_http": {
+        "200": 12
+      },
+      "management_latency_ms": {
+        "median": 213.00000000000097,
+        "p95": 453.99999999999704,
+        "max": 453.99999999999704
+      },
+      "management_results": [
+        {
+          "index": 0,
+          "started_s": 5.0256,
+          "finished_s": 5.2826,
+          "http": 200,
+          "error_type": null,
+          "vm_count": 3,
+          "states": [
+            "running",
+            "running",
+            "running"
+          ]
+        },
+        {
+          "index": 1,
+          "started_s": 15.004,
+          "finished_s": 15.1416,
+          "http": 200,
+          "error_type": null,
+          "vm_count": 3,
+          "states": [
+            "running",
+            "running",
+            "running"
+          ]
+        },
+        {
+          "index": 2,
+          "started_s": 25.001,
+          "finished_s": 25.455,
+          "http": 200,
+          "error_type": null,
+          "vm_count": 3,
+          "states": [
+            "running",
+            "running",
+            "running"
+          ]
+        },
+        {
+          "index": 3,
+          "started_s": 35.0013,
+          "finished_s": 35.3553,
+          "http": 200,
+          "error_type": null,
+          "vm_count": 3,
+          "states": [
+            "running",
+            "running",
+            "running"
+          ]
+        },
+        {
+          "index": 4,
+          "started_s": 45.0059,
+          "finished_s": 45.1418,
+          "http": 200,
+          "error_type": null,
+          "vm_count": 3,
+          "states": [
+            "running",
+            "running",
+            "running"
+          ]
+        },
+        {
+          "index": 5,
+          "started_s": 55.0003,
+          "finished_s": 55.3841,
+          "http": 200,
+          "error_type": null,
+          "vm_count": 3,
+          "states": [
+            "running",
+            "running",
+            "running"
+          ]
+        },
+        {
+          "index": 6,
+          "started_s": 65.0027,
+          "finished_s": 65.4235,
+          "http": 200,
+          "error_type": null,
+          "vm_count": 3,
+          "states": [
+            "running",
+            "running",
+            "running"
+          ]
+        },
+        {
+          "index": 7,
+          "started_s": 75.0017,
+          "finished_s": 75.1298,
+          "http": 200,
+          "error_type": null,
+          "vm_count": 3,
+          "states": [
+            "running",
+            "running",
+            "running"
+          ]
+        },
+        {
+          "index": 8,
+          "started_s": 85.0003,
+          "finished_s": 85.2246,
+          "http": 200,
+          "error_type": null,
+          "vm_count": 3,
+          "states": [
+            "running",
+            "running",
+            "running"
+          ]
+        },
+        {
+          "index": 9,
+          "started_s": 95.0052,
+          "finished_s": 95.1954,
+          "http": 200,
+          "error_type": null,
+          "vm_count": 3,
+          "states": [
+            "running",
+            "running",
+            "running"
+          ]
+        },
+        {
+          "index": 10,
+          "started_s": 105.0011,
+          "finished_s": 105.1277,
+          "http": 200,
+          "error_type": null,
+          "vm_count": 3,
+          "states": [
+            "running",
+            "running",
+            "running"
+          ]
+        },
+        {
+          "index": 11,
+          "started_s": 115.0038,
+          "finished_s": 115.2055,
+          "http": 200,
+          "error_type": null,
+          "vm_count": 3,
+          "states": [
+            "running",
+            "running",
+            "running"
+          ]
+        }
+      ],
+      "nonfresh_file_samples_during_request_or_next_2s": 1,
+      "nonfresh_file_samples_outside_request_window": 1,
+      "run_free_bytes": 527794176,
+      "formal_acceptance_trial": false
+    },
+    "recovery": {
+      "phase": "recovery",
+      "duration_s": 60.00162771300529,
+      "file_samples": 237,
+      "file_statuses": {
+        "fresh": 230,
+        "expired": 7
+      },
+      "max_file_age_ms": 4734,
+      "file_nonfresh_episodes": [
+        {
+          "start_s": 14.0027,
+          "samples": 7,
+          "statuses": [
+            "expired"
+          ],
+          "max_age_ms": 4734,
+          "recovered_s": 15.7819,
+          "observed_duration_s": 1.7792
+        }
+      ],
+      "presentation_requests": 60,
+      "presentation_http": {
+        "200": 60
+      },
+      "presentation_bad_samples": 2,
+      "presentation_source_statuses": {
+        "de113a23-d80e-4333-94b8-788babe0e41e": {
+          "fresh": 58,
+          "stale": 2
+        },
+        "5002a22d-63d6-4f7a-9106-193b14499898": {
+          "fresh": 58,
+          "stale": 2
+        },
+        "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": {
+          "fresh": 58,
+          "stale": 2
+        }
+      },
+      "bad_presentation_samples": [
+        {
+          "started_s": 14.0326,
+          "finished_s": 14.2266,
+          "http": 200,
+          "error_type": null,
+          "sequence": 1815,
+          "source_epoch": "9f146caf-76f8-491a-af24-7f64b1bd4c45",
+          "mqtt_connected": true,
+          "drive_source": "fresh",
+          "vms": [
+            {
+              "vm_id": "de113a23-d80e-4333-94b8-788babe0e41e",
+              "state": "running",
+              "source": {
+                "received_at": "2026-11-08T09:08:30.809+00:00",
+                "observed_at": null,
+                "age_ms": 3311,
+                "status": "stale"
+              },
+              "current_app_when_vm_not_fresh": false
+            },
+            {
+              "vm_id": "5002a22d-63d6-4f7a-9106-193b14499898",
+              "state": "running",
+              "source": {
+                "received_at": "2026-11-08T09:08:30.809+00:00",
+                "observed_at": null,
+                "age_ms": 3311,
+                "status": "stale"
+              },
+              "current_app_when_vm_not_fresh": false
+            },
+            {
+              "vm_id": "17cad3c4-b3cd-4b29-8740-e679d0eaebd4",
+              "state": "running",
+              "source": {
+                "received_at": "2026-11-08T09:08:30.809+00:00",
+                "observed_at": null,
+                "age_ms": 3311,
+                "status": "stale"
+              },
+              "current_app_when_vm_not_fresh": false
+            }
+          ]
+        },
+        {
+          "started_s": 15.0345,
+          "finished_s": 15.3502,
+          "http": 200,
+          "error_type": null,
+          "sequence": 1816,
+          "source_epoch": "9f146caf-76f8-491a-af24-7f64b1bd4c45",
+          "mqtt_connected": true,
+          "drive_source": "fresh",
+          "vms": [
+            {
+              "vm_id": "de113a23-d80e-4333-94b8-788babe0e41e",
+              "state": "running",
+              "source": {
+                "received_at": "2026-11-08T09:08:30.809+00:00",
+                "observed_at": null,
+                "age_ms": 4324,
+                "status": "stale"
+              },
+              "current_app_when_vm_not_fresh": false
+            },
+            {
+              "vm_id": "5002a22d-63d6-4f7a-9106-193b14499898",
+              "state": "running",
+              "source": {
+                "received_at": "2026-11-08T09:08:30.809+00:00",
+                "observed_at": null,
+                "age_ms": 4324,
+                "status": "stale"
+              },
+              "current_app_when_vm_not_fresh": false
+            },
+            {
+              "vm_id": "17cad3c4-b3cd-4b29-8740-e679d0eaebd4",
+              "state": "running",
+              "source": {
+                "received_at": "2026-11-08T09:08:30.809+00:00",
+                "observed_at": null,
+                "age_ms": 4324,
+                "status": "stale"
+              },
+              "current_app_when_vm_not_fresh": false
+            }
+          ]
+        }
+      ],
+      "mqtt_connected_samples": 60,
+      "drive_sources": {
+        "fresh": 60
+      },
+      "expired_vm_with_current_app": 0,
+      "management_requests": 0,
+      "management_http": {},
+      "management_latency_ms": null,
+      "management_results": [],
+      "nonfresh_file_samples_during_request_or_next_2s": 0,
+      "nonfresh_file_samples_outside_request_window": 7,
+      "run_free_bytes": 527794176,
+      "formal_acceptance_trial": false
+    }
+  },
+  "code_provenance": {
+    "hashes": {
+      "service.py": "562031cd463e84bbf511d65e7ebb7025db577a029d94bb6b98de9bf875c8d579",
+      "api/vms.py": "9212d4534bdf1fd67af65bc4935b0e4455842ac00073c5fe5edbef2a30a0c621",
+      "observations.py": "8fb108826f4bf79f6ab8c19fa53ce4a647e3bcff17f751f631ea39edd3767336"
+    },
+    "observations_path_is_existing_shared_file": true,
+    "diagnostic_flag_enabled": false,
+    "api_pid": "1470872"
+  },
+  "preflight": {
+    "units": [
+      {
+        "Id": "xenova-dom0-manager.service",
+        "ActiveState": "active",
+        "SubState": "running",
+        "MainPID": "1470872",
+        "NRestarts": "1"
+      },
+      {
+        "Id": "xenova-display-feed.service",
+        "ActiveState": "active",
+        "SubState": "running",
+        "MainPID": "591163",
+        "NRestarts": "0"
+      },
+      {
+        "Id": "xenova-gateway.service",
+        "ActiveState": "active",
+        "SubState": "running",
+        "MainPID": "858989",
+        "NRestarts": "0"
+      },
+      {
+        "Id": "xenova-recovery-worker.service",
+        "ActiveState": "active",
+        "SubState": "running",
+        "MainPID": "1278905",
+        "NRestarts": "0"
+      },
+      {
+        "Id": "mosquitto.service",
+        "ActiveState": "active",
+        "SubState": "running",
+        "MainPID": "833",
+        "NRestarts": "0"
+      },
+      {
+        "Id": "tailscaled.service",
+        "ActiveState": "active",
+        "SubState": "running",
+        "MainPID": "599",
+        "NRestarts": "0"
+      }
+    ],
+    "hashes": {
+      "xenova_execution.py": "5ac73bbc1c284db17c1a57249fc62f985db62fe18e9aa13a346f611eb5a03ea5",
+      "xenova_management.py": "4ed1255bb9b9c909a62bd92e8d331cb38d50b5b4d003c03c19185890bfcf1319",
+      "xenova_telemetry_support.py": "a509cee8f6d7973184e11395aa1b342be7a9891fa79a133e7cb4df4ae91f525e",
+      "xenova_drive_binding.py": "a059c3267c5f92dde34739d0202f4573ca7353a66c1ffc12eca5876973304e0e"
+    },
+    "shared": {
+      "status": "ok",
+      "age_ms": 1325,
+      "domain_count": 3,
+      "has_diagnostics": false
+    },
+    "run_free_bytes": 527790080,
+    "archive_mode": "0o600",
+    "old_source_absent": true,
+    "archive_worker_still_present": false,
+    "ssh_policy_sha256": "7123dfbeb5efb88f25cb7efcbc4ff89ba121761b7702cce3626ae2e7cf66cb65"
+  },
+  "final": {
+    "units": [
+      {
+        "Id": "xenova-dom0-manager.service",
+        "ActiveState": "active",
+        "SubState": "running",
+        "MainPID": "1470872",
+        "NRestarts": "1"
+      },
+      {
+        "Id": "xenova-display-feed.service",
+        "ActiveState": "active",
+        "SubState": "running",
+        "MainPID": "591163",
+        "NRestarts": "0"
+      },
+      {
+        "Id": "xenova-gateway.service",
+        "ActiveState": "active",
+        "SubState": "running",
+        "MainPID": "858989",
+        "NRestarts": "0"
+      },
+      {
+        "Id": "xenova-recovery-worker.service",
+        "ActiveState": "active",
+        "SubState": "running",
+        "MainPID": "1278905",
+        "NRestarts": "0"
+      },
+      {
+        "Id": "mosquitto.service",
+        "ActiveState": "active",
+        "SubState": "running",
+        "MainPID": "833",
+        "NRestarts": "0"
+      },
+      {
+        "Id": "tailscaled.service",
+        "ActiveState": "active",
+        "SubState": "running",
+        "MainPID": "599",
+        "NRestarts": "0"
+      }
+    ],
+    "hashes": {
+      "xenova_execution.py": "5ac73bbc1c284db17c1a57249fc62f985db62fe18e9aa13a346f611eb5a03ea5",
+      "xenova_management.py": "4ed1255bb9b9c909a62bd92e8d331cb38d50b5b4d003c03c19185890bfcf1319",
+      "xenova_telemetry_support.py": "a509cee8f6d7973184e11395aa1b342be7a9891fa79a133e7cb4df4ae91f525e",
+      "xenova_drive_binding.py": "a059c3267c5f92dde34739d0202f4573ca7353a66c1ffc12eca5876973304e0e"
+    },
+    "shared": {
+      "status": "ok",
+      "age_ms": 2674,
+      "domain_count": 3,
+      "has_diagnostics": false
+    },
+    "run_free_bytes": 527794176,
+    "archive_mode": "0o600",
+    "old_source_absent": true,
+    "archive_worker_still_present": false,
+    "ssh_policy_sha256": "7123dfbeb5efb88f25cb7efcbc4ff89ba121761b7702cce3626ae2e7cf66cb65"
+  },
+  "preservation_checks": {
+    "all_service_pids_unchanged": true,
+    "all_service_restart_counters_unchanged": true,
+    "all_units_active": true,
+    "platform_module_hashes_unchanged": true,
+    "ssh_policy_unchanged": true,
+    "diagnostics_still_disabled": true,
+    "local_service_route_match_board": true
+  },
+  "conclusions": {
+    "management_list_failure_reproduced": false,
+    "presentation_nonfresh_reproduced_after_management_stopped": true,
+    "management_query_proven_cause": false,
+    "continuous_freshness_issue_resolved": false,
+    "api_list_reuses_shared_observations_in_matching_source_and_enabled_config": true,
+    "source_delay_stage_not_identified": "query vs publication vs scheduling needs bounded follow-up diagnostics",
+    "formal_acceptance_pass": false,
+    "jira_status_changed": false,
+    "services_restarted": false,
+    "board_code_or_settings_changed": false,
+    "ssh_closed": true
+  },
+  "artifacts": "outputs/display-374-management-recheck-20261108/"
+}

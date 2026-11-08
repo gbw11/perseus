@@ -1,0 +1,567 @@
+{
+  "issue": "S15P31E110-374",
+  "date": "2026-11-08",
+  "platform_base": "8e5a4944",
+  "candidate_sha256": "391f4bfaa82d4898f8d6675dd122467bfe1e939801d8e7259ae26c241b59a223",
+  "candidate_previously_tested": 35,
+  "scope": "120s bounded optional diagnostic, one existing file reader, no display consumer or management load. Restore module/config in finally and enqueue API restart. Not browser or physical display acceptance.",
+  "timing": {
+    "duration_s": 120.00058194398298,
+    "file_checks": 475,
+    "unique_frames": 101,
+    "frames_with_diagnostics": 101,
+    "unique_rounds": 102,
+    "errors": {},
+    "snapshot_samples": {
+      "fresh": 473,
+      "expired": 2
+    },
+    "query_duration_s": {
+      "count": 102,
+      "median": 1.0284076320094755,
+      "p95": 1.634370748011861,
+      "max": 2.4844839469878934
+    },
+    "publication_duration_s": {
+      "count": 101,
+      "median": 0.008983928011730313,
+      "p95": 0.03558175201760605,
+      "max": 0.11503643199102953
+    },
+    "query_end_to_publication_start_s": {
+      "count": 102,
+      "median": 3.0999493901617825e-05,
+      "p95": 0.00018927600467577577,
+      "max": 0.004827914002817124
+    },
+    "outcomes": {
+      "ok": 102
+    },
+    "error_kinds": {},
+    "publication_failures": 0,
+    "queries_over_3s": 0,
+    "max_sampled_snapshot_age_ms": 3299,
+    "slowest_rounds": [
+      {
+        "query_started_mono": 156426.33767245,
+        "query_finished_mono": 156428.822156397,
+        "publish_started_mono": 156428.82218273,
+        "outcome": "ok",
+        "error_kind": null,
+        "platform_code": null,
+        "errno": null,
+        "reason": null,
+        "publish_finished_mono": 156428.825886693,
+        "published": true,
+        "publication_error_kind": null,
+        "publication_errno": null
+      },
+      {
+        "query_started_mono": 156406.878573752,
+        "query_finished_mono": 156408.709101142,
+        "publish_started_mono": 156408.709137808,
+        "outcome": "ok",
+        "error_kind": null,
+        "platform_code": null,
+        "errno": null,
+        "reason": null,
+        "publish_finished_mono": 156408.725553402,
+        "published": true,
+        "publication_error_kind": null,
+        "publication_errno": null
+      },
+      {
+        "query_started_mono": 156394.312774967,
+        "query_finished_mono": 156396.063181947,
+        "publish_started_mono": 156396.063208984,
+        "outcome": "ok",
+        "error_kind": null,
+        "platform_code": null,
+        "errno": null,
+        "reason": null,
+        "publish_finished_mono": 156396.071438679,
+        "published": true,
+        "publication_error_kind": null,
+        "publication_errno": null
+      },
+      {
+        "query_started_mono": 156424.513259314,
+        "query_finished_mono": 156426.242107096,
+        "publish_started_mono": 156426.242134022,
+        "outcome": "ok",
+        "error_kind": null,
+        "platform_code": null,
+        "errno": null,
+        "reason": null,
+        "publish_finished_mono": 156426.281869252,
+        "published": true,
+        "publication_error_kind": null,
+        "publication_errno": null
+      },
+      {
+        "query_started_mono": 156360.663476257,
+        "query_finished_mono": 156362.302214199,
+        "publish_started_mono": 156362.302234791,
+        "outcome": "ok",
+        "error_kind": null,
+        "platform_code": null,
+        "errno": null,
+        "reason": null,
+        "publish_finished_mono": 156362.305517091,
+        "published": true,
+        "publication_error_kind": null,
+        "publication_errno": null
+      },
+      {
+        "query_started_mono": 156345.696681412,
+        "query_finished_mono": 156347.33105216,
+        "publish_started_mono": 156347.33108103,
+        "outcome": "ok",
+        "error_kind": null,
+        "platform_code": null,
+        "errno": null,
+        "reason": null,
+        "publish_finished_mono": 156347.366662782,
+        "published": true,
+        "publication_error_kind": null,
+        "publication_errno": null
+      }
+    ],
+    "new_vm_queries": 0,
+    "acceptance_trial": false
+  },
+  "failures": {
+    "distinct_rounds": 102,
+    "query_error_count": 0,
+    "platform_codes": {},
+    "validation_reasons": {},
+    "query_errnos": {},
+    "publication_error_count": 0,
+    "publication_kinds": {},
+    "publication_errnos": {},
+    "failed_queries": [],
+    "failed_publications": [],
+    "new_vm_queries": 0
+  },
+  "pipeline": {
+    "loop_wait_s": {
+      "count": 101,
+      "median": 0.05935577300260775,
+      "p95": 0.37669879899476655,
+      "max": 0.4681337619840633
+    },
+    "largest_loop_waits": [
+      {
+        "from_query": 156317.395985704,
+        "to_query": 156318.398327429,
+        "publish_end_to_next_query_s": 0.4681337619840633
+      },
+      {
+        "from_query": 156436.88663619,
+        "to_query": 156437.889369225,
+        "publish_end_to_next_query_s": 0.4657971160195302
+      },
+      {
+        "from_query": 156321.471073537,
+        "to_query": 156322.472180074,
+        "publish_end_to_next_query_s": 0.41224792099092156
+      },
+      {
+        "from_query": 156322.472180074,
+        "to_query": 156323.475726717,
+        "publish_end_to_next_query_s": 0.3934662039973773
+      },
+      {
+        "from_query": 156435.886386408,
+        "to_query": 156436.88663619,
+        "publish_end_to_next_query_s": 0.3860642689978704
+      }
+    ],
+    "observed_file_expiry_risks_between_visible_publications": [
+      {
+        "previous_observed_mono": 156425.511,
+        "previous_publish_finished": 156426.281869252,
+        "next_query_started": 156426.33767245,
+        "next_query_duration_s": 2.4844839469878934,
+        "next_publication_duration_s": 0.0037039630115032196,
+        "previous_file_age_at_next_publish_s": 3.314886692998698,
+        "minimum_old_file_expiry_risk_s": 0.314886692998698,
+        "coverage_note": "published rounds visible in sampled current/previous frames; unseen rounds possible",
+        "consecutive_round_link_verified": true,
+        "previous_observation_age_when_published_s": 0.7708692520100158,
+        "wait_before_next_query_s": 0.05580319798900746
+      }
+    ],
+    "single_query_durations_s": {
+      "count": 102,
+      "median": 1.0284076320094755,
+      "p95": 1.634370748011861,
+      "max": 2.4844839469878934
+    },
+    "notes": [
+      "Diagnostic consumer, not browser acceptance",
+      "Snapshot observation timestamps are never renewed to hide age",
+      "Risk rows need coverage caveat; not a complete producer trace"
+    ]
+  },
+  "isolated_manager_trace": {
+    "scope": "one isolated existing Manager list diagnostic; not a freshness acceptance trial",
+    "query_count": 1,
+    "execute": false,
+    "same_live_api_process": false,
+    "api_pid": "1504530",
+    "read_configuration": {
+      "XENOVA_PLATFORM_READ_FORK": "1",
+      "XENOVA_IDENTITY_BATCH_READS": "1"
+    },
+    "read_timeout_s": 5.0,
+    "elapsed_s": 1.2290218620037194,
+    "ok": true,
+    "error_code": null,
+    "error_cause_type": null,
+    "result_vm_count": 3,
+    "trace_elapsed_s": 1.213968826981727,
+    "span_summary": {
+      "platform.registry": {
+        "calls": 2,
+        "errors": 0,
+        "inclusive_seconds": 0.15173276799032465,
+        "exclusive_seconds": 0.15173276799032465
+      },
+      "manager.registry-state": {
+        "calls": 18,
+        "errors": 0,
+        "inclusive_seconds": 0.0015107630169950426,
+        "exclusive_seconds": 0.0015107630169950426
+      },
+      "execution.publish_observation": {
+        "calls": 6,
+        "errors": 0,
+        "inclusive_seconds": 0.256309877964668,
+        "exclusive_seconds": 0.256309877964668
+      },
+      "external.command": {
+        "calls": 4,
+        "errors": 0,
+        "inclusive_seconds": 0.327706627023872,
+        "exclusive_seconds": 0.327706627023872
+      },
+      "storage.file_write": {
+        "calls": 3,
+        "errors": 0,
+        "inclusive_seconds": 0.0016934089944697917,
+        "exclusive_seconds": 0.0016934089944697917
+      },
+      "storage.file_fsync": {
+        "calls": 3,
+        "errors": 0,
+        "inclusive_seconds": 0.00037301500560715795,
+        "exclusive_seconds": 0.00037301500560715795
+      },
+      "storage.replace": {
+        "calls": 3,
+        "errors": 0,
+        "inclusive_seconds": 0.009011853981064633,
+        "exclusive_seconds": 0.009011853981064633
+      },
+      "storage.directory_fsync": {
+        "calls": 3,
+        "errors": 0,
+        "inclusive_seconds": 0.0014064310234971344,
+        "exclusive_seconds": 0.0014064310234971344
+      },
+      "storage.atomic_write": {
+        "calls": 3,
+        "errors": 0,
+        "inclusive_seconds": 0.02411661099176854,
+        "exclusive_seconds": 0.011631901987129822
+      },
+      "execution.observe_many": {
+        "calls": 1,
+        "errors": 0,
+        "inclusive_seconds": 0.9648862500034738,
+        "exclusive_seconds": 0.31046702101593837
+      },
+      "manager.view": {
+        "calls": 3,
+        "errors": 0,
+        "inclusive_seconds": 0.014726278983289376,
+        "exclusive_seconds": 0.014726278983289376
+      },
+      "read.round": {
+        "calls": 1,
+        "errors": 0,
+        "inclusive_seconds": 1.1973612880101427,
+        "exclusive_seconds": 0.1107913410232868
+      },
+      "manager.call": {
+        "calls": 1,
+        "errors": 0,
+        "inclusive_seconds": 1.2134499429957941,
+        "exclusive_seconds": 0.016088654985651374
+      }
+    },
+    "command_summary": {
+      "xl.list": {
+        "calls": 2,
+        "errors": 0,
+        "inclusive_seconds": 0.24057125402032398
+      }
+    },
+    "dropped_entries": 0,
+    "dropped_summary_spans": 0,
+    "raw_arguments_exported": false,
+    "result_observation_age_ms": {
+      "min": 693,
+      "max": 693
+    },
+    "source_hashes": {
+      "xenova_execution.py": "5ac73bbc1c284db17c1a57249fc62f985db62fe18e9aa13a346f611eb5a03ea5",
+      "xenova_management.py": "4ed1255bb9b9c909a62bd92e8d331cb38d50b5b4d003c03c19185890bfcf1319",
+      "xenova_drive_binding.py": "a059c3267c5f92dde34739d0202f4573ca7353a66c1ffc12eca5876973304e0e"
+    }
+  },
+  "staging": {
+    "staged": true,
+    "live_unchanged": true,
+    "manifest": {
+      "base_commit": "8e5a4944",
+      "target": "/usr/lib/python3.14/site-packages/dom0_manager/observations.py",
+      "before_sha256": "8fb108826f4bf79f6ab8c19fa53ce4a647e3bcff17f751f631ea39edd3767336",
+      "candidate_sha256": "391f4bfaa82d4898f8d6675dd122467bfe1e939801d8e7259ae26c241b59a223",
+      "phase": "staged",
+      "uid": 0,
+      "gid": 0,
+      "mode": 420,
+      "dropin": "/run/systemd/system/xenova-dom0-manager.service.d/374-postspace-timing.conf",
+      "dropin_parent_existed": false,
+      "original_api_pid": "1470872",
+      "original_diagnostic_flag_absent": true
+    }
+  },
+  "activation": {
+    "api_restart_exit": 0,
+    "api": {
+      "Id": "xenova-dom0-manager.service",
+      "ActiveState": "active",
+      "SubState": "running",
+      "MainPID": "1502154"
+    },
+    "diagnostic_flag": "1"
+  },
+  "restore": {
+    "source_hash_restored": true,
+    "override_removed": true,
+    "daemon_reload_exit": 0,
+    "api_restarted": false
+  },
+  "restart_restore_enqueued": {
+    "api_restart_exit": 0,
+    "api": {
+      "Id": "xenova-dom0-manager.service",
+      "ActiveState": "deactivating",
+      "SubState": "stop-sigterm",
+      "MainPID": "1502154"
+    },
+    "diagnostic_flag": "1"
+  },
+  "restoration_check": {
+    "source_restored": true,
+    "override_removed": true,
+    "diagnostic_flag_absent": true,
+    "diagnostics_in_current_frame": false,
+    "api_pid": "1504530",
+    "restored_source_timestamp": 1794129935,
+    "restored_source_bytes": 9474,
+    "pycache": [
+      {
+        "name": "observations.cpython-314.pyc",
+        "source_timestamp": 1794129935,
+        "source_bytes": 9474
+      }
+    ],
+    "private_backup_retained": "/etc/xenova/display-374-postspace-timing-20261108"
+  },
+  "recovered_unit": {
+    "unit": {
+      "ActiveState": "active",
+      "SubState": "running",
+      "Type": "notify",
+      "NotifyAccess": "main",
+      "TimeoutStartUSec": "1min 30s",
+      "MainPID": "1504530",
+      "Result": "success",
+      "NRestarts": "0",
+      "ExecMainStatus": "0"
+    },
+    "journal_signals": [
+      {
+        "markers": [
+          "shutting_down"
+        ],
+        "utc_us": "1794129963777113",
+        "pid": "1502154"
+      },
+      {
+        "markers": [
+          "starting"
+        ],
+        "utc_us": "1794129964529415",
+        "pid": "1"
+      },
+      {
+        "markers": [
+          "started",
+          "process_started"
+        ],
+        "utc_us": "1794129995857744",
+        "pid": "1504530"
+      },
+      {
+        "markers": [
+          "startup_complete"
+        ],
+        "utc_us": "1794129995897752",
+        "pid": "1504530"
+      },
+      {
+        "markers": [
+          "listening"
+        ],
+        "utc_us": "1794129995902417",
+        "pid": "1504530"
+      },
+      {
+        "markers": [
+          "started"
+        ],
+        "utc_us": "1794129995917104",
+        "pid": "1"
+      }
+    ],
+    "raw_messages_exported": false
+  },
+  "healthy_api_after_restore": {
+    "api": {
+      "ActiveState": "active",
+      "SubState": "running",
+      "MainPID": "1504530"
+    },
+    "responses": [
+      {
+        "path": "/healthz",
+        "status": 200
+      },
+      {
+        "path": "/api/v1/vms",
+        "status": 200,
+        "vms": [
+          {
+            "vm_id": "17cad3c4-b3cd-4b29-8740-e679d0eaebd4",
+            "state": "running"
+          },
+          {
+            "vm_id": "de113a23-d80e-4333-94b8-788babe0e41e",
+            "state": "running"
+          },
+          {
+            "vm_id": "5002a22d-63d6-4f7a-9106-193b14499898",
+            "state": "running"
+          }
+        ]
+      }
+    ],
+    "shared": {
+      "epoch": "a6f2cec6-519d-42a1-a957-a4709e911ac1",
+      "status": "ok",
+      "age_ms": 2118
+    }
+  },
+  "final_state": {
+    "units": [
+      {
+        "Id": "xenova-dom0-manager.service",
+        "ActiveState": "active",
+        "SubState": "running",
+        "MainPID": "1504530",
+        "NRestarts": "0"
+      },
+      {
+        "Id": "xenova-display-feed.service",
+        "ActiveState": "active",
+        "SubState": "running",
+        "MainPID": "591163",
+        "NRestarts": "0"
+      },
+      {
+        "Id": "xenova-gateway.service",
+        "ActiveState": "active",
+        "SubState": "running",
+        "MainPID": "858989",
+        "NRestarts": "0"
+      },
+      {
+        "Id": "xenova-recovery-worker.service",
+        "ActiveState": "active",
+        "SubState": "running",
+        "MainPID": "1278905",
+        "NRestarts": "0"
+      },
+      {
+        "Id": "mosquitto.service",
+        "ActiveState": "active",
+        "SubState": "running",
+        "MainPID": "833",
+        "NRestarts": "0"
+      },
+      {
+        "Id": "tailscaled.service",
+        "ActiveState": "active",
+        "SubState": "running",
+        "MainPID": "599",
+        "NRestarts": "0"
+      }
+    ],
+    "hashes": {
+      "xenova_execution.py": "5ac73bbc1c284db17c1a57249fc62f985db62fe18e9aa13a346f611eb5a03ea5",
+      "xenova_management.py": "4ed1255bb9b9c909a62bd92e8d331cb38d50b5b4d003c03c19185890bfcf1319",
+      "xenova_telemetry_support.py": "a509cee8f6d7973184e11395aa1b342be7a9891fa79a133e7cb4df4ae91f525e",
+      "xenova_drive_binding.py": "a059c3267c5f92dde34739d0202f4573ca7353a66c1ffc12eca5876973304e0e"
+    },
+    "shared": {
+      "status": "ok",
+      "age_ms": 1358,
+      "domain_count": 3,
+      "has_diagnostics": false
+    },
+    "run_free_bytes": 527781888,
+    "archive_mode": "0o600",
+    "old_source_absent": true,
+    "archive_worker_still_present": false,
+    "ssh_policy_sha256": "7123dfbeb5efb88f25cb7efcbc4ff89ba121761b7702cce3626ae2e7cf66cb65"
+  },
+  "preservation": {
+    "non_api_pids_unchanged": true,
+    "non_api_restart_counters_unchanged": true,
+    "all_units_active": true,
+    "platform_hashes_unchanged": true,
+    "ssh_policy_unchanged": true,
+    "source_restored": true,
+    "override_removed": true,
+    "diagnostics_disabled": true
+  },
+  "conclusions": {
+    "publication_failure_reproduced": false,
+    "single_query_over_3_seconds": false,
+    "old_observation_expired_while_next_query_pending": true,
+    "specific_consecutive_round_link_confirmed": true,
+    "continuous_freshness_resolved": false,
+    "previous_4734ms_episode_not_fully_explained_by_this_shorter_trial": true,
+    "trace_label_publish_observation_includes_inputs_and_publish_not_six_writes": true,
+    "team_modules_modified": false,
+    "ttl_or_cpu_changed": false,
+    "ssh_closed": true,
+    "jira_status_changed": false
+  },
+  "artifacts": "outputs/display-374-postspace-timing-20261108/"
+}
