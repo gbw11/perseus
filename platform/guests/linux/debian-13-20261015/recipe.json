@@ -25,6 +25,7 @@
     ],
     "web_assets": "external-vm-screens-dist",
     "config": "/etc/xenova/guest-display-domu.json",
-    "service": "xenova-guest-display-app.service"
+    "service": "xenova-guest-display-app.service",
+    "target": "xenova-guest-display.target"
   }
 }

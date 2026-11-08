@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 import subprocess
 
-from prepare_rootfs import inside
+from prepare_rootfs import enable, inside
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -13,11 +13,13 @@ SOURCE = ROOT / "platform/services/display/router/xenova_display"
 DEPLOY = ROOT / "platform/services/display/router/deploy/guest-display/domu"
 CONFIG_SOURCE = DEPLOY / "guest-display-domu.json.example"
 SERVICE_SOURCE = DEPLOY / "xenova-guest-display-app.service"
+TARGET_SOURCE = DEPLOY / "xenova-guest-display.target"
 MODULES = ("__init__.py", "capture_limits.py", "mjpeg.py", "guest_sender.py", "guest_app.py")
 POLICY = {"account": "xenova-display", "python_modules": list(MODULES),
           "web_assets": "external-vm-screens-dist",
           "config": "/etc/xenova/guest-display-domu.json",
-          "service": "xenova-guest-display-app.service"}
+          "service": "xenova-guest-display-app.service",
+          "target": "xenova-guest-display.target"}
 ACCOUNT = "xenova-display"
 HOME = "/nonexistent"
 SHELL = "/usr/sbin/nologin"
@@ -30,7 +32,7 @@ def validate_policy(policy):
 
 def source_files():
     """VM3에 복사하는 Plan A Python 입력을 source lock에 포함한다."""
-    files = [SOURCE / name for name in MODULES] + [CONFIG_SOURCE, SERVICE_SOURCE]
+    files = [SOURCE / name for name in MODULES] + [CONFIG_SOURCE, SERVICE_SOURCE, TARGET_SOURCE]
     if any(path.is_symlink() or not path.is_file() or path.resolve() != path for path in files):
         raise ValueError("display guest Python input must be a canonical regular file")
     return files
@@ -74,6 +76,25 @@ def install_service(root):
     target.write_bytes(raw)
     target.chmod(0o644)
     return {"path": "/usr/lib/systemd/system/xenova-guest-display-app.service",
+            "sha256": hashlib.sha256(raw).hexdigest(), "mode": "0644"}
+
+
+def install_target(root, *, enable_unit=enable):
+    """Plan A 앱 서비스만 묶은 target을 설치하고 multi-user 부팅에 enable한다."""
+    raw = TARGET_SOURCE.read_bytes()
+    text = raw.decode("utf-8").splitlines()
+    if ("Wants=xenova-guest-display-app.service" not in text
+            or "WantedBy=multi-user.target" not in text
+            or any("session" in line or "sender" in line for line in text if not line.lstrip().startswith("#"))):
+        raise ValueError("display guest target differs from the approved Plan A contract")
+    target = inside(root, "usr/lib/systemd/system/xenova-guest-display.target", follow_final=False)
+    if target.is_symlink() or (target.exists() and not target.is_file()):
+        raise ValueError("display guest target unit is linked or non-regular")
+    target.write_bytes(raw)
+    target.chmod(0o644)
+    enable_unit(root, "xenova-guest-display.target")
+    return {"path": "/usr/lib/systemd/system/xenova-guest-display.target",
+            "enabled_by": "/etc/systemd/system/multi-user.target.wants/xenova-guest-display.target",
             "sha256": hashlib.sha256(raw).hexdigest(), "mode": "0644"}
 
 
@@ -152,7 +173,8 @@ def verify(root):
             "password_locked": True}
 
 
-def prepare(root, policy, *, web_assets=None, web_revision=None, command=subprocess.run):
+def prepare(root, policy, *, web_assets=None, web_revision=None, command=subprocess.run,
+            enable_unit=enable):
     """새 템플릿에 계정을 만들고 고정한 Plan A Python 모듈을 설치한다."""
     validate_policy(policy)
     root = Path(root)
@@ -184,5 +206,7 @@ def prepare(root, policy, *, web_assets=None, web_revision=None, command=subproc
     web = install_web_assets(root, web_assets, web_revision)
     config = install_config(root)
     service = install_service(root)
+    target = install_target(root, enable_unit=enable_unit)
     return {"account": account, "python_root": "/opt/xenova/display-guest",
-            "python_modules": installed, "web": web, "config": config, "service": service}
+            "python_modules": installed, "web": web, "config": config, "service": service,
+            "target": target}

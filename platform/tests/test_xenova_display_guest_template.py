@@ -29,6 +29,13 @@ class DisplayGuestAccountTest(unittest.TestCase):
         (self.web / "assets").mkdir(parents=True)
         (self.web / "index.html").write_text('<div id="root"></div>')
         (self.web / "assets/index-test.js").write_text('const route="/display/mobile";')
+        self.enabled = []
+
+    def enable_unit(self, root, unit):
+        self.assertEqual(Path(root), self.root)
+        self.assertEqual(unit, "xenova-guest-display.target")
+        self.assertTrue((self.root / "usr/lib/systemd/system" / unit).is_file())
+        self.enabled.append(unit)
 
     def useradd(self, argv, **kwargs):
         self.assertEqual(argv[:3], ["chroot", str(self.root), "/usr/sbin/useradd"])
@@ -45,7 +52,7 @@ class DisplayGuestAccountTest(unittest.TestCase):
     def test_prepare_creates_locked_system_account_without_home(self):
         result = display_guest.prepare(self.root, display_guest.POLICY,
                                        web_assets=self.web.resolve(), web_revision="abcdef1",
-                                       command=self.useradd)
+                                       command=self.useradd, enable_unit=self.enable_unit)
         self.assertEqual(result["account"], {"account": "xenova-display", "uid": 998, "gid": 998,
                                              "home": "/nonexistent", "shell": "/usr/sbin/nologin",
                                              "password_locked": True})
@@ -78,6 +85,11 @@ class DisplayGuestAccountTest(unittest.TestCase):
         self.assertIn("Restart=on-failure", directives)
         self.assertEqual(result["service"]["path"],
                          "/usr/lib/systemd/system/xenova-guest-display-app.service")
+        target = self.root / "usr/lib/systemd/system/xenova-guest-display.target"
+        self.assertIn("Wants=xenova-guest-display-app.service", target.read_text().splitlines())
+        self.assertEqual(self.enabled, ["xenova-guest-display.target"])
+        self.assertEqual(result["target"]["enabled_by"],
+                         "/etc/systemd/system/multi-user.target.wants/xenova-guest-display.target")
         self.assertFalse((self.root / "nonexistent").exists())
 
     def test_existing_account_or_instance_is_rejected(self):
@@ -108,7 +120,8 @@ class DisplayGuestAccountTest(unittest.TestCase):
                                   "python_modules": list(display_guest.MODULES),
                                   "web_assets": "external-vm-screens-dist",
                                   "config": "/etc/xenova/guest-display-domu.json",
-                                  "service": "xenova-guest-display-app.service"}}
+                                  "service": "xenova-guest-display-app.service",
+                                  "target": "xenova-guest-display.target"}}
         path = source / "recipe.json"
         path.write_text(json.dumps(meta))
         info = recipe.source_info(path.resolve(), meta["source_id"])
@@ -121,6 +134,8 @@ class DisplayGuestAccountTest(unittest.TestCase):
         self.assertIn("platform/services/display/router/deploy/guest-display/domu/guest-display-domu.json.example",
                       locked)
         self.assertIn("platform/services/display/router/deploy/guest-display/domu/xenova-guest-display-app.service",
+                      locked)
+        self.assertIn("platform/services/display/router/deploy/guest-display/domu/xenova-guest-display.target",
                       locked)
         meta["guest_display"]["account"] = "root"
         path.write_text(json.dumps(meta))
