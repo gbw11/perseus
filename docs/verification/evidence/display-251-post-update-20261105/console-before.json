@@ -1,0 +1,51 @@
+{
+  "unit": {
+    "FragmentPath": "/usr/lib/systemd/system/xenova-dom0-manager.service",
+    "DropInPaths": "/usr/lib/systemd/system/xenova-dom0-manager.service.d/30-runtime-logs.conf",
+    "MainPID": "1520"
+  },
+  "settings": {
+    "XENOVA_CONSOLE_ENABLED": "",
+    "XENOVA_CONSOLE_LOCK_DIR": "",
+    "PYTHONPATH": ""
+  },
+  "console_sources": [
+    {
+      "path": "/usr/lib/python3.14/site-packages/dom0_manager/api/console.py",
+      "sha256": "f154ebd80b993131b5d0575c7bde595838b50fc318b29c20f59817719e945fb2",
+      "busy_recheck": true
+    },
+    {
+      "path": "/usr/lib/python3.14/site-packages/dom0_manager/api/console.py",
+      "sha256": "f154ebd80b993131b5d0575c7bde595838b50fc318b29c20f59817719e945fb2",
+      "busy_recheck": true
+    }
+  ],
+  "unit_configuration": [
+    "EnvironmentFile=-/etc/xenova/dom0-manager-token.env",
+    "EnvironmentFile=/etc/xenova/dom0-manager.env",
+    "EnvironmentFile=-/etc/xenova/spring-registration.env",
+    "ExecStart=/usr/bin/python3 -m dom0_manager"
+  ],
+  "proc_exe": "/usr/bin/python3.14",
+  "console_processes": [],
+  "console_lock_files": [],
+  "lock_holders": [],
+  "guest_addresses": [
+    {
+      "vm_id": null,
+      "name": "zephyr-drive-a",
+      "ipv4": "192.168.77.2"
+    },
+    {
+      "vm_id": null,
+      "name": "debian-dev",
+      "ipv4": "192.168.77.20"
+    },
+    {
+      "vm_id": null,
+      "name": "zephyr-drive-b",
+      "ipv4": "192.168.77.3"
+    }
+  ]
+}

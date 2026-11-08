@@ -1,0 +1,44 @@
+{
+  "date": "2026-11-05",
+  "base_platform": "fb192eb",
+  "branch": "feat/platform/S15P31E110-351-display-mode-switch",
+  "environment": "Local WSL; native services replaced by a bounded fake; installer and systemd validation use an isolated temporary rootfs",
+  "final_tests": {
+    "passed": 96,
+    "failed": 0,
+    "skipped": 0,
+    "warnings": 1,
+    "seconds": 27.41
+  },
+  "warning": "Existing Starlette/httpx TestClient deprecation",
+  "prior_run": {
+    "passed": 95,
+    "failed": 1,
+    "failure": "Existing mobile-access signal callback subprocess exceeded its unchanged 4-second timeout"
+  },
+  "isolated_retry": {
+    "passed": 1,
+    "call_seconds": 3.08,
+    "timeout_changed": false
+  },
+  "board_accessed": false,
+  "server_accessed": false,
+  "physical_phone_verified": false,
+  "physical_hdmi_verified": false,
+  "bitbake_build_run": false,
+  "image_deployed": false,
+  "firmware_changed": false,
+  "service_actions_allowed": [
+    "start/stop xenova-display-hdmi.service",
+    "start/stop xenova-display-mobile.service"
+  ],
+  "boot_default": "hdmi",
+  "selection_storage": "/run/xenova-display-mode/mobile",
+  "tests": [
+    "test_display_mode.py",
+    "test_mobile_deployment_bundle.py",
+    "test_mobile_runtime.py",
+    "test_mobile_access_deploy.py",
+    "test_native_session.py"
+  ]
+}

@@ -24,6 +24,9 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Properties;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 import org.eclipse.paho.client.mqttv3.MqttClient;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
@@ -200,6 +203,47 @@ class MqttAgentSubscriberIntegrationTest {
         assertThat(telemetryHeartbeats.findById(zephyr).orElseThrow().report().publisherState()).isEqualTo("running");
         assertThat(telemetryHeartbeats.findById(linux).orElseThrow().report().publisherState()).isEqualTo("degraded");
         assertThat(heartbeatRepository.findAll()).noneMatch(row -> zephyr.equals(row.getVmId()) || linux.equals(row.getVmId()));
+    }
+
+    @Test
+    void deletedVmRetainedInventoryIsClearedOnTheBroker() throws Exception {
+        String vm = "c1000000-0000-4000-8000-000000000003";
+        String topic = "xenova/v1/vms/" + vm + "/inventory";
+        try (MqttClient agent = new MqttClient("tcp://127.0.0.1:" + PORT, "fake-agent-inventory",
+                new MemoryPersistence())) {
+            agent.connect();
+            agent.publish(topic, "{\"type\":\"agent.inventory\"}".getBytes(StandardCharsets.UTF_8), 1, true);
+            agent.disconnect();
+        }
+        assertThat(retainedPayload(topic)).isNotNull();
+
+        // The subscriber connects asynchronously; a clear sent while disconnected waits for the reconnect.
+        Instant deadline = Instant.now().plusSeconds(10);
+        byte[] retained;
+        do {
+            subscriber.clearRetainedInventory(vm);
+            Thread.sleep(200);
+            retained = retainedPayload(topic);
+        } while (retained != null && Instant.now().isBefore(deadline));
+        assertThat(retained).isNull();
+    }
+
+    // The retained message a new subscriber gets for the topic, or null when there is none.
+    private static byte[] retainedPayload(String topic) throws Exception {
+        BlockingQueue<byte[]> received = new LinkedBlockingQueue<>();
+        try (MqttClient reader = new MqttClient("tcp://127.0.0.1:" + PORT,
+                "retained-reader-" + System.nanoTime(), new MemoryPersistence())) {
+            reader.connect();
+            // Only the retained message can reach a subscriber this new (Moquette does not set its retain flag).
+            reader.subscribe(topic, 1, (ignored, message) -> {
+                if (message.getPayload().length > 0) {
+                    received.add(message.getPayload());
+                }
+            });
+            byte[] payload = received.poll(500, TimeUnit.MILLISECONDS);
+            reader.disconnect();
+            return payload;
+        }
     }
 
     private static int freePort() {

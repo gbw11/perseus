@@ -1,0 +1,484 @@
+{
+  "issue": "S15P31E110-253",
+  "date": "2026-11-06",
+  "verdict": "partial_improvement_expiry_remains",
+  "cpu_configuration_changed": false,
+  "passive_two_browser_pages": {
+    "duration_s": 56.766,
+    "samples": 70,
+    "extra_board_requests": 0,
+    "errors": {},
+    "http": {
+      "200": 70
+    },
+    "xen_source_per_response": {
+      "fresh": 66,
+      "stale": 4
+    },
+    "current_app_count_per_response": {
+      "4": 61,
+      "0": 4,
+      "3": 4,
+      "1": 1
+    },
+    "expired_vm_with_current_app_samples": [],
+    "source_transitions": [
+      {
+        "sample": 0,
+        "status": "fresh"
+      },
+      {
+        "sample": 4,
+        "status": "stale"
+      },
+      {
+        "sample": 5,
+        "status": "fresh"
+      },
+      {
+        "sample": 8,
+        "status": "stale"
+      },
+      {
+        "sample": 9,
+        "status": "fresh"
+      },
+      {
+        "sample": 21,
+        "status": "stale"
+      },
+      {
+        "sample": 22,
+        "status": "fresh"
+      },
+      {
+        "sample": 67,
+        "status": "stale"
+      },
+      {
+        "sample": 68,
+        "status": "fresh"
+      }
+    ],
+    "roundtrip_ms": {
+      "min": 281,
+      "median": 594.0,
+      "p95_nearest_rank": 890,
+      "max": 1015
+    },
+    "mqtt_connected_count": 70,
+    "feed_epochs": [
+      "d07696d7-0941-4cc4-96f9-ca7973f5ac10"
+    ],
+    "drive_mode": {
+      "SAFE_STOP": 70
+    },
+    "drive_source": {
+      "fresh": 70
+    },
+    "active_vm": {
+      "None": 70
+    }
+  },
+  "comparison_20261105": {
+    "samples": [
+      {
+        "batch": false,
+        "elapsed_s": 2.4673,
+        "ok": true,
+        "error_code": null,
+        "commands": {
+          "xl.list": {
+            "calls": 2,
+            "errors": 0,
+            "inclusive_seconds": 0.4972909990010521
+          },
+          "xenova-domain-identity": {
+            "calls": 6,
+            "errors": 0,
+            "inclusive_seconds": 1.0847102260031534
+          }
+        },
+        "vm_ids": [
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4",
+          "de113a23-d80e-4333-94b8-788babe0e41e",
+          "5002a22d-63d6-4f7a-9106-193b14499898"
+        ],
+        "observation_ages_ms": [
+          921,
+          767,
+          501
+        ]
+      },
+      {
+        "batch": true,
+        "elapsed_s": 1.8929,
+        "ok": true,
+        "error_code": null,
+        "commands": {
+          "xl.list": {
+            "calls": 4,
+            "errors": 0,
+            "inclusive_seconds": 0.5002016969992837
+          }
+        },
+        "vm_ids": [
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4",
+          "de113a23-d80e-4333-94b8-788babe0e41e",
+          "5002a22d-63d6-4f7a-9106-193b14499898"
+        ],
+        "observation_ages_ms": [
+          575,
+          575,
+          575
+        ]
+      },
+      {
+        "batch": true,
+        "elapsed_s": 1.1789,
+        "ok": true,
+        "error_code": null,
+        "commands": {
+          "xl.list": {
+            "calls": 2,
+            "errors": 0,
+            "inclusive_seconds": 0.44248474599953624
+          }
+        },
+        "vm_ids": [
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4",
+          "de113a23-d80e-4333-94b8-788babe0e41e",
+          "5002a22d-63d6-4f7a-9106-193b14499898"
+        ],
+        "observation_ages_ms": [
+          426,
+          426,
+          426
+        ]
+      },
+      {
+        "batch": false,
+        "elapsed_s": 1.7983,
+        "ok": true,
+        "error_code": null,
+        "commands": {
+          "xl.list": {
+            "calls": 2,
+            "errors": 0,
+            "inclusive_seconds": 0.25349249500141013
+          },
+          "xenova-domain-identity": {
+            "calls": 6,
+            "errors": 0,
+            "inclusive_seconds": 0.6847683399992093
+          }
+        },
+        "vm_ids": [
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4",
+          "de113a23-d80e-4333-94b8-788babe0e41e",
+          "5002a22d-63d6-4f7a-9106-193b14499898"
+        ],
+        "observation_ages_ms": [
+          693,
+          605,
+          508
+        ]
+      },
+      {
+        "batch": false,
+        "elapsed_s": 1.6779,
+        "ok": true,
+        "error_code": null,
+        "commands": {
+          "xl.list": {
+            "calls": 2,
+            "errors": 0,
+            "inclusive_seconds": 0.3144628610025393
+          },
+          "xenova-domain-identity": {
+            "calls": 6,
+            "errors": 0,
+            "inclusive_seconds": 0.829410951002501
+          }
+        },
+        "vm_ids": [
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4",
+          "de113a23-d80e-4333-94b8-788babe0e41e",
+          "5002a22d-63d6-4f7a-9106-193b14499898"
+        ],
+        "observation_ages_ms": [
+          748,
+          625,
+          372
+        ]
+      },
+      {
+        "batch": true,
+        "elapsed_s": 1.3503,
+        "ok": true,
+        "error_code": null,
+        "commands": {
+          "xl.list": {
+            "calls": 2,
+            "errors": 0,
+            "inclusive_seconds": 0.31082561500079464
+          }
+        },
+        "vm_ids": [
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4",
+          "de113a23-d80e-4333-94b8-788babe0e41e",
+          "5002a22d-63d6-4f7a-9106-193b14499898"
+        ],
+        "observation_ages_ms": [
+          571,
+          571,
+          571
+        ]
+      },
+      {
+        "batch": true,
+        "elapsed_s": 0.8371,
+        "ok": true,
+        "error_code": null,
+        "commands": {
+          "xl.list": {
+            "calls": 2,
+            "errors": 0,
+            "inclusive_seconds": 0.21990617299888982
+          }
+        },
+        "vm_ids": [
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4",
+          "de113a23-d80e-4333-94b8-788babe0e41e",
+          "5002a22d-63d6-4f7a-9106-193b14499898"
+        ],
+        "observation_ages_ms": [
+          311,
+          311,
+          311
+        ]
+      },
+      {
+        "batch": false,
+        "elapsed_s": 1.6711,
+        "ok": true,
+        "error_code": null,
+        "commands": {
+          "xl.list": {
+            "calls": 2,
+            "errors": 0,
+            "inclusive_seconds": 0.2856745540011616
+          },
+          "xenova-domain-identity": {
+            "calls": 6,
+            "errors": 0,
+            "inclusive_seconds": 0.8516870949988515
+          }
+        },
+        "vm_ids": [
+          "17cad3c4-b3cd-4b29-8740-e679d0eaebd4",
+          "de113a23-d80e-4333-94b8-788babe0e41e",
+          "5002a22d-63d6-4f7a-9106-193b14499898"
+        ],
+        "observation_ages_ms": [
+          647,
+          556,
+          320
+        ]
+      }
+    ],
+    "execute": false,
+    "published_control_messages": 0
+  },
+  "final_board": {
+    "module_matches_candidate": true,
+    "batch_binary_matches_candidate": true,
+    "single_helper_unchanged": true,
+    "single_native_unchanged": true,
+    "units": {
+      "xenova-dom0-manager.service": {
+        "Id": "xenova-dom0-manager.service",
+        "ActiveState": "active",
+        "MainPID": "1537"
+      },
+      "xenova-display-feed.service": {
+        "Id": "xenova-display-feed.service",
+        "ActiveState": "active",
+        "MainPID": "598"
+      },
+      "mosquitto.service": {
+        "Id": "mosquitto.service",
+        "ActiveState": "active",
+        "MainPID": "821"
+      },
+      "xenova-gateway.service": {
+        "Id": "xenova-gateway.service",
+        "ActiveState": "active",
+        "MainPID": "1504"
+      },
+      "xenova-recovery-worker.service": {
+        "Id": "xenova-recovery-worker.service",
+        "ActiveState": "active",
+        "MainPID": "1506"
+      },
+      "xenova-runtime-log-collector.service": {
+        "Id": "xenova-runtime-log-collector.service",
+        "ActiveState": "active",
+        "MainPID": "514"
+      },
+      "tailscaled.service": {
+        "Id": "tailscaled.service",
+        "ActiveState": "active",
+        "MainPID": "605"
+      }
+    },
+    "process_flags": {
+      "xenova-dom0-manager.service": {
+        "batch": "1",
+        "read_fork": "1",
+        "console": true,
+        "shared_path": "/run/xenova/vm-observations.json"
+      },
+      "xenova-display-feed.service": {
+        "batch": "",
+        "read_fork": "",
+        "console": false,
+        "shared_path": "/run/xenova/vm-observations.json"
+      },
+      "xenova-gateway.service": {
+        "batch": "",
+        "read_fork": "",
+        "console": false,
+        "shared_path": ""
+      },
+      "xenova-recovery-worker.service": {
+        "batch": "",
+        "read_fork": "",
+        "console": false,
+        "shared_path": ""
+      }
+    },
+    "vm_list_statuses": [
+      503,
+      503,
+      200
+    ],
+    "vms": [
+      {
+        "vm_id": "17cad3c4-b3cd-4b29-8740-e679d0eaebd4",
+        "state": "running"
+      },
+      {
+        "vm_id": "de113a23-d80e-4333-94b8-788babe0e41e",
+        "state": "running"
+      },
+      {
+        "vm_id": "5002a22d-63d6-4f7a-9106-193b14499898",
+        "state": "running"
+      }
+    ],
+    "shared": {
+      "host_boot_id": "a4029056-0438-4c4d-bd36-371c8496ed2d",
+      "producer_epoch": "5ebc77cb-6fa2-4fa3-9168-7e241980a247",
+      "status": "ok",
+      "domains": [
+        {
+          "vm_id": "17cad3c4-b3cd-4b29-8740-e679d0eaebd4",
+          "state": "running",
+          "vcpus": 1,
+          "memory_mib": 512,
+          "domid": 1,
+          "name": "Debian Interaction",
+          "observation_id": "eb402cc1-df69-4925-916d-e803b51b2dc8"
+        },
+        {
+          "vm_id": "de113a23-d80e-4333-94b8-788babe0e41e",
+          "state": "running",
+          "vcpus": 1,
+          "memory_mib": 16,
+          "domid": 2,
+          "name": "Zephyr 주행 A",
+          "observation_id": "3fecfba9-d26e-4e1d-8eaf-2204d1f3bf15"
+        },
+        {
+          "vm_id": "5002a22d-63d6-4f7a-9106-193b14499898",
+          "state": "running",
+          "vcpus": 1,
+          "memory_mib": 16,
+          "domid": 3,
+          "name": "Zephyr 주행 B",
+          "observation_id": "72069b5f-6bfc-41a1-a26a-55264ef99f1d"
+        }
+      ]
+    },
+    "gateway": {
+      "owner": "de113a23-d80e-4333-94b8-788babe0e41e",
+      "generation": 1,
+      "mode": "SAFE_STOP",
+      "phase": "DISARMED",
+      "output_permitted": false
+    },
+    "cpu_rows": [
+      {
+        "name": "Domain-0",
+        "domid": 0,
+        "vcpu": 0,
+        "hard_affinity": "0,3"
+      },
+      {
+        "name": "Domain-0",
+        "domid": 0,
+        "vcpu": 1,
+        "hard_affinity": "0,3"
+      },
+      {
+        "name": "Domain-0",
+        "domid": 0,
+        "vcpu": 2,
+        "hard_affinity": "0,3"
+      },
+      {
+        "name": "Domain-0",
+        "domid": 0,
+        "vcpu": 3,
+        "hard_affinity": "0,3"
+      },
+      {
+        "name": "debian-dev",
+        "domid": 1,
+        "vcpu": 0,
+        "hard_affinity": "0,3"
+      },
+      {
+        "name": "zephyr-drive-a",
+        "domid": 2,
+        "vcpu": 0,
+        "hard_affinity": "1"
+      },
+      {
+        "name": "zephyr-drive-b",
+        "domid": 3,
+        "vcpu": 0,
+        "hard_affinity": "2"
+      }
+    ],
+    "ssh_original_restored": true
+  },
+  "ssh_cleanup": {
+    "ssh_original_hash_restored": true,
+    "temporary_port_removed": true,
+    "sshd_config_test": true
+  },
+  "tests": {
+    "new_tests_passed": 33,
+    "selected_regressions_passed": 81,
+    "selected_subtests_passed": 14,
+    "baseline_reproduced_failure": "test_S4_T08_owned_helper_timeout_after_pipe_eof_reaps_child",
+    "full_suite_pass_claimed": false
+  },
+  "limitations": [
+    "Not a physical HDMI or video latency test",
+    "Not driving READY or mode transition acceptance",
+    "Short observation window; intermittent freshness expiry remains"
+  ]
+}

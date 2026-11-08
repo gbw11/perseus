@@ -79,6 +79,25 @@ def test_local_readiness_is_not_physical_or_fresh_vehicle_acceptance(settings, s
     assert TOKEN not in json.dumps(result)
 
 
+@pytest.mark.parametrize("guard_present", [True, False])
+def test_runtime_mode_requires_its_own_guard(settings, store, marker, environment, monkeypatch, guard_present):
+    marker.write_bytes(b"mobile\n")
+    marker.chmod(0o600)
+    monkeypatch.setattr(mobile, "RUNTIME_MARKER", marker)
+    info = unit_info()
+    new_guard = marker.parent / "xenova-display-hdmi.service.d/60-display-mode.conf"
+    new_guard.parent.mkdir()
+    new_guard.write_text(f"[Unit]\nConditionPathExists=!{marker}\n")
+    if guard_present:
+        info[mobile.UNITS[1]]["DropInPaths"] += " " + str(new_guard)
+    p = DisplayPolicy(settings, store.epoch).presentation(store.snapshot())
+    def response(port, path, token):
+        return ("text/html", b'<div id="root"></div>') if path == "/display/mobile" else ("application/json", json.dumps(p).encode())
+    result = mobile.inspect(environment=environment, query_units=lambda: info, get=response)
+    assert result["checks"]["phone_first_marker"]
+    assert result["local_runtime_ready"] == guard_present
+
+
 @pytest.mark.parametrize("change,check", [
     ("partof", "native_shared_feed"), ("duplicate-workers", "native_shared_feed"),
     ("ten-workers", "native_shared_feed"), ("other-address", "native_shared_feed"),

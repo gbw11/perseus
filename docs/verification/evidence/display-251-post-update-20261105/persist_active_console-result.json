@@ -1,0 +1,10 @@
+{
+  "configuration": "/etc/systemd/system/xenova-dom0-manager.service.d/90-console-enabled.conf",
+  "configuration_exact": true,
+  "persistent": true,
+  "manager_active": true,
+  "manager_pid_unchanged": true,
+  "loaded": true,
+  "reload_call_timeout": true,
+  "api_restarted": false
+}

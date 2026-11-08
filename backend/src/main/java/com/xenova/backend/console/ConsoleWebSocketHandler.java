@@ -280,7 +280,8 @@ public class ConsoleWebSocketHandler extends AbstractWebSocketHandler {
         @Override
         public CompletionStage<?> onClose(WebSocket upstream, int code, String reason) {
             int safeCode = switch (code) {
-                case 1000, 1001, 1008, 1009, 1011, 4400, 4401, 4404, 4409 -> code;
+                // 1003: dom0 console-websocket-v1 "unsupported input"; browser-console-v1 passes inner codes on.
+                case 1000, 1001, 1003, 1008, 1009, 1011, 4400, 4401, 4404, 4409 -> code;
                 default -> 1011;
             };
             finish(c, new CloseStatus(safeCode, "upstream console ended"));

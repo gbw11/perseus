@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.xenova.backend.common.error.ApiException;
+import com.xenova.backend.agent.application.AgentInventoryCleaner;
 import com.xenova.backend.event.application.EventRecorder;
 import com.xenova.backend.event.application.VmStateTracker;
 import com.xenova.backend.template.application.TemplateCatalog;
@@ -20,6 +21,7 @@ import com.xenova.backend.vm.application.VmService.CreateResult;
 import com.xenova.backend.vm.domain.CreateVmCommand;
 import com.xenova.backend.vm.domain.Vm;
 import com.xenova.backend.vm.domain.VmControlPort;
+import com.xenova.backend.vm.domain.VmControlOperation;
 import com.xenova.backend.vm.domain.VmLaunchSpec;
 import com.xenova.backend.vm.domain.VmLifecycle;
 import com.xenova.backend.vm.domain.VmRecord;
@@ -60,6 +62,9 @@ class VmServiceTest {
     private EventRecorder eventRecorder;
 
     @Mock
+    private AgentInventoryCleaner inventoryCleaner;
+
+    @Mock
     private VmStateTracker stateTracker;
 
     private VmService service;
@@ -72,7 +77,7 @@ class VmServiceTest {
         // Disabled cache: every read goes to the port, as these cases were written for.
         VmRuntimeCache runtimeCache = new VmRuntimeCache(
                 vmControlPort, new VmRuntimeCacheProperties(false, Duration.ofSeconds(1), Duration.ofSeconds(10)), clock);
-        service = new VmService(vmControlPort, vmRecordRepository, templateCatalog, eventRecorder, stateTracker, runtimeCache, clock);
+        service = new VmService(vmControlPort, vmRecordRepository, templateCatalog, eventRecorder, stateTracker, runtimeCache, inventoryCleaner, clock);
     }
 
     @Test
@@ -158,6 +163,37 @@ class VmServiceTest {
 
         assertThatThrownBy(() -> service.create(ALPINE)).isInstanceOf(ApiException.class);
         verify(vmRecordRepository).delete(any(VmRecord.class));
+    }
+
+    @Test
+    void createRefusedForAPlatformNameConflictRemovesTheRecordAndIsNotASuccess() {
+        when(vmRecordRepository.findByName("alpine-sensor")).thenReturn(Optional.empty());
+        when(vmRecordRepository.save(any(VmRecord.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(vmControlPort.launch(anyString(), any())).thenThrow(
+                new ApiException(HttpStatus.CONFLICT, "VM_NAME_CONFLICT", "이름 충돌"));
+
+        assertThatThrownBy(() -> service.create(ALPINE))
+                .isInstanceOfSatisfying(ApiException.class, exception -> {
+                    assertThat(exception.getStatus()).isEqualTo(HttpStatus.CONFLICT);
+                    assertThat(exception.getCode()).isEqualTo("VM_NAME_CONFLICT");
+                });
+        verify(vmRecordRepository).delete(any(VmRecord.class));
+        verify(vmControlPort, never()).find(anyString());
+        verify(eventRecorder, never()).vmCreated(any());
+    }
+
+    @Test
+    void startRefusedForAPlatformNameConflictIsNotTreatedAsStarted() {
+        when(vmRecordRepository.findById("vm-1")).thenReturn(Optional.of(record("vm-1", "alpine-1")));
+        when(vmControlPort.find("vm-1")).thenReturn(Optional.empty());
+        when(vmControlPort.launch("vm-1", new VmLaunchSpec("alpine-1", "alpine", "1.2.0", 1, 256))).thenThrow(
+                new ApiException(HttpStatus.CONFLICT, "VM_NAME_CONFLICT", "이름 충돌"));
+
+        assertThatThrownBy(() -> service.start("vm-1"))
+                .isInstanceOfSatisfying(ApiException.class,
+                        exception -> assertThat(exception.getCode()).isEqualTo("VM_NAME_CONFLICT"));
+        verify(stateTracker, never()).changedByUser(anyString(), any(), any(), anyString());
+        verify(vmRecordRepository, never()).delete(any(VmRecord.class));
     }
 
     @Test
@@ -251,6 +287,40 @@ class VmServiceTest {
     }
 
     @Test
+    void rebootReturnsTheTrackedOperationWithoutWaitingForTheNewExecution() {
+        when(vmRecordRepository.findById("vm-1")).thenReturn(Optional.of(record("vm-1", "alpine-1")));
+        VmControlOperation pending = operation("vm-1", "reboot-1", "pending");
+        when(vmControlPort.requestReboot("vm-1", "reboot-1")).thenReturn(pending);
+
+        VmControlOperation result = service.reboot("vm-1", "reboot-1");
+
+        assertThat(result).isEqualTo(pending);
+        verify(vmControlPort).requestReboot("vm-1", "reboot-1");
+        verify(vmControlPort, never()).find("vm-1");
+    }
+
+    @Test
+    void controlOperationReadsTheOriginalRequestWithoutRebootingAgain() {
+        when(vmRecordRepository.findById("vm-1")).thenReturn(Optional.of(record("vm-1", "alpine-1")));
+        VmControlOperation completed = operation("vm-1", "reboot-1", "completed");
+        when(vmControlPort.findControlOperation("vm-1", "reboot-1")).thenReturn(completed);
+
+        assertThat(service.controlOperation("vm-1", "reboot-1")).isEqualTo(completed);
+        verify(vmControlPort).findControlOperation("vm-1", "reboot-1");
+        verify(vmControlPort, never()).requestReboot(anyString(), anyString());
+    }
+
+    @Test
+    void rebootRejectsAnInvalidIdempotencyKeyBeforeCallingDom0() {
+        assertThatThrownBy(() -> service.reboot("vm-1", "contains space"))
+                .isInstanceOfSatisfying(ApiException.class, exception -> {
+                    assertThat(exception.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST);
+                    assertThat(exception.getCode()).isEqualTo("INVALID_ARGUMENT");
+                });
+        verify(vmControlPort, never()).requestReboot(anyString(), anyString());
+    }
+
+    @Test
     void destroyRetiresDomainAndKeepsTheRecordForRestore() {
         VmRecord record = record("vm-1", "alpine-1");
         when(vmRecordRepository.findById("vm-1")).thenReturn(Optional.of(record));
@@ -262,6 +332,18 @@ class VmServiceTest {
         assertThat(record.getLifecycle()).isEqualTo(VmLifecycle.RETIRED);
         verify(eventRecorder).vmDeleted("vm-1", "alpine-1");
         verify(stateTracker).forget("vm-1");
+        // Contract mqtt §3: the deleted VM's retained and stored inventory goes after dom0 confirmed the delete.
+        verify(inventoryCleaner).vmDeleted("vm-1");
+    }
+
+    @Test
+    void failedDestroyKeepsTheInventory() {
+        when(vmRecordRepository.findById("vm-1")).thenReturn(Optional.of(record("vm-1", "alpine-1")));
+        org.mockito.Mockito.doThrow(new ApiException(HttpStatus.CONFLICT, "INVALID_VM_STATE", "실행 중"))
+                .when(vmControlPort).destroy("vm-1");
+
+        assertThatThrownBy(() -> service.destroy("vm-1")).isInstanceOf(ApiException.class);
+        verify(inventoryCleaner, never()).vmDeleted(anyString());
     }
 
     @Test
@@ -302,5 +384,11 @@ class VmServiceTest {
 
     private static VmRecord record(String vmId, String name) {
         return new VmRecord(vmId, new CreateVmCommand(name, "alpine", "1.2.0", 1, 256), NOW);
+    }
+
+    private static VmControlOperation operation(String vmId, String requestKey, String status) {
+        return new VmControlOperation(
+                vmId, "reboot", requestKey, UUID.randomUUID().toString(), status, true,
+                status, 1L, UUID.randomUUID().toString(), 2L, null, null, null, null, List.of());
     }
 }

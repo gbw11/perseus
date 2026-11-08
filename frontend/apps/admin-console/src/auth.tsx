@@ -28,5 +28,5 @@ export function RequireAuth({ children }: { children: ReactNode }) {
 
   if (session) return children;
   if (restoring) return <p style={{ padding: 24 }}>세션 확인 중…</p>;
-  return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
 }
