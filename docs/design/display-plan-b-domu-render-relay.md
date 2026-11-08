@@ -87,14 +87,14 @@ relay 127.0.0.1:<port> /streams/display.mjpeg  (relay token)
 | Xen 그래픽 장치 | 모든 cfg에 `vfb/vkb/vdispl` 없음. 게스트·dom0 커널의 `XEN_FBDEV_FRONTEND`/`DRM_XEN_FRONTEND` 여부 미확인. QEMU VNC는 `-vnc none`만 검증됨 | 그래서 **Xen PV 화면 장치 대신 네트워크 MJPEG**를 택했다. PV 장치 경로는 커널 설정 확인 전에는 쓰지 않는다 |
 | dom0 HDMI 표시 | dom0에 chromium-x11, Xorg, openbox, ffmpeg(x11grab)는 있음. mpv·gstreamer 없음 | HDMI 프레임 출력기 후보: (a) 기존 kiosk Chromium이 MJPEG 표시 — 쉬우나 무거움, (b) TurboJPEG 디코드 + X11 MIT-SHM 출력 — 기존 `native_jpeg`/`native_x11` 재사용, 가벼움. **(b) 권장**, 후속에서 측정 후 결정 |
 | 휴대폰 | 휴대폰 선택지는 폰 직접 렌더링 (Jira 250·350·379·381의 현행 조건과 같음) | B안 프레임 경로를 휴대폰에 쓰지 않는다. 해당 티켓 조건은 그대로 둔다 |
-| HDMI 1대 판정 | `outputs.RuntimeConfig`와 `display_mode`가 아직 출력 2개(monitor-1/2)를 전제한다 | HDMI 1대만 연결된 보드에서 HDMI 준비 판정이 되도록 출력 1개 구성 반영이 필요 (379/380/390) |
+| HDMI 1대 판정 | [S15P31E110-412](https://ssafy.atlassian.net/browse/S15P31E110-412)에서 출력 1개(`monitor-1`) 구성 지원 (`RuntimeConfig`·`display_mode`·kiosk `page`) | 보드 실물 확인은 380/390 |
 | 입력 | 이번 범위는 표시만 | 폰/HDMI에서 화면 조작(터치)이 필요하면 별도 입력 경로 설계가 필요 |
 | 11/10 데모 | 지금 보드는 현재 경로(dom0 렌더링)로 동작 | B안은 domU 이미지·배포가 남아 있어 데모 전 전환은 위험. 데모는 현재 경로 유지를 권장 |
 
 ## 7. 후속 작업 (일반 작업, 각 ≤ 5 SP)
 
-1. **표시 domU 이미지·실행 구성** — Xvfb/Xorg dummy, Chromium kiosk, ffmpeg, `guest_sender` unit, 토큰 배포. 게스트 템플릿 담당 협의 포함.
-2. **dom0 HDMI 프레임 출력기** — [S15P31E110-411](https://ssafy.atlassian.net/browse/S15P31E110-411)에서 로컬 구현·검증 완료 ([검증](../verification/display-411-hdmi-frame-output-20261108.md)). 기존 HDMI 세션의 kiosk가 `renderer: guest_frames`일 때 Chromium 대신 `frame_presenter`를 실행한다. 상태 파일 형식이 같아 `display_mode`는 그대로 동작한다. 남은 것: 보드 실물 확인, HDMI 1대 판정(379/380/390).
+1. **표시 domU 실행 구성** — [S15P31E110-413](https://ssafy.atlassian.net/browse/S15P31E110-413)에서 domU 쪽 구성(화면 앱 서버·Xvfb/Chromium 세션·송신 unit) 완료 ([검증](../verification/display-413-domu-runtime-20261109.md)). 남은 것: 게스트 템플릿 반영([요청서](../requests/2026-11-09-display-domu-renderer-platform.md)), VM3 메모리 결정.
+2. **dom0 HDMI 프레임 출력기** — [S15P31E110-411](https://ssafy.atlassian.net/browse/S15P31E110-411)에서 로컬 구현·검증 완료 ([검증](../verification/display-411-hdmi-frame-output-20261108.md)). 기존 HDMI 세션의 kiosk가 `renderer: guest_frames`일 때 Chromium 대신 `frame_presenter`를 실행한다. 상태 파일 형식이 같아 `display_mode`는 그대로 동작한다. 남은 것: 보드 실물 확인. HDMI 1대 구성은 412에서 반영.
 3. **guest data relay 배포** — `192.168.77.1` bind, 출발지 제한 규칙, 토큰 발급·회전.
 4. **실보드 B안 검증 (HDMI 1대)** — CPU·RAM(dom0·domU 따로), fps, 표시 지연, 끊김·domU 재시작·HDMI↔휴대폰 모드 전환 복귀, 10분 연속. 휴대폰 직접 렌더링 검증은 기존 352·392·393 그대로.
 
