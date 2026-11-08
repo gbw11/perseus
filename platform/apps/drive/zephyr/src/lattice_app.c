@@ -463,6 +463,19 @@ static void reject_state(const dw_state *copy,enum de_result reason){
  if(result.application_sequence)(void)dl_applied(&result);
 }
 static bool rejected(enum de_result rc){return rc==DE_STATE||rc==DE_FRAME||rc==DE_CONFIGURATION||rc==DE_REFERENCE;}
+/* Requests are bounded by the original completed Guest -> Pi lower endpoint.
+ * The upper endpoint is only the current-time rejection bound, never extra TTL. */
+static uint64_t request_deadline(const struct dl_clock *clock,uint64_t completed,uint64_t now,uint64_t parent_end){
+ if(!clock->acknowledged||!completed||completed>INT64_MAX)return 0;
+ uint64_t lower;
+ if(clock->lower>=0){if(completed>(uint64_t)INT64_MAX-(uint64_t)clock->lower)return 0;lower=completed+(uint64_t)clock->lower;}
+ else{uint64_t magnitude=(uint64_t)(-(clock->lower+1))+1;if(completed<magnitude)return 0;lower=completed-magnitude;}
+ if(lower>INT64_MAX-250000)return 0;
+ uint64_t end=lower+250000;
+ if(end>clock->expires_pi)end=clock->expires_pi;
+ if(end>parent_end)end=parent_end;
+ return end>now?end:0;
+}
 static void behavior_io(const struct dl_clock *clock,uint64_t now,uint64_t guest){
  bool have_facts=!dl_control_facts(&planner_facts,now),have_status=!dl_episode_status(&planner_status,now);
  /* Presence comes from the current trusted Gateway's installed profile.
@@ -479,10 +492,9 @@ static void behavior_io(const struct dl_clock *clock,uint64_t now,uint64_t guest
   if(de_budget_reply(&engine,&budget_reply,now)==DE_OK)dl_snapshot_request();
  }
  if(de_budget_request(&engine,&budget_request)&&de_registration_state(&engine,&registration_state)){
-  budget_request.completed_guest_us=guest;budget_request.valid_until_pi_us=now>INT64_MAX-250000?0:now+250000;
-  if(budget_request.valid_until_pi_us>clock->expires_pi)budget_request.valid_until_pi_us=clock->expires_pi;
+  budget_request.completed_guest_us=guest;
   uint64_t mission_end=engine.grant.execution_deadline_pi_us?engine.grant.execution_deadline_pi_us:engine.grant.search_deadline_pi_us;
-  if(budget_request.valid_until_pi_us>mission_end)budget_request.valid_until_pi_us=mission_end;
+  budget_request.valid_until_pi_us=request_deadline(clock,guest,now,mission_end);
   pb_ostream_t wire=pb_ostream_from_buffer(budget_request_wire,sizeof(budget_request_wire));uint8_t hash[32];
   if(budget_request.valid_until_pi_us>now&&dw_plan_hash(&registration_state,budget_request.plan_sha256.bytes)&&
      dw_selected_goal_hash(&registration_state.mission,budget_request.selected_goal_sha256.bytes)&&
@@ -494,10 +506,7 @@ static void behavior_io(const struct dl_clock *clock,uint64_t now,uint64_t guest
  strcpy(registration_request.vm,boot.identity.vm_id);strcpy(registration_request.execution,boot.identity.execution_id);
  strcpy(registration_request.app_instance,boot.auto_instance_id);registration_request.completed_guest_us=guest;
  registration_request.clock_probe_sequence=clock->probe_sequence;memcpy(registration_request.clock_reply_sha256.bytes,clock->reply_sha256,32);
- registration_request.valid_until_pi_us=now>INT64_MAX-250000?0:now+250000;
- if(registration_request.valid_until_pi_us>clock->expires_pi)registration_request.valid_until_pi_us=clock->expires_pi;
- if(registration_request.valid_until_pi_us>registration_request.candidate.phase_deadline_pi_us)
-  registration_request.valid_until_pi_us=registration_request.candidate.phase_deadline_pi_us;
+ registration_request.valid_until_pi_us=request_deadline(clock,guest,now,registration_request.candidate.phase_deadline_pi_us);
  if(registration_request.valid_until_pi_us<=now||!dw_plan_hash(&registration_state,registration_request.plan_sha256.bytes))return;
  uint8_t hash[32];if(!dw_episode_request_hash(&registration_request,hash))return;
  if(!dl_episode_submit(&registration_request,hash))de_episode_submitted(&engine,&registration_request);

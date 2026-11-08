@@ -35,6 +35,23 @@ static uint64_t context_u64(const char *text){
 }
 int main(int argc,char **argv){
  assert(argc==2||argc==3||argc==15);struct drive_completion work={.sequence=41,.end_us=1000000};
+ if(!strcmp(argv[1],"request-window")){
+  assert(argc==3);unsigned variant=(unsigned)context_u64(argv[2]);assert(variant<8);
+  struct dl_clock mapping={.acknowledged=true,.lower=10000,.upper=30000,.expires_pi=2000000};
+  uint64_t completed=1000000,now=1030000,parent=1800000;
+  if(variant==1)mapping.upper=mapping.lower;
+  else if(variant==2)mapping.expires_pi=1100000;
+  else if(variant==3)parent=1080000;
+  else if(variant==4){completed=INT64_MAX-100;mapping.lower=200;}
+  else if(variant==5)now=1300000;
+  else if(variant==6){completed=1;mapping.lower=-2;}
+  else if(variant==7){completed=1461154;mapping.lower=111965606;mapping.upper=111985060;
+   now=113446212;mapping.expires_pi=120000000;parent=119000000;}
+  printf("{\"completed\":%llu,\"lower\":%lld,\"upper\":%lld,\"now\":%llu,\"clock_end\":%llu,\"parent_end\":%llu,\"end\":%llu}\n",
+   (unsigned long long)completed,(long long)mapping.lower,(long long)mapping.upper,(unsigned long long)now,
+   (unsigned long long)mapping.expires_pi,(unsigned long long)parent,
+   (unsigned long long)request_deadline(&mapping,completed,now,parent));return 0;
+ }
  work.sample.modern_command=true;work.sample.v_mps=.2f;work.sample.steer_rad=.1f;
  work.sample.valid_until_guest_us=1100000;work.sample.command.clock_probe_sequence=7;
  struct xm_drive_command2 *body=&work.sample.command.command;
@@ -178,3 +195,23 @@ def test_actual_manual_caller_zero_preparation_and_moving_first_b_are_separate(c
     assert body["driver_session"]==value["session_id"] and body["driver_state_seq"]=="1"
     assert body["command_kind"]==("DRIVE" if case=="continue" else "STOP")
     assert body["next_direction"]==0
+
+
+@pytest.mark.parametrize('variant', range(8), ids=('positive-width', 'zero-width', 'clock-min',
+    'phase-or-mission-min', 'overflow', 'expired', 'underflow', 'cohort04-original-window'))
+def test_actual_request_deadline_uses_original_completed_lower_and_parent_min(command_probe, variant):
+    # Declared numeric clock arithmetic only; actual P4 admission is the app/actor bridge's responsibility.
+    result = subprocess.run([str(command_probe), 'request-window', str(variant)],
+                            capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert not result.stderr
+    value = json.loads(result.stdout)
+    original_lower = value['completed'] + value['lower']
+    limit = (1 << 63) - 1
+    expected = min(original_lower + 250000, value['clock_end'], value['parent_end'])
+    if original_lower < 0 or original_lower > limit - 250000 or expected <= value['now']:
+        expected = 0
+    assert value['end'] == expected
+    if variant == 7:
+        assert value['end'] == 113676760  # original positive-width cohort04 counterexample
+        assert value['now'] + 250000 - value['end'] == 19452
