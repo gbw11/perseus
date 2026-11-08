@@ -11,8 +11,8 @@
 |---|---|---|
 | broker J `xenova/v1/world/snapshot.pb` | mapper → 각 VM의 전용 world 수신자 | `WorldSnapshot`, QoS0·non-retained·단일 PUBLISH·비압축·32KiB 이하 |
 | broker P `xenova/v1/vehicle/state.pb` | Gateway의 단일 serial/odom 소유자 → 각 VM의 기존 작은 제어 수신자 | `VehicleSample`, 2KiB 이하 |
-| broker P `xenova/v1/vms/<UUID>/drive/link/out` | 그 VM의 state 소유자 → Gateway binary 수신자 | `DriveLink`의 probe/snapshot/applied |
-| broker P `xenova/v1/vms/<UUID>/drive/link/in` | Gateway → 그 VM의 state 소유자 | `DriveLink`의 clock/accepted |
+| broker P `xenova/v1/vms/<UUID>/drive/link/out` | 그 VM의 state 소유자 → Gateway binary 수신자 | `DriveLink`의 probe/snapshot/applied/budget_request |
+| broker P `xenova/v1/vms/<UUID>/drive/link/in` | Gateway → 그 VM의 state 소유자 | `DriveLink`의 clock/accepted/mission_grant/budget_reply |
 
 지도와 전체 path는 G1 UDS·작은 JSON latest 슬롯에 넣지 않는다. Gateway actor는
 권위와 G2 출처·적용 metadata를 소유한다. 큰 사본의 decode/encode는 binary I/O 소유자가
@@ -55,7 +55,10 @@ Pi 제어·차량 상태 연결까지 막는 전역 readiness gate가 아니다.
 모든 required field는 실제 존재해야 한다. decode 전 wire 크기와 중복 singular/oneof,
 문자열·repeated 수·부분 frame을 검사하고 decode 후 유한값·배열·의미를 검사한다.
 알 수 없는 optional field는 무시하지만 지원하지 않는 `required_features` bit는 거절한다.
-현재 지원 값은 과거 의미 0과 아래 도로 우선 의미 1이다.
+공용 codec은 과거 의미 0·1과 lane/localization/whole-cell permission을 포함한 11,
+주차 후보를 더한 15를 검사한다. codec의 형식 지원은 실제 임무 실행 지원과 별개다.
+현재 새 profile의 주행 소비자는 LANE grant를 요구하며 후진 주차 실행·전체 phase 승인은
+별도 구현 대상이다. 아직 지원하지 않는 parking state를 FOLLOW로 바꾸어 승인하지 않는다.
 Python은 검사하지 않은 unknown bytes를 사본 fingerprint에 넣거나 다시 relay하지 않는다.
 문자열 식별자는 공통 ASCII 범위이며 C 문자열의 NUL 뒤 suffix로 신원을 다르게 표현할 수 없다.
 
@@ -140,7 +143,8 @@ C/Python reader는 불일치·중복을 거절한다. 필드가 없는 과거 �
 Gateway binary relay가 보존하고, target은 경로 채택 후에만 근거를 자기 실행에 적용한다.
 다른 도로 revision에서 경로 자체가 검증돼도 과거 revision의 통과 근거는 가져오지 않는다.
 
-wire major는 1을 유지한다. A/B의 `lattice`·`engine`·`lattice_app`과 C/Python 생성물·공용 codec,
+현재 `WorldSnapshot`은 major1/minor2, `DriveState`·`DriveLink`는 major2/state_features7이다.
+nested `VehicleSample`·`MissionGrant`는 major1을 유지한다. A/B의 `lattice`·`engine`·`lattice_app`과 C/Python 생성물·공용 codec,
 이를 실제로 로드한 Gateway binary 수신 프로세스를 같은 지원 후보로 맞춘다. 옛 Gateway는
 모르는 선택 필드를 버리므로 새 통과 근거를 보존하는 혼합 실행은 지원하지 않는다.
 Worker는 raw 사본이나 이 필드를 직접 읽을 필요가 없다. Gateway의 출처·권위 검사는
@@ -185,6 +189,44 @@ python3 platform/apps/drive/tools/generate_world.py --tools <frozen-tools>
 python3 platform/apps/drive/tools/generate_primitives.py --help
 pytest platform/apps/drive/tests/test_world.py platform/apps/drive/tests/test_lattice.py platform/apps/drive/tests/test_engine.py
 ```
+
+공용 Python codec은 `platform/apps/drive/world/pyproject.toml`의 독립 내부 패키지
+`xenova-drive-world`로도 설치할 수 있다. 기존 source-tree의 `world_codec` shim은 유지한다.
+생성기의 protobuf3.20.3과 대상 런타임의 승인된 protobuf6.33.6은 별개다. 이 패키지는
+런타임 의존성을 자동 설치하지 않으므로 기존 Python 환경에 승인된 protobuf와 setuptools가
+준비돼 있어야 한다. 아래 명령은 패키지만 설치하며 다운로드나 장치 연결을 하지 않는다.
+
+```sh
+python -m pip install --no-deps --no-build-isolation ./platform/apps/drive/world
+```
+
+Jetson의 `xenova_vehicle.transport.world_adapter`는 이 공용 codec을 호출하는 순수 builder다.
+원 시각·시계·보정·frame 문맥과 완전한 `schema.WorldSnapshot` template은 호출자가 제공한다.
+별도 broker 발행이나 안정 ID/scene/임무 권한 발급을 하지 않으며 반환 후보의 원 input kind와
+`world_valid=false`, `metric_ready=false`, `live_authority=false`를 유지한다. 불완전한 새 feature
+payload는 빈 lane/slot이나 임의 시각으로 채우지 않고 `WorldBuildError`로 거절한다.
+
+```python
+from xenova_vehicle.transport.world_adapter import WorldSource, build_world, lane_model_from_road
+
+# 아래 값은 모두 원 기록/외부 문맥에서 제공한다. builder가 발급하거나 승인하지 않는다.
+lane_model = lane_model_from_road(road_result, lane_ids=stable_lane_ids,
+    model_revision=model_revision, lane_revisions=lane_revisions, crossing=crossing_policy)
+template.lane_model.CopyFrom(lane_model)
+source = WorldSource(snapshot['kind'], snapshot['frame_id'], template.frame_epoch,
+    snapshot['clock_id'], snapshot['calibration_id'], original_capture_interval, original_snapshot_us,
+    wire_clock_epoch=template.clock_epoch)
+candidate = build_world(snapshot, template, source=source, preferred_road=preferred_road_mask)
+wire_bytes = candidate.payload
+```
+
+내부 UNKNOWN0/FREE1/OCCUPIED2는 wire255/0/100으로 명시 변환한다. age는 원 uint32 ms를
+little-endian row-major로 보존한다. whole-cell permission bit와 선호 도로 중심 bit는 독립이다.
+frame-local 이름과 원 clock label을 wire epoch에 명시 결박하는 책임은 caller에 남는다.
+`simulation:<UUID>` 같은 원 label을 잘라 쓰거나 J 시각으로 재발급하지 않는다. legacy0/1은
+비영점 capture 구간을 표현하지 못하므로 거절하며,11/15는 localization의 timestamp 반폭을 검사한다.
+float32 grid 양자화는 선언된 localization geometry bound 안에 있어야 하며 그 bound가 없는
+legacy profile은 float32에 정확히 표현되는 grid만 이 builder에서 지원한다.
 
 `tests/run_lattice_pair.py --help`는 별도 network namespace·실제 두 broker·동일 firmware 두 개·
 제품 Gateway·PTY feedback의 통합 시험이다. 지도와 encoder/물리 모델, root/Store는 시험 대체 경계다.

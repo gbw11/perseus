@@ -29,12 +29,13 @@ class ResidentPerception:
         self.latest_summary=None
         self.processed=0
 
-    def consume(self, sample, *, now_us, nn_candidates=None):
+    def consume(self, sample, *, now_us, nn_candidates=None, checkpoint=None, completed_clock=None):
         """caller는 모든 view/token을 이미 반환해야 한다. 원 source/time을 새로 발급하지 않는다."""
         from ..perception.adapters import from_capture_sample
         observation=from_capture_sample(sample,self.binding.fields,self.calibration,
             nn_candidates=nn_candidates,include_nn=nn_candidates is not None)
-        result=self.pipeline.process(observation,now_us=now_us)
+        result=self.pipeline.process(observation,now_us=now_us,checkpoint=checkpoint,
+                                     completed_clock=completed_clock)
         self.latest_summary=result.summary
         self.processed+=1
         return result.summary

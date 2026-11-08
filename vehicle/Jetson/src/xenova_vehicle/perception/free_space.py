@@ -11,6 +11,8 @@ import math
 from .calibration import CalibrationProfile, number, polygon, vector
 from .geometry import Interval, PointBounds, plane_height_bounds, project_point
 from .ray_batch import RayBundleBatch
+from .point_batch import PointBoundsBatch
+from .ray_witness import witness as _witness
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,31 +103,6 @@ def _inside_box(bounds, support, guard=1e-10):
     return True
 
 
-def _witness(patch, lower, upper, guard):
-    origin = tuple(Interval(a, b) for a, b in zip(patch.origin_lower, patch.origin_upper))
-    direction = tuple(Interval(a, b) for a, b in zip(patch.direction_lower, patch.direction_upper))
-    axes = sorted(range(3), key=lambda i: -min(abs(direction[i].lo), abs(direction[i].hi)))
-    for axis in axes:
-        if direction[axis].lo <= 0 <= direction[axis].hi:
-            continue
-        cut = (lower[axis] + upper[axis]) / 2
-        try:
-            rho = (Interval(cut, cut) - origin[axis]) / direction[axis]
-        except ValueError:
-            continue
-        if rho.lo <= max(0., patch.near_m) + guard or rho.hi >= min(patch.range_lower_m, patch.far_m) - guard:
-            continue
-        intersects = True
-        for i in range(3):
-            value = Interval(cut, cut) if i == axis else origin[i] + rho * direction[i]
-            if value.lo <= lower[i] + guard or value.hi >= upper[i] - guard:
-                intersects = False
-                break
-        if intersects:
-            return True
-    return False
-
-
 def certify_cell(cell_xy_bounds, patches, targets, profile, *, permission_polygon=None,
                  max_tiles=4096, max_ray_tests=200000, tile_size_m=None, hazards=()):
     """미검사 placement가 하나라도 남으면 UNKNOWN이다. 후보 ray 순서는 증명 범위를 줄이지 않는다.
@@ -142,7 +119,9 @@ def certify_cell(cell_xy_bounds, patches, targets, profile, *, permission_polygo
         raise ValueError('certificate work cap exceeds profile')
     batch = type(patches) is RayBundleBatch
     patches = patches if batch else tuple(patches)
-    targets, hazards = tuple(targets), tuple(hazards)
+    targets = tuple(targets)
+    point_batch = type(hazards) is PointBoundsBatch
+    hazards = hazards if point_batch else tuple(hazards)
     if len(patches) > 8192 or not 1 <= len(targets) <= 4 or len(hazards) > 8192:
         raise ValueError('certificate input cap exceeded')
     if (not batch and any(type(p) is not RayBundle for p in patches)) or any(type(t) is not TargetClass for t in targets):
@@ -150,11 +129,16 @@ def certify_cell(cell_xy_bounds, patches, targets, profile, *, permission_polygo
     def result(status, reason, tested=0, required=0, work=0, keys=(), rank=0):
         return Certificate(status, status == 'CLEAR_REGION', work, reason, tested, required,
                            tuple(keys), profile.sha256, rank)
-    for hit in hazards:
-        if type(hit) is not PointBounds:
-            raise ValueError('hazard must be a bounded 3D hit')
-        if hit.lower[0] <= x1 and hit.upper[0] >= x0 and hit.lower[1] <= y1 and hit.upper[1] >= y0:
-            return result('OCCUPIED' if hit.qualified else 'UNKNOWN', 'CURRENT_HIT')
+    if point_batch:
+        first = hazards.first_intersection(bounds)
+        if first is not None:
+            return result('OCCUPIED' if first[1] else 'UNKNOWN', 'CURRENT_HIT')
+    else:
+        for hit in hazards:
+            if type(hit) is not PointBounds:
+                raise ValueError('hazard must be a bounded 3D hit')
+            if hit.lower[0] <= x1 and hit.upper[0] >= x0 and hit.lower[1] <= y1 and hit.upper[1] >= y0:
+                return result('OCCUPIED' if hit.qualified else 'UNKNOWN', 'CURRENT_HIT')
     if not profile.free_qualified or any(not t.qualified for t in targets):
         return result('UNKNOWN', 'UNQUALIFIED_FIRST_SURFACE_OR_TARGET')
     if not _inside_box(bounds, profile.support_polygon):

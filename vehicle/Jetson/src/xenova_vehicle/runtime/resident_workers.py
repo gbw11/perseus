@@ -176,11 +176,11 @@ class _Actor:
         self.link.flush()
         self.drain_sent()
 
-    def progress(self, stage, sequence=None, *, completed=None, reason=None):
+    def progress(self, stage, sequence=None, *, completed=None, reason=None, request_id=None):
         completed = j_us() if completed is None else completed
         packet = self.send_required('PROGRESS', dict(stage=stage,
             source_sequence=None if sequence is None else str(sequence), completed_j_us=str(completed),
-            state=self.state, reason=reason), issued_us=j_us())
+            state=self.state, reason=reason), issued_us=j_us(), request_id=request_id)
         self.last_progress = packet.fields['message_sequence'], str(completed)
         self.progress_count += 1
         self.drain_sent()
@@ -565,43 +565,40 @@ def acquisition_main(endpoint, boot):
 
 
 def mapper_main(endpoint, boot):
-    """한 owned 표본만 보유해 decode한다. raw view 반환은 파서/후보 수명과 분리한다."""
+    """M-main은 control/raw 반환, compute 하나는 owned 입력의 parser·후보 core를 소유한다."""
     import numpy
     import cv2
 
     cv2.setNumThreads(1)
     actor = _Actor(endpoint, boot)
     reader = None
-    perception = None
+    compute = control = None
     failed = False
     try:
         bind = actor.await_bind()
         context = ReaderSlotContext(WriterSlotContext(boot.writer_bind, boot.raw_scope), bind)
         from .native_resources import RawArenaReader
-        from ..perception.decoders import decode_depth, decode_rgb
-        from ..perception import yolop
+        from .mapper_compute import MapperCompute, MapperInput
+        from .mapper_control import MapperControl
+        from .mapper_processor import ResidentMapperProcessor
 
         from .resident_profile import parser_manifest_sha256
         if parser_manifest_sha256() != boot.raw_profile.parser_id:
             raise ValueError('actual local parser manifest differs from the accepted binding')
-        if boot.perception_profile_bytes is not None:
-            from .resident_perception import ResidentPerception
-            perception=ResidentPerception(boot.perception_profile_bytes,bind.binding)
-
         reader = RawArenaReader(boot.raw_scope, boot.raw_tokens)
         # S가 CAPTURE_READY 후 발급한 원 ACK 시각이다. 첫 NN 수신/heartbeat로 갱신하지 않는다.
         parser_deadline = AbsoluteDeadline.after(actor.ack.issued_us, 15_000_000, now_us=j_us(),
                                                 cap_us=boot.startup_deadline_us)
         actor.state = 'WARMUP'
+        compute=MapperCompute(lambda generation:ResidentMapperProcessor(
+            boot.perception_profile_bytes,bind.binding),source_generation=bind.binding.sha256)
+        compute.start()
+        control=MapperControl(actor,compute,parser_deadline,
+            nn_stall_us=int(boot.profile.nn_stall_timeout_s*1_000_000))
         acquire = None
-        streak = 0
-        previous = None
-        ready = False
-        last_completion = None
         while True:
             incoming = actor.poll()
-            if not ready and parser_deadline.expired(j_us()):
-                raise TimeoutError('parser5 original first-output deadline elapsed')
+            control.tick()
             for packet in incoming:
                 if packet.kind != 'SLOT':
                     raise ValueError('unexpected M control statement')
@@ -616,6 +613,8 @@ def mapper_main(endpoint, boot):
                                      expires=now + boot.slot_limits.read_budget_us)
                     if out is not None:
                         acquire = SlotMessage(out, context, offer, limits=boot.slot_limits)
+                        # view 유무와 이미 발급한 read lease의 종결은 다른 사실이다.
+                        actor.leases_released = False
                 elif packet.payload.get('op') == 'ACQUIRED':
                     if acquire is None:
                         raise ValueError('ACQUIRED has no original read request')
@@ -626,7 +625,6 @@ def mapper_main(endpoint, boot):
                         acquired.record.read_request.offer.content)
                     actor.leases_released = False
                     owned, returned = reader.copy_owned(acquired.record, expected)
-                    actor.leases_released = True
                     payload = acquired.payload
                     payload['op'] = 'RELEASE'
                     completed = returned.writable_posted_us
@@ -634,57 +632,24 @@ def mapper_main(endpoint, boot):
                         expires=completed + boot.cleanup_limits.transport_budget_us)
                     ReleaseMessage(release, acquired, limits=boot.cleanup_limits)
                     actor.await_sent(release)
+                    actor.leases_released = True
                     acquire = None
                     sample = decode_sample_slot(owned, bind.binding)
                     owned = None
-                    # NN이 없는 RGB/depth도 동일 owned-copy 경계 뒤 인지 코어에 전달한다.
-                    # NN 준비 횟수/원 기한은 fresh NN을 실제 해석한 경우만 갱신한다.
                     if not sample.fresh(j_us()):
                         continue
-                    candidates=None
-                    if sample.nn_output is not None:
-                        stamp = _source_stamp(sample.nn_input, bind.binding.fields['stream_instances']['nn_input0'])
-                        if stamp.advances(previous):
-                            started=j_us()
-                            started_packet=actor.progress('PARSER_STARTED',stamp.sequence,completed=started)
-                            actor.await_sent(started_packet,cap_us=started+500_000)
-                            candidates=yolop.decode_yolop(sample.nn_output)
-                            # 보정 미선택 때도 기존 RGB/depth decoder 검사를 유지한다.
-                            if perception is None:
-                                rgb=decode_rgb(sample.rgb)
-                                depth=decode_depth(sample.depth)
-                                rgb=depth=None
-                            completed=j_us()
-                            if completed-started>=500_000:
-                                raise TimeoutError('active parser exceeded 500ms progress deadline')
-                            if not sample.fresh(completed):
-                                streak=0 if not ready else streak
-                                actor.progress('PARSER_COMPLETED',stamp.sequence,completed=completed,reason='STALE_INPUT')
-                                continue
-                            previous=stamp
-                            streak+=1
-                            last_completion=completed
-                            if not ready and streak>=5:
-                                if parser_deadline.expired(completed):
-                                    raise TimeoutError('parser completion missed original readiness deadline')
-                                ready=True
-                                actor.state='WAIT_CLOCK'
-                                actor.progress('NN_READY',stamp.sequence,completed=completed,reason='METRIC_NOT_READY')
-                            else:
-                                actor.progress('PARSER_COMPLETED',stamp.sequence,completed=completed,reason='METRIC_NOT_READY')
-                    if perception is not None and sample.fresh(j_us()):
-                        # copy_owned가 view와 native token을 먼저 반환했고 RELEASE도 전송했다.
-                        # 이 호출은 SDK/arena/view를 빌리지 않으며 주행 권한을 만들지 않는다.
-                        perception.consume(sample,now_us=j_us(),nn_candidates=candidates)
-                    candidates=sample=None
+                    lower=min(int(clock['sdk_host_timestamp_j_bracket_us'][0])
+                              for clock in sample.clocks.values())
+                    expires=min(2**64-1,lower+500_000)
+                    item=MapperInput(str(uuid.uuid4()),bind.binding.sha256,sample,expires,
+                        parser_cap_us=None if control.ready else parser_deadline.expires_us)
+                    # 실제 native 반환과 RELEASE 송신이 끝난 owned bytes만 넘긴다.
+                    compute.submit(item)
+                    item=sample=None
                 else:
                     raise ValueError('unsupported M SLOT operation')
             if acquire is not None and j_us() >= acquire.expires_us:
                 raise TimeoutError('original read request expired without ACQUIRED')
-            if (ready and last_completion is not None
-                    and j_us() - last_completion >= int(boot.profile.nn_stall_timeout_s * 1_000_000)):
-                # WAIT_CLOCK 자체는 hang이 아니다. 원 NN의 새 유효 해석 부재를 별도로 감시한다.
-                raise TimeoutError('fresh NN parser association stalled')
             time.sleep(0.002)
     except _StopWork:
         pass
@@ -698,9 +663,18 @@ def mapper_main(endpoint, boot):
             pass
     finally:
         actor.state = 'QUIESCING'
-        if perception is not None and perception.latest_summary is not None:
+        if compute is not None:
+            compute.request_stop()
+            remaining=(2. if actor.stop is None else
+                       max(0.,min(2.,(actor.stop.expires_us-j_us())/1_000_000)))
             try:
-                actor.save('perception-summary.json',dict(processed=perception.processed,latest=perception.latest_summary))
+                compute.join(remaining)
+            except Exception as error:
+                actor.failure=type(error).__name__
+                failed=True
+        if control is not None and control.latest_summary is not None:
+            try:
+                actor.save('perception-summary.json',control.latest_summary)
             except (OSError,ValueError) as error:
                 print('PERCEPTION_DIAGNOSTIC_FAILED '+type(error).__name__,file=sys.stderr)
         if reader is not None:

@@ -8,6 +8,7 @@ RIGHT depth 원점은 바꾸지 않는다. native import는 호출 때만 수행
 import math
 from .calibration import CameraModel
 from .geometry import PointBounds
+from .point_batch import PointBoundsBatch
 
 MAX_BOXES = 8192
 WORKSPACE_LIMIT_BYTES = 16 * 1024**2
@@ -22,9 +23,11 @@ def box_occlusion(boxes, camera):
     외부 Python 객체와 NumPy/BLAS 내부 allocator 비용은 이 배열 상한과 별개다.
     """
     import numpy as np
-    if type(camera) is not CameraModel or type(boxes) not in (tuple, list) or len(boxes) > MAX_BOXES:
+    batch = type(boxes) is PointBoundsBatch
+    if (type(camera) is not CameraModel or (not batch and type(boxes) not in (tuple, list))
+            or len(boxes) > MAX_BOXES):
         raise ValueError('occlusion requires a camera and at most8192 bounded boxes')
-    if any(type(box) is not PointBounds for box in boxes):
+    if not batch and any(type(box) is not PointBounds for box in boxes):
         raise ValueError('occlusion requires exact PointBounds candidates')
     workspace = (len(boxes) * 1024 + (camera.height + 1) * (camera.width + 1) * 4
                  + camera.height * camera.width * 2)
@@ -43,7 +46,8 @@ def box_occlusion(boxes, camera):
     # lens 곡선의 내부/경계 extrema는 꼭짓점만으로 보장할 수 없다.
     if any(camera.distortion):
         return full_roi()
-    bounds = np.asarray([(box.lower, box.upper) for box in boxes], dtype=np.float64)
+    bounds = (np.stack((boxes.lower, boxes.upper), axis=1) if batch else
+              np.asarray([(box.lower, box.upper) for box in boxes], dtype=np.float64))
     bits = np.asarray(((0, 0, 0), (0, 0, 1), (0, 1, 0), (0, 1, 1),
                        (1, 0, 0), (1, 0, 1), (1, 1, 0), (1, 1, 1)), dtype=np.bool_)
     corners = np.where(bits[None, :, :], bounds[:, 1, None, :], bounds[:, 0, None, :])

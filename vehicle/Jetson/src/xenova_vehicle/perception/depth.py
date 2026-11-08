@@ -5,16 +5,34 @@
 """
 
 from dataclasses import dataclass
+from functools import lru_cache
 import math
 
 from .calibration import CalibrationProfile, CameraModel, Plane, number
-from .free_space import RayBundle
 from .ray_batch import RayBundleBatch
-from .geometry import PointBounds, axial_ray_bounds_many
+from .point_batch import PointBoundsBatch
+from .geometry import axial_ray_bounds_many
 from .inputs import FrameStamp
 
 
 BLOCK_PIXELS = 8192
+# 최대2개 모델의 width1280+height720+matrix9+translation3+normal3 float64 bytes만 캐시한다.
+COEFFICIENT_CACHE_BYTES = 2 * (1280 + 720 + 9 + 3 + 3) * 8
+
+
+@lru_cache(maxsize=2)
+def _coefficients(camera, plane):
+    """immutable 1D 계수와 작은 행렬만 재사용한다. 전체 image/ray/depth 값은 캐시하지 않는다."""
+    import numpy as np
+    k = camera.k
+    values = ((np.arange(camera.width, dtype=np.float64) - k[0][2]).tobytes(),
+        ((np.arange(camera.height, dtype=np.float64) - k[1][2]) / k[1][1]).tobytes(),
+        (np.asarray(camera.rectification) @ np.asarray(camera.rotation).T).tobytes(),
+        np.asarray(camera.translation, dtype=np.float64).tobytes(), np.asarray(plane.normal, dtype=np.float64).tobytes())
+    return (*values, math.hypot(camera.pixel_error / k[1][1],
+        camera.pixel_error / k[0][0] + abs(k[0][1]) * camera.pixel_error / (k[0][0] * k[1][1])),
+        2 * math.sin(camera.ray_error_rad / 2), 2 * math.sin(camera.rotation_error_rad / 2),
+        2 * math.sin(plane.normal_error_rad / 2), sum(abs(x) for x in plane.normal))
 
 
 @dataclass(frozen=True)
@@ -51,7 +69,7 @@ class DepthEvidence:
     stamp: FrameStamp | None
     calibration_id: str | None
     input_kind: str
-    hit_boxes: tuple
+    hit_boxes: tuple | PointBoundsBatch
     patches: tuple | RayBundleBatch
     valid_count: int
     floor_count: int
@@ -144,16 +162,12 @@ def analyze_depth(depth_mm, camera, plane, *, stamp=None, calibration_id=None,
     flat_depth = depth.reshape(-1)
     a, b, c, d = camera.roi
     k = camera.k
-    transform = np.asarray(camera.rectification) @ np.asarray(camera.rotation).T
-    translation, normal = np.asarray(camera.translation), np.asarray(plane.normal)
-    pixel_q_error = math.hypot(camera.pixel_error / k[1][1],
-        camera.pixel_error / k[0][0] + abs(k[0][1]) * camera.pixel_error / (k[0][0] * k[1][1]))
-    delta = 2 * math.sin(camera.ray_error_rad / 2)
-    rotation_delta = 2 * math.sin(camera.rotation_error_rad / 2)
-    plane_delta = 2 * math.sin(plane.normal_error_rad / 2)
+    stored = _coefficients(camera, plane)
+    centered_x, row_qy, transform, translation, normal = (np.frombuffer(value, dtype=np.float64) for value in stored[:5])
+    transform = transform.reshape(3, 3)
+    pixel_q_error, delta, rotation_delta, plane_delta, normal_l1 = stored[5:]
     absolute = config.extra_depth_error_m + (0. if profile is None else profile.depth_error_m)
     relative = config.extra_relative_error + (0. if profile is None else profile.depth_relative_error)
-    normal_l1 = sum(abs(x) for x in plane.normal)
 
     def classify(indices):
         # 최대 BLOCK_PIXELS개의 작업 배열만 유지한다. bbox radius는 축별 pad다.
@@ -164,8 +178,11 @@ def analyze_depth(depth_mm, camera, plane, *, stamp=None, calibration_id=None,
             valid = (np.isfinite(z) & (z > 0) & (values <= 65535)
                      & (z >= camera.near_m) & (z <= camera.far_m)
                      & (xx >= a) & (xx < c) & (yy >= b) & (yy < d))
-            qy = (yy - k[1][2]) / k[1][1]
-            qx = (xx - k[0][2] - k[0][1] * qy) / k[0][0]
+            # invalid 원 행의 분모는 보존하되 기하 계산은 실제 valid index에만 한다.
+            locations = np.flatnonzero(valid)
+            z = z[locations]
+            qy = row_qy[yy[locations]]
+            qx = (centered_x[xx[locations]] - k[0][1] * qy) / k[0][0]
             q = np.stack((qx, qy, np.ones_like(qx)), axis=-1)
             points = z[:, None] * (q @ transform) + translation
             norm = np.sqrt((q * q).sum(axis=-1))
@@ -181,10 +198,12 @@ def analyze_depth(depth_mm, camera, plane, *, stamp=None, calibration_id=None,
             # 축별 translation/error box의 L2 반경은 sqrt(3)*radius 이하다.
             h_error += plane_delta * (np.sqrt((points * points).sum(axis=-1)) + math.sqrt(3) * radius)
             finite = np.isfinite(radius) & np.isfinite(heights) & np.isfinite(h_error)
-            floor = (valid & finite & (heights - h_error >= -config.floor_tolerance_m)
+            floor_values = (finite & (heights - h_error >= -config.floor_tolerance_m)
                      & (heights + h_error <= config.floor_tolerance_m))
-            hits = (valid & finite & (heights + h_error >= config.obstacle_min_height_m)
+            hit_values = (finite & (heights + h_error >= config.obstacle_min_height_m)
                     & (heights - h_error <= config.obstacle_max_height_m))
+            floor, hits = np.zeros(len(indices), dtype=bool), np.zeros(len(indices), dtype=bool)
+            floor[locations], hits[locations] = floor_values, hit_values
         return points, radius, valid, floor, hits
 
     metric = (profile is not None and profile.metric_qualified and camera.qualified and plane.qualified
@@ -214,14 +233,11 @@ def analyze_depth(depth_mm, camera, plane, *, stamp=None, calibration_id=None,
     selected = _stratified(patch_indices[:patch_count], patch_floors[:patch_count], config.max_patches, camera.width)
     del hit_indices, patch_indices, patch_floors, points, radii, valid, floor, hits, indices
 
-    hit_boxes = []
+    hit_boxes = ()
     for start in range(0, len(chosen_hits), BLOCK_PIXELS):
         points, radii, valid, floor, hits = classify(chosen_hits[start:start + BLOCK_PIXELS])
-        for center, error in zip(points, radii):
-            error = float(error)
-            lower = tuple(math.nextafter(float(x) - error, -math.inf) for x in center)
-            upper = tuple(math.nextafter(float(x) + error, math.inf) for x in center)
-            hit_boxes.append(PointBounds(lower, upper, metric))
+        lower, upper = np.nextafter(points - radii[:, None], -np.inf), np.nextafter(points + radii[:, None], np.inf)
+        hit_boxes = PointBoundsBatch(lower, upper, bool(metric), None if stamp is None else stamp.key)
         del points, radii, valid, floor, hits
     patches = ()
     source_key = None if stamp is None else stamp.key
@@ -236,7 +252,7 @@ def analyze_depth(depth_mm, camera, plane, *, stamp=None, calibration_id=None,
             pixels = np.column_stack((indices[valid] % camera.width, indices[valid] // camera.width))
             patches = RayBundleBatch(origin_lo[valid], origin_hi[valid], direction_lo[valid], direction_hi[valid],
                 range_lo[valid], range_hi[valid], near[valid], far[valid], bool(free), source_key, pixels)
-    return DepthEvidence(stamp, calibration_id, input_kind, tuple(hit_boxes), patches,
+    return DepthEvidence(stamp, calibration_id, input_kind, hit_boxes, patches,
         valid_count, floor_count, total - floor_count - len(hit_boxes), total - valid_count,
         hit_count - len(hit_boxes), valid_count - len(patches), bool(metric),
         'QUALIFIED_RAYS' if free else 'HIT_ONLY' if metric else 'UNKNOWN')

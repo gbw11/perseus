@@ -37,18 +37,73 @@ static bool application_pending;
 static uint64_t probe_sequence,probe_sent,next_probe,next_snapshot;
 static uint64_t received_vehicle;
 static uint64_t accepted_maps,rejected_maps,rejected_links,rejected_vehicles;
+static xenova_drive_MissionGrant current_mission;
+static bool mission_available,budget_pending,budget_send_pending,budget_reply_available;
+static xenova_drive_MissionBudgetRequest budget_request;
+static xenova_drive_MissionBudgetReply budget_reply;
+static uint8_t mission_wire[1024],grant_candidate[1024],budget_wire[512],budget_candidate[512],budget_sha256[32];
+static size_t mission_wire_size,budget_wire_size;
+static uint32_t control_generation;
+static char active_vm[37];
 #if defined(CONFIG_XENOVA_DRIVE_NATIVE_TEST)
 static uint64_t clock_trace[16][4];static unsigned clock_trace_count;
 #endif
 
 static uint64_t clock_us(void){uint64_t now=0;if(xdiag_clock_us(&now))atomic_set(&reason,DW_TIME);return now;}
 static bool stopped(void){return atomic_get(&stop)||xd_stopping();}
+static int hex_digit(char c){return c>='0'&&c<='9'?c-'0':c>='a'&&c<='f'?c-'a'+10:-1;}
+static bool bytes_hex(const uint8_t *bytes,size_t size,const char *text,bool uuid){
+ if(strlen(text)!=(uuid?36:2*size))return false;
+ size_t n=0;int upper=-1;
+ for(size_t i=0;text[i];i++){
+  if(uuid&&(i==8||i==13||i==18||i==23)){if(text[i]!='-')return false;continue;}
+  int digit=hex_digit(text[i]);if(digit<0)return false;
+  if(upper<0)upper=digit;else{if(n>=size||bytes[n++]!=(uint8_t)(upper*16+digit))return false;upper=-1;}
+ }
+ return n==size&&upper<0;
+}
+static int cache_grant(const xenova_drive_MissionGrant *grant,const struct xt_bootstrap *boot){
+ if(dw_mission_grant_validate(grant)||strcmp(grant->vehicle,lp_selected_config.vehicle)||
+    strcmp(grant->configuration,lp_selected_config.id)||strcmp(grant->calibration,lp_selected_config.calibration)||
+    !bytes_hex(grant->primitive.bytes,32,lp_selected_assets.sha256,false)||
+    !bytes_hex(grant->pi_host_boot.bytes,16,boot->identity.host_boot_id,true)||
+    !bytes_hex(grant->gateway_instance.bytes,16,gateway,true))return -EPROTO;
+ if(grant->control_generation!=control_generation||
+    !bytes_hex(grant->owner_vm.bytes,16,active_vm,true))return -ESTALE;
+ pb_ostream_t stream=pb_ostream_from_buffer(grant_candidate,sizeof(grant_candidate));
+ if(!pb_encode(&stream,xenova_drive_MissionGrant_fields,grant))return -EMSGSIZE;
+ if(mission_wire_size){
+  bool same_mission=current_mission.mission_revision==grant->mission_revision&&
+   !memcmp(current_mission.mission_id.bytes,grant->mission_id.bytes,16);
+  if(same_mission&&grant->grant_revision<current_mission.grant_revision)return -ESTALE;
+  bool same_key=same_mission&&current_mission.grant_revision==grant->grant_revision;
+  bool same_owner=current_mission.control_generation==grant->control_generation&&
+   !memcmp(current_mission.owner_vm.bytes,grant->owner_vm.bytes,16)&&
+   !memcmp(current_mission.owner_execution.bytes,grant->owner_execution.bytes,16)&&
+   !memcmp(current_mission.app_instance.bytes,grant->app_instance.bytes,16)&&
+   !memcmp(current_mission.pi_host_boot.bytes,grant->pi_host_boot.bytes,16)&&
+   !memcmp(current_mission.gateway_instance.bytes,grant->gateway_instance.bytes,16);
+  /* A qualified warm owner may carry the original immutable mission budget.
+   * Its owner binding changes; conflicting bytes in the same binding do not. */
+  if(same_key&&same_owner){
+   if(stream.bytes_written!=mission_wire_size||memcmp(grant_candidate,mission_wire,mission_wire_size))return -EPROTO;
+   mission_available=true;return 0;
+  }
+  if(grant->issued_pi_us<current_mission.issued_pi_us)return -ESTALE;
+ }
+ current_mission=*grant;memcpy(mission_wire,grant_candidate,stream.bytes_written);mission_wire_size=stream.bytes_written;
+ mission_available=true;return 0;
+}
 void dl_context(const struct xd_inputs *inputs){
  if(k_mutex_lock(&input_context_lock,K_NO_WAIT))return;
  bool valid=inputs->connected&&!inputs->control.error&&!strcmp(inputs->control.sender,"dom0-gateway")&&inputs->control.instance[0];
- if(!valid||strcmp(gateway,inputs->control.instance)){clock_available=false;gateway[0]=0;}
+ if(!valid||strcmp(gateway,inputs->control.instance)){clock_available=false;mission_available=false;mission_wire_size=0;gateway[0]=0;}
  context_available=valid;
  if(valid)strcpy(gateway,inputs->control.instance);
+ struct xm_vehicle_control control;control_generation=0;active_vm[0]=0;
+ if(valid&&!xm_vehicle_control_parse((struct xm_span){inputs->control.payload,inputs->control.length},&control)){
+  control_generation=control.generation;strcpy(active_vm,control.active_vm_id);
+ }
  k_mutex_unlock(&input_context_lock);
 }
 int dl_clock_get(struct dl_clock *out,uint64_t *now_pi){
@@ -62,6 +117,63 @@ int dl_clock_get(struct dl_clock *out,uint64_t *now_pi){
   *now_pi=(uint64_t)((int64_t)guest+out->upper);
  }
  return rc;
+}
+int dl_mission_get(xenova_drive_MissionGrant *out,uint64_t now){
+ if(!out)return -EINVAL;
+ if(k_mutex_lock(&input_context_lock,K_NO_WAIT))return -EBUSY;
+ uint64_t guest=clock_us();
+ int rc=!guest||guest>current_clock.expires_guest||!context_available||!clock_available||!mission_available||
+  current_mission.control_generation!=control_generation||current_mission.issued_pi_us>now||
+  !bytes_hex(current_mission.owner_vm.bytes,16,active_vm,true)||
+  (current_mission.kind==2&&now>=current_mission.mission_deadline_pi_us)?-EAGAIN:0;
+ if(!rc)*out=current_mission;
+ k_mutex_unlock(&input_context_lock);return rc;
+}
+int dl_mission_for_local(xenova_drive_MissionGrant *out,uint64_t now){
+ int rc=dl_mission_get(out,now);if(rc)return rc;
+ struct xt_bootstrap boot;if(xd_context_get(&boot))return -EAGAIN;
+ if(!out->admitted||out->kind!=1)return -EACCES;
+ return bytes_hex(out->owner_vm.bytes,16,boot.identity.vm_id,true)&&
+  bytes_hex(out->owner_execution.bytes,16,boot.identity.execution_id,true)&&
+  bytes_hex(out->app_instance.bytes,16,boot.auto_instance_id,true)?0:-EXDEV;
+}
+int dl_budget_submit(const xenova_drive_MissionBudgetRequest *request,const uint8_t fingerprint[32]){
+ if(!request||!fingerprint||dw_budget_request_validate(request))return -EINVAL;
+ struct dl_clock mapping;uint64_t now;if(dl_clock_get(&mapping,&now))return -EAGAIN;
+ struct xt_bootstrap boot;if(xd_context_get(&boot))return -EAGAIN;
+ if(k_mutex_lock(&input_context_lock,K_NO_WAIT))return -EBUSY;
+ pb_ostream_t stream=pb_ostream_from_buffer(budget_candidate,sizeof(budget_candidate));
+ if(!pb_encode(&stream,xenova_drive_MissionBudgetRequest_fields,request)){k_mutex_unlock(&input_context_lock);return -EMSGSIZE;}
+ int rc=0;
+ if(budget_pending){
+  if(stream.bytes_written!=budget_wire_size||memcmp(budget_candidate,budget_wire,budget_wire_size)||memcmp(fingerprint,budget_sha256,32))rc=-EBUSY;
+  else if(!budget_reply_available)budget_send_pending=true;
+ }else{
+  uint64_t guest=clock_us(),lower=0;bool mapped=true;
+  if(mapping.lower<0){uint64_t magnitude=(uint64_t)(-(mapping.lower+1))+1;if(magnitude>request->completed_guest_us)mapped=false;else lower=request->completed_guest_us-magnitude;}
+  else if((uint64_t)mapping.lower>UINT64_MAX-request->completed_guest_us)mapped=false;
+  else lower=request->completed_guest_us+(uint64_t)mapping.lower;
+  if(!mission_available||!current_mission.admitted||current_mission.kind!=2||
+   !bytes_hex(current_mission.owner_vm.bytes,16,boot.identity.vm_id,true)||
+   !bytes_hex(current_mission.owner_execution.bytes,16,boot.identity.execution_id,true)||
+   !bytes_hex(current_mission.app_instance.bytes,16,boot.auto_instance_id,true)||
+   request->control_generation!=control_generation||request->control_generation!=current_mission.control_generation||
+   request->mission_revision!=current_mission.mission_revision||request->expected_grant_revision!=current_mission.grant_revision||
+   memcmp(request->mission_id.bytes,current_mission.mission_id.bytes,16)||
+   memcmp(request->scene_admission_id.bytes,current_mission.scene_admission_id.bytes,16)||
+   request->scene_revision!=current_mission.scene_revision||request->completed_guest_us>guest||!mapped||
+   request->valid_until_pi_us<=now||request->valid_until_pi_us<lower||request->valid_until_pi_us-lower>250000)rc=-ESTALE;
+  else{budget_request=*request;memcpy(budget_wire,budget_candidate,stream.bytes_written);budget_wire_size=stream.bytes_written;
+   memcpy(budget_sha256,fingerprint,32);budget_pending=budget_send_pending=true;budget_reply_available=false;}
+ }
+ k_mutex_unlock(&input_context_lock);return rc;
+}
+int dl_budget_take(xenova_drive_MissionBudgetRequest *request,xenova_drive_MissionBudgetReply *reply){
+ if(!request||!reply)return -EINVAL;
+ if(k_mutex_lock(&input_context_lock,K_NO_WAIT))return -EBUSY;
+ int rc=budget_pending&&budget_reply_available?0:-EAGAIN;
+ if(!rc){*request=budget_request;*reply=budget_reply;budget_pending=budget_send_pending=budget_reply_available=false;}
+ k_mutex_unlock(&input_context_lock);return rc;
 }
 static int vehicle_received(void *unused,const uint8_t *bytes,size_t count,int64_t received){
  ARG_UNUSED(unused);ARG_UNUSED(received);
@@ -119,6 +231,8 @@ static int link_received(void *unused,const uint8_t *bytes,size_t count,int64_t 
   if(upper<lower||(uint64_t)upper-(uint64_t)lower>lp_selected_config.clock_error_us){rejected_links++;return -ETIME;}
   if(k_mutex_lock(&input_context_lock,K_NO_WAIT))return -EBUSY;
   if(!context_available||strcmp(gateway,reply->gateway_instance)){k_mutex_unlock(&input_context_lock);return -EXDEV;}
+  if(reply->has_current_mission){int granted=cache_grant(&reply->current_mission,&boot);if(granted&&granted!=-ESTALE){k_mutex_unlock(&input_context_lock);return granted;}}
+  else mission_available=false;
   struct dl_clock *out=&current_clock;memset(out,0,sizeof(*out));out->lower=lower;out->upper=upper;
   out->expires_guest=now+lp_selected_config.clock_lease_us;strcpy(out->gateway,gateway);
   const xenova_drive_WorldTrust *t=&reply->trust;struct dw_trust *d=&out->trust;
@@ -128,6 +242,23 @@ static int link_received(void *unused,const uint8_t *bytes,size_t count,int64_t 
   strcpy(d->clock.epoch,t->clock_epoch);d->clock.lower_offset_us=t->lower_offset_us;d->clock.upper_offset_us=t->upper_offset_us;
   d->clock.expires_pi_us=t->expires_pi_us;d->clock.max_error_us=MIN(t->max_error_us,lp_selected_config.clock_error_us);d->max_live_age_us=lp_selected_config.live_age_us;
   clock_available=true;k_mutex_unlock(&input_context_lock);probe_sent=0;return 0;
+ }
+ if(incoming.which_payload==xenova_drive_DriveLink_mission_grant_tag){
+  if(k_mutex_lock(&input_context_lock,K_NO_WAIT))return -EBUSY;
+  int rc=context_available?cache_grant(&incoming.payload.mission_grant,&boot):-EAGAIN;
+  k_mutex_unlock(&input_context_lock);return rc==-ESTALE?0:rc;
+ }
+ if(incoming.which_payload==xenova_drive_DriveLink_budget_reply_tag){
+  if(k_mutex_lock(&input_context_lock,K_NO_WAIT))return -EBUSY;
+  const xenova_drive_MissionBudgetReply *reply=&incoming.payload.budget_reply;
+  int rc=0;
+  if(!context_available||!budget_pending||memcmp(reply->request_nonce.bytes,budget_request.request_nonce.bytes,16)||
+     memcmp(reply->request_sha256.bytes,budget_sha256,32))rc=-EPROTO;
+  else if(!budget_reply_available){
+   if(reply->has_grant){int granted=cache_grant(&reply->grant,&boot);if(granted&&granted!=-ESTALE)rc=granted;}
+   if(!rc){budget_reply=*reply;budget_reply_available=true;budget_send_pending=false;}
+  }
+  k_mutex_unlock(&input_context_lock);return rc;
  }
  if(incoming.which_payload==xenova_drive_DriveLink_accepted_tag){
   struct dl_clock mapping;uint64_t now;const xenova_drive_AcceptedState *copy=&incoming.payload.accepted;
@@ -206,7 +337,7 @@ static void state(void *a,void *b,void *c){
    if(link_client.connected&&now>=next_probe){
     struct xt_bootstrap boot;
     if(!xd_context_get(&boot)&&probe_sequence<UINT64_MAX){
-     memset(&outgoing,0,sizeof(outgoing));outgoing.major=1;outgoing.which_payload=xenova_drive_DriveLink_probe_tag;
+     memset(&outgoing,0,sizeof(outgoing));outgoing.major=2;outgoing.which_payload=xenova_drive_DriveLink_probe_tag;
      xenova_drive_ClockProbe *p=&outgoing.payload.probe;strcpy(p->vm,boot.identity.vm_id);
      strcpy(p->execution,boot.identity.execution_id);strcpy(p->app_instance,boot.auto_instance_id);
      p->sequence=++probe_sequence;p->guest_send_us=now;probe_sent=now;
@@ -215,15 +346,25 @@ static void state(void *a,void *b,void *c){
    }
    if(link_client.connected&&!k_mutex_lock(&applied_lock,K_NO_WAIT)){
     bool send=application_pending;
-    if(send){memset(&outgoing,0,sizeof(outgoing));outgoing.major=1;outgoing.which_payload=xenova_drive_DriveLink_applied_tag;
+    if(send){memset(&outgoing,0,sizeof(outgoing));outgoing.major=2;outgoing.which_payload=xenova_drive_DriveLink_applied_tag;
      outgoing.payload.applied=applied;application_pending=false;}
     k_mutex_unlock(&applied_lock);
     if(send)(void)binary_publish(&link_client,out_topic,&outgoing);
    }
    if(link_client.connected&&now>=next_snapshot){
-    memset(&outgoing,0,sizeof(outgoing));outgoing.major=1;outgoing.which_payload=xenova_drive_DriveLink_snapshot_tag;
+    memset(&outgoing,0,sizeof(outgoing));outgoing.major=2;outgoing.which_payload=xenova_drive_DriveLink_snapshot_tag;
     if(!drive_lattice_snapshot(&outgoing.payload.snapshot))(void)binary_publish(&link_client,out_topic,&outgoing);
     next_snapshot=now+lp_selected_config.state_period_us;
+   }
+   if(link_client.connected&&!k_mutex_lock(&input_context_lock,K_NO_WAIT)){
+    bool send=budget_pending&&budget_send_pending&&!budget_reply_available;
+    if(send){memset(&outgoing,0,sizeof(outgoing));outgoing.major=2;outgoing.which_payload=xenova_drive_DriveLink_budget_request_tag;
+     outgoing.payload.budget_request=budget_request;budget_send_pending=false;}
+    k_mutex_unlock(&input_context_lock);
+    if(send&&binary_publish(&link_client,out_topic,&outgoing)&&!k_mutex_lock(&input_context_lock,K_NO_WAIT)){
+     if(budget_pending&&!budget_reply_available)budget_send_pending=true;
+     k_mutex_unlock(&input_context_lock);
+    }
    }
   }
   k_sleep(K_MSEC(2));

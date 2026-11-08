@@ -127,37 +127,73 @@ class EvidenceGrid:
         return tuple((c,row) for row in range(r0,r1+1) for c in range(c0,c1+1))
 
     def add_hits(self, boxes_xy, stamp, *, view_id, origin_xy):
+        import numpy as np
         observed = self._time(stamp)
         if type(view_id) is not str or len(view_id)>128 or len(origin_xy)!=2 or any(not math.isfinite(v) for v in origin_xy):
             raise ValueError('hit view identity/origin missing')
-        touched = set()
-        for box in boxes_xy:
-            touched.update(self.touched(box))
-        for col,row in touched:
-            self.conflict[row,col] |= self.state[row,col] == FREE
-            self.state[row,col] = OCCUPIED
-            if observed is None:
-                # 새 hit는 과거 free/hit의 known 시각을 상속하지 않는다.
-                self.time_known[row,col] = False
-                self.observed_us[row,col] = 0
-                self.unordered_hit[row,col] = True
-                self.hit_available_us[row,col] = max(int(self.hit_available_us[row,col]),stamp.available_us)
-                self.hit_origin[row,col] = origin_xy
-                self.hit_view[row*self.spec.width+col] = view_id
-            elif self.unordered_hit[row,col] and observed <= int(self.hit_available_us[row,col]):
-                # 미상 hit의 수신 이후라는 원 시각 근거가 없으면 순서를 확정하지 않는다.
-                continue
-            elif not self.time_known[row,col] or observed>=int(self.observed_us[row,col]):
-                self.observed_us[row,col] = observed
-                self.time_known[row,col] = True
-                self.unordered_hit[row,col] = False
-                self.hit_available_us[row,col] = stamp.available_us
-                self.hit_origin[row,col] = origin_xy
-                self.hit_view[row*self.spec.width+col] = view_id
-        if touched:
+        touched = self._hit_mask(boxes_xy)
+        count = int(np.count_nonzero(touched))
+        self.conflict[touched] |= self.state[touched] == FREE
+        self.state[touched] = OCCUPIED
+        if observed is None:
+            # 새 hit는 과거 free/hit의 known 시각을 상속하지 않는다.
+            updated = touched
+            self.time_known[updated] = False
+            self.observed_us[updated] = 0
+            self.unordered_hit[updated] = True
+            self.hit_available_us[updated] = np.maximum(self.hit_available_us[updated], np.uint64(stamp.available_us))
+        else:
+            # uint64끼리 비교하여 큰 원 시각도 float promotion/반올림 없이 보존한다.
+            value = np.uint64(observed)
+            blocked = self.unordered_hit & (value <= self.hit_available_us)
+            updated = touched & ~blocked & (~self.time_known | (value >= self.observed_us))
+            self.observed_us[updated] = value
+            self.time_known[updated] = True
+            self.unordered_hit[updated] = False
+            self.hit_available_us[updated] = np.uint64(stamp.available_us)
+        self.hit_origin[updated] = origin_xy
+        for index in np.flatnonzero(updated).tolist():
+            self.hit_view[index] = view_id
+        if count:
             self.revision += 1
-            self.applied_hits += len(touched)
-        return len(touched)
+            self.applied_hits += count
+        return count
+
+    def _hit_mask(self, boxes_xy):
+        """닫힌 ceil-1/floor rectangle union. 변환 전 clip으로 거대 off-grid 좌표도 안전하다."""
+        import numpy as np
+        from ..perception.point_batch import PointBoundsBatch
+        if type(boxes_xy) is PointBoundsBatch:
+            lower, upper = boxes_xy.lower[:, :2], boxes_xy.upper[:, :2]
+        else:
+            values = np.asarray(boxes_xy if type(boxes_xy) is np.ndarray else tuple(boxes_xy), dtype=np.float64)
+            if not values.size:
+                return np.zeros(self.state.shape, dtype=bool)
+            if values.ndim != 2 or values.shape[1] != 4 or not np.isfinite(values).all():
+                raise ValueError('hit input requires finite XY bounds')
+            lower, upper = values[:, :2], values[:, 2:]
+            if np.any(lower > upper):
+                raise ValueError('invalid hit XY bounds')
+        ox, oy = self.spec.origin_xy
+        r, width, height = self.spec.resolution_m, self.spec.width, self.spec.height
+        with np.errstate(over='ignore', invalid='ignore'):
+            # clip은 원 quotient가 grid 주변 범위일 때 아무 값도 바꾸지 않는다.
+            c0 = np.maximum(0., np.ceil(np.clip((lower[:, 0] - ox) / r, -1., width+1.)) - 1).astype(np.intp)
+            c1 = np.minimum(width-1., np.floor(np.clip((upper[:, 0] - ox) / r, -1., width+1.))).astype(np.intp)
+            r0 = np.maximum(0., np.ceil(np.clip((lower[:, 1] - oy) / r, -1., height+1.)) - 1).astype(np.intp)
+            r1 = np.minimum(height-1., np.floor(np.clip((upper[:, 1] - oy) / r, -1., height+1.))).astype(np.intp)
+        keep = (c0 <= c1) & (r0 <= r1)
+        c0, c1, r0, r1 = c0[keep], c1[keep]+1, r0[keep], r1[keep]+1
+        # bounded depth batch는8192행이다. 기존 tuple API의 별도 상한을 새로 만들지는 않는다.
+        dtype = np.int32 if len(lower) <= 8192 else np.int64
+        difference = np.zeros((height+1, width+1), dtype=dtype)
+        np.add.at(difference, (r0, c0), 1)
+        np.add.at(difference, (r1, c0), -1)
+        np.add.at(difference, (r0, c1), -1)
+        np.add.at(difference, (r1, c1), 1)
+        np.cumsum(difference, axis=0, dtype=dtype, out=difference)
+        np.cumsum(difference, axis=1, dtype=dtype, out=difference)
+        return difference[:-1, :-1] > 0
 
     def add_free(self, cells, stamp, *, view_id, origin_xy, certificate_complete):
         """호출자가 검산한 whole-cell certificate만 받는다. 원 time을 보존한다."""
