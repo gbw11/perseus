@@ -461,6 +461,13 @@ class GatewayMapperUplink:
             raise ValueError('J_TOF_ORIGIN')
         identity = value.sensor_instance, value.sensor_generation, value.device_session, value.pi_session, value.clock_epoch
         previous = self.last_tof.get(value.sensor_id)
+        if previous is not None and identity[2:4]==previous[0][2:4]:
+            old=previous[0]
+            if (value.sensor_generation<old[1]
+                    or value.sensor_generation==old[1] and value.sensor_instance!=old[0]
+                    or value.sensor_generation>old[1] and value.sensor_instance==old[0]
+                    or value.clock_epoch!=old[4]):
+                raise ValueError('J_TOF_SOURCE_LIFETIME')
         if previous is not None and previous[0] == identity:
             if value.source_sample < previous[1] or value.source_sample == previous[1] and raw != previous[2]:
                 raise ValueError('J_TOF_REGRESSION')
@@ -478,6 +485,16 @@ class GatewayMapperUplink:
         with self._tof_lock:
             self._tof_inputs[value.sensor_id] = raw
         return True
+
+    def revoke_tof(self,sensor):
+        """철회 가능한 unsent 사본만 버린다. 이미 child/MQTT에 제출한 원문은 TTL로 끝난다."""
+        if sensor not in (0,1):raise ValueError('J_TOF_SENSOR')
+        with self._tof_lock:self._tof_inputs.pop(sensor,None)
+        self.pending.pop(('tof',sensor),None)
+        if self.link is not None and self.link.pending is not None and self.link.pending[1]=='SOURCE_TOF':
+            _,raw=unframe(self.link.pending[0])
+            if decode(raw,schema.TofObservation).sensor_id==sensor:self.link.pending=None
+        # Keep source HWM: reset/revoke is not permission to replay old raw.
 
     def publish_scene_after_commit(self, raw):
         """현재 durable scene owner의 원 SceneGrant만 전달한다. 이 함수는 내구 승인 producer가 아니다."""

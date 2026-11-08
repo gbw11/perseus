@@ -2,7 +2,7 @@
 
 상태: **명시 선택 신규 연결 목표 / Pi 구현·고정 vector 교차 확인 / MCU·실물 수락 전**. 구형 write-only/feedback-1/feedback-2는 명시 호환 선택일 때만 사용하며 원문·vector를 보존한다. 자동 승격·downgrade는 없다.
 
-합의 설계의 원천은 Jetson-drive-docs/result/appendix-b-control-protocol.md §8–10/13.2다. 해당 원문의 설계/미배포 구분을 유지하며, 아래에서는 목표 계약과 현재 Pi 구현·미통합을 나눈다. 원 B08 cohort07 관련16파일을 manifest/archive/current bytes로 대조한 정적 근거에서 작성했다. 이 문서·vector 작성은 firmware 또는 물리 수락이 아니다.
+합의 설계의 원천은 Jetson-drive-docs/result/appendix-b-control-protocol.md §8–10/13.2다. 해당 원문의 설계/미배포 구분을 유지하며, 아래에서는 목표 계약과 Pi의 생산·소비 책임을 나눈다. 기본 제어와 선택형 ToF의 software 소비·J 전달 경계는 MCU producer·실측 보정·물리 수락과 별개다. 이 문서·vector는 firmware 또는 물리 수락을 대신하지 않는다.
 
 장치 담당 제공물과 수락 순서는 [ESP32 요청서](../requests/20261029-request-esp32.md), 기존 명시 호환은 [feedback-1/2 계약](gateway-provider-v1.md#g3-명시-선택-serial-feedback-1), 고정 bytes는 [feedback-3 vector](vectors/gateway-feedback-3.json), 실제 codec 대조 코드는 [시험](../../platform/services/gateway/tests/test_feedback3_vectors.py)을 따른다.
 
@@ -18,7 +18,7 @@ Pi Gateway의 단일 `OutputOwner`가 TX/RX·프레이밍·명령 원 기한·AC
 
 - CRC-16/CCITT-FALSE: poly `0x1021`, init `0xffff`, refin/refout false, xorout `0`; 대상은 id+length+payload. 독립 stdlib 생성기에서 `123456789 → 0x29b1` 기준을 확인했다. 실제 제품 codec과의 golden 교차시험은 별도 실행한다.
 - 모든 정수는 `<` little endian, alignment/padding 없음. UUID는 `UUID.bytes`의 RFC UUID 16B 순서이며 `bytes_le`가 아니다. SHA는 hex 문자열이 아닌 원 digest 32B다.
-- decoded raw는 payload+5B, payload 최대240B. `packet()`은 240 초과를 거절하고 `unpack()`은 delimiter 포함 frame256B 초과·불일치 길이·CRC·잘못된 COBS를 거절한다. 현9개 제품 payload 중 최장 REPORT123B/wire상한130B다. 설계된 ToF209B는 wire상한216B이며 현 serial adapter에는 아직 연결되지 않았다.
+- decoded raw는 payload+5B, payload 최대240B. `packet()`은 240 초과를 거절하고 `unpack()`은 delimiter 포함 frame256B 초과·불일치 길이·CRC·잘못된 COBS를 거절한다. 기본9개 제품 payload 중 최장 REPORT123B/wire상한130B다. 선택형 ToF209B/wire상한216B도 동일 serial adapter에서 소비하며 별도 thread/serial handle을 만들지 않는다.
 - header raw offset: id0..1, length2, payload3부터, CRC는 `3+payload_length`부터2B. 다음 표의 offset은 **payload 시작 기준**이다. raw offset은 +3.
 - RX는 최대4096B/read, 부분 frame을 유지한다. 중간 손상·oversize는 다음0 delimiter까지 버린다. 빈 delimiter는 frame이 아니다. invalid/oversize 계수는 진단이며 성공 ACK가 아니다.
 - 현 SerialSink 코드 기본 baud는115200이다. **부록B의 ToF 포함 첫 bench 목표는460800/8N1**이며 실제 USB bridge/MCU 지원과 STOP 지연 실측 전 사용 가능으로 표시하지 않는다. 115200에서 같은 ToF 율을 강행하지 않는다. USB line 설정 자체를 물리 적용 보증으로 해석하지 않는다.
@@ -182,9 +182,9 @@ Pi Gateway의 단일 `OutputOwner`가 TX/RX·프레이밍·명령 원 기한·AC
 | 113 | `stop_command_sequence` | `Q` / 8 | 원 STOP reference | 원 COMMAND exact; STOP0 |
 | 121 | `reason` | `H` / 2 | 공통 reason0..20 | 설계 enum 아래 참조; 성공0, 실패 원 이유 보존 |
 
-### TOF_FRAGMENT3 `0x0f16` · MCU → Pi (설계됨 / 현 adapter 미통합)
+### TOF_FRAGMENT3 `0x0f16` · MCU → Pi (선택형 Pi consumer 구현 / MCU·물리 미수락)
 
-원 symbol `TOF_FRAGMENT3_DESIGN`, format `<16s16sQQI16sQB16sII32sBBBBBBHI64s`, payload **209B**, raw **214B**, COBS+delimiter 최대 **216B**.
+제품 symbol `tof_feedback3.TOF_FRAGMENT3`, format `<16s16sQQI16sQB16sII32sBBBBBBHI64s`, payload **209B**, raw **214B**, COBS+delimiter 최대 **216B**. 원 고정 vector의 `TOF_FRAGMENT3_DESIGN` 명칭·bytes는 당시 설계 provenance로 보존한다.
 
 | offset | field | type / bytes | 단위·의미 | 현재 제한 / sentinel |
 |---:|---|---|---|---|
@@ -214,7 +214,7 @@ Pi Gateway의 단일 `OutputOwner`가 TX/RX·프레이밍·명령 원 기한·AC
 
 Pi HELLO는 version3+새 Pi session+등록 config digest다. MCU는 부팅 session과 실제 지원 cap, 등록 config/firmware digest, 실제 누계 encoder 폭을 ACK한다. ACK의 원 Pi echo/NIL 아닌 device session/등록 SHA/encoder ABI/필수 mask가 모두 맞아야 Pi `ready`가 된다. 이는 출력 허가나 정지 확인이 아니다. ACK만으로 DRIVE를 시작하지 않는다.
 
-현 필수 mask는 **0x01f7**. 부록B §8에 합의된 u16 의미는 ACCEPT0x1, APPLY0x2, VELOCITY0x4, STEERING0x8, STATIONARY0x10, ODOMETRY0x20, **ABS_EXPIRY0x40, CLOCK4_LATCH0x80, DIRECTION_GATE0x100, TOF_FRAGMENT0x200, STATIONARY_STEER0x400**이다. Pi 코드에는 뒤 확장 비트의 symbolic 상수 이름이 없지만 필수 mask와 HOLD의0x400 검산은 구현돼 있다. 이는 설계 의미가 미정이라는 뜻이 아니다. ToF를 쓸 profile은0x200, 정지 조향 profile은0x400도 필요하다. 0x8은 필수 mask 밖이며 AUTO HOLD의 measured steering sensor quality와 동일 개념이 아니다. 없는 기능을 cap로 광고하지 않는다.
+현 필수 mask는 **0x01f7**. 부록B §8에 합의된 u16 의미는 ACCEPT0x1, APPLY0x2, VELOCITY0x4, STEERING0x8, STATIONARY0x10, ODOMETRY0x20, **ABS_EXPIRY0x40, CLOCK4_LATCH0x80, DIRECTION_GATE0x100, TOF_FRAGMENT0x200, STATIONARY_STEER0x400**이다. 필수 mask와 HOLD의0x400 검산에 더해 선택형 ToF는 `TOF_CAPABILITY=0x200`을 검사한다. ToF를 쓸 profile에는0x200, 정지 조향 profile에는0x400도 필요하다. `tof_profiles: []`는0x200 없이 정상이며, 선택한 ToF의 cap 부족은 ToF만 unavailable로 남긴다. clock/encoder/STOP의 기존 준비조건을 ToF로 막지 않는다. 0x8은 필수 mask 밖이며 AUTO HOLD의 measured steering sensor quality와 동일 개념이 아니다. 없는 기능을 cap로 광고하지 않는다.
 
 같은 Pi 연결에서 MCU boot session이 바뀌면 DEVICE_RESTARTED fault·ready 철회다. 새 ACK/새 표본이 기존 fault를 자동 해제하지 않는다. clock/session/cumulative counter를 조용히 초기화해 같은 장치로 계속 달리지 않는다. Pi 재기동은 새 pi_session/clock_epoch로 다시 설치한다. boot session 생성·영구 저장 방식은 MCU 제공물에 명시한다.
 
@@ -281,15 +281,19 @@ Pi odometry는 원 Δticks와 source dt·승인 최대속도·Ackermann 일관�
 - ToF source 빈 목록은 허용된다. **ToF0x0f16/209B·cap0x0200·CRC32·source lifetime은 부록B §13에 이미 설계돼 있다.** 현 adapter는 이를 지원한다고 광고하지 않고 수신 kind를 거절한다. ToF[]/cap미광고는 정상 가능한 구성이다. ToF를 달 경우 아래 설계대로 MCU producer와 Pi decoder/assembler를 연결·수락해야 하며 임의 packet을 정의하지 않는다.
 - 미확인 핵심은 hash domain/manifest/NVS·실측 MCU 설정 주입/검증과 실제 firmware 구현·물리 성능이다. cap/reason/cache 규칙의 설계 존재와 구현 미확인을 구분한다.
 
-## 9.1 optional ToF의 이미 합의된 wire / 현재 미통합
+## 9.1 optional ToF의 합의 wire와 선택형 Pi 연결
 
-위 TOF_FRAGMENT3 layout은 설계 원문에서 유도한 정확209B이며 현 제품 struct가 아니다. zones의 i번째 offset은 `145+4*i`: distance:u16LE(offset+0), status:u8(+2), quality:u8(+3), i0..15다. row-major64zone을4조각으로 나눈다. distance0/65535는 invalid다. status는0 UNKNOWN/1 VALID/2 NO_TARGET/3 OUT_OF_RANGE/4 SATURATED/5 SENSOR_ERROR/6 STALE/7 BAD_RETURN. quality bit는 TARGET_VALID1/NATIVE_QUALITY_AVAILABLE2/SECOND_TARGET_OBSERVED4/REDUCED_TO_CLOSEST8/FREE_BLOCKED16, 상위 bit0이다. valid hit가 free 허가는 아니다. 가까운 invalid/merged/unresolved return은 FREE_BLOCKED로 남겨 먼 배경을 free로 carve하지 않는다. sensor별 native status→wire mapping과 AXIAL_Z/RADIAL·multi-target closest 설정은 calibration manifest·golden에 고정한다. 부록B의 VL53L5CX 초기 native free whitelist는status5이며 native9/12/13을 단순VALID/free로 쓰지 않는다. native5와 wire5(SENSOR_ERROR)는 같은 의미가 아니다. 실제 모델·2target설정/readback·multi-target 분리 성능은 아직 hardware 확인이 필요하다.
+위 TOF_FRAGMENT3 layout은 설계 원문과 같은 정확209B 제품 struct다. zones의 i번째 offset은 `145+4*i`: distance:u16LE(offset+0), status:u8(+2), quality:u8(+3), i0..15다. row-major64zone을4조각으로 나눈다. distance0/65535는 invalid다. status는0 UNKNOWN/1 VALID/2 NO_TARGET/3 OUT_OF_RANGE/4 SATURATED/5 SENSOR_ERROR/6 STALE/7 BAD_RETURN. quality bit는 TARGET_VALID1/NATIVE_QUALITY_AVAILABLE2/SECOND_TARGET_OBSERVED4/REDUCED_TO_CLOSEST8/FREE_BLOCKED16, 상위 bit0이다. TARGET_VALID에는 wire VALID와 유효 거리가 필요하지만 valid hit가 free 허가는 아니다. 가까운 invalid/merged/unresolved return은 FREE_BLOCKED로 남겨 먼 배경을 free로 carve하지 않는다. sensor별 native status→wire mapping과 AXIAL_Z/RADIAL·multi-target closest 설정은 calibration manifest·golden에 고정한다. 부록B의 VL53L5CX 초기 native free whitelist는status5이며 native9/12/13을 단순VALID/free로 쓰지 않는다. native5와 wire5(SENSOR_ERROR)는 같은 의미가 아니다. native 원 code는 이 wire에 없으므로 Pi consumer가 MCU reducer의 정직성·2target설정/readback·multi-target 분리 성능을 증명하지는 않는다.
 
 sample_crc32는 CRC32/IEEE(reflected poly0xedb88320, init/final xor0xffffffff)다. 순서 `pi_session,device_session,source_sample,device_sample_us,sample_time_error_us,clock_epoch,clock_seq,sensor_id,sensor_instance,sensor_generation,sensor_config_revision,sensor_calibration_sha256,rows,cols,frame_status,64zones`의 **393B**를 계산한다. fragment_index/count/zone_first/count 및 sample_crc32 자체는 제외한다. 네 조각 common metadata/원 sample CRC는 bitwise 같아야 한다. outerCRC16도 별도로 검사한다.
 
 sensor reset은 generation증가+새instance, motor device session/encoder/odom을 reset하지 않는다. same-generation 다른instance conflict·구generation거절·generation소진 unavailable이다. 시각오차는 ToF 전체 적분/zone 취득+IRQ/I2C 지연 구간을 감싸고 encoder latch/UART send 시각으로 대체하지 않는다. frame_status TIMING_VALID는 실제 시간근거가 있을 때만 켠다.
 
-합의된 Pi 재조립은 sensor당partial1+latest1(각512B, 총2KiB payload), 입력queue8, 첫 조각 수신+100ms 원 deadline 고정이다. 동일조각 동일bytes ignore/다른bytes 전체폐기·누락/CRC/timeout/overflow 전체폐기·새sample은옛partial폐기다. **이 절은 구현 완료 선언이 아니다.** 현 serial adapter를 ToF parser/assembler라고 표시하지 않는다.
+Pi 단일 serial owner는 outer framing/session·선택 sensor·cap0x200·원 clock epoch/seq와 실제 INSTALL ACK lease를 확인하고, 각209B와 원 완성 read 시각·변경 불가 lease 사본을 queue8에 nonblocking으로 넘긴다. overflow는 원 queued batch 전체를 폐기하고 영향 source를 fence한다. Gateway actor가 sensor당partial1+latest1을393B씩 소유한다(각512B 이하, 두 센서 합계1572B≤2KiB; 입력 queue의 최대1672B는 별도). 첫 조각의 실제 read 완료+100ms 원 deadline은 중복·retry·뒤 조각으로 늘지 않는다. 동일조각 동일bytes ignore/다른bytes 전체폐기·누락/CRC/timeout/overflow 전체폐기·새sample은옛partial폐기다. 조립·CRC32·protobuf/J 작업은 serial owner에서 하지 않는다.
+
+원 ACK lease의 Pi−device 구간을 capture까지 보수 drift 확장한 뒤 TIMING_VALID와 원 sensor time error를 함께 검사한다. `pi_sample_us`는 원 capture를 map한 midpoint이며 `clock_error_us`는 보수 half-width다. 원 만료는 `pi_sample_us+tof_max_age_us-clock_error_us-sensor_time_error_us`이고 actor poll/J 전달/재접속으로 늘지 않는다. 도착시각이나 encoder latch로 ToF source time을 바꾸지 않는다. reset은 센서별 더 높은 generation+새 instance와 실제 증가한 motor-boot 시각을 요구하며, old generation·같은 generation의 다른 instance·같은 instance의 generation 재라벨을 거절한다. device boot/session·clock epoch 변경은 기존 전역 fault/session 규칙을 따르고 ToF가 odom/encoder를 초기화하지 않는다.
+
+actor는 원 `TofObservation`을 기존 `submit_mapper_tof→submit_tof→offer_tof`로 넘긴다. 선택 profile의 leaf/config, Pi/device/host/Gateway 원천과 source HWM을 다시 검사하고 J가 original expiry로 보낸다. source 손실/reset은 아직 보내지 않은 parent/seqpacket 사본만 폐기할 수 있다. 이미 child/MQTT에 제출된 관측을 즉시 철회하는 wire는 없으므로 그런 보장을 하지 않는다. 다음 실제 higher-generation 완전 관측 또는 원 expiry로 종결한다. empty source/센서 오류/ToF timeout은 encoder·clock·STOP을 바꾸지 않으며 ToF는 출력 권한을 만들지 않는다.
 
 STOP/fault→COMMAND/FEEDBACK→encoder/clock→ToF 순위이며 ToF polling/reset이 control/encoder를 막아서는 안 된다. 센서당10Hz/8×8/4조각 software 목표다. ToF 포함 설계 RX상한29880B/s는115200/8N1 용량11520B/s를 넘고, 선택 bench460800은46080B/s다. 단일 ToF wire216B의 비선점시간4.6875ms와 driver/USB queue·기타 jitter를 실제 STOP 예산에 포함한다. 전체8조각을 TX queue에 선입력해 STOP을 뒤에 세우지 않는다. 미달이면 율/조각/독립transport를 조정하며 control E를 연장하지 않는다.
 
@@ -297,12 +301,12 @@ STOP/fault→COMMAND/FEEDBACK→encoder/clock→ToF 순위이며 ToF polling/res
 
 [gateway-feedback-3.json](vectors/gateway-feedback-3.json)은 제품을 import하지 않는 독립 stdlib CRC/COBS/struct 생성으로 고정했다. 실제 제품9종 payload와 optional ToF 설계209B를 구분한다. UUID/hash/time/jitter/encoder/오차는 codec 전용 가상값이며 실물 설정 기본값이 아니다. firmware/config hash도 명시한 fixture-only label의 digest이지 배포 바이너리 digest가 아니다.
 
-[test_feedback3_vectors.py](../../platform/services/gateway/tests/test_feedback3_vectors.py)는 기존 실제 struct·packet/unpack·Framer·frame CRC/COBS와 고정 bytes를 교차한다. STOP/전진/후진/HOLD, 상태보고, measured/estimated/미지원 slot, CRC/COBS/길이/부분/oversize, ToF의 외부 framing/393B sample CRC만 분리해 확인한다. ToF 외부 framing 성공은 현재 Feedback3SerialSink의 payload 수락·재조립 구현이 아니다. 원 byte SHA·선택자와 정적 검산은 별도 작업 영수증에 남긴다.
+[test_feedback3_vectors.py](../../platform/services/gateway/tests/test_feedback3_vectors.py)는 기존 실제 struct·packet/unpack·Framer·frame CRC/COBS와 고정 bytes를 교차한다. STOP/전진/후진/HOLD, 상태보고, measured/estimated/미지원 slot, CRC/COBS/길이/부분/oversize, ToF의 외부 framing/393B sample CRC를 확인한다. 원 시험·vector는 비교 기준으로 보존한다. [ToF 회귀](../../platform/services/gateway/tests/test_tof_feedback3.py)는 원 고정 ToF bytes와 decoder/조립·시각·세대·CRC·압력 반례, 실제 development FD/원 ACK 경로→actor→기존 J local port를 별도로 검사한다. software leaf·local port 수락과 실제 MCU·MQTT/Mapper 처리·물리 수락의 범위를 구분한다.
 
-고정 vector는 독립 stdlib 생성·byte offset/size 대조 후 Nano의 실제 Pi codec과 교차 확인했다. 이 선택자의41개 검사는 모두 통과했다. MCU codec·ToF payload consumer·실차 수락은 별도이며, 원 실행·소스와 미수락 경계는 Jetson-drive-docs/making-reports의0065 보고서에 보존한다. 반복 실행할 최소 선택자는 다음과 같다.
+고정 vector는 독립 stdlib CRC/COBS/struct와 Pi codec의 byte offset/size·원 bytes를 비교하는 기준이다. 실행별 source·결과·미수락 경계는 Jetson-drive-docs/making-reports에서 관리하며 개별 시험 경과를 계약 수락으로 대신하지 않는다. codec와 ToF consumer의 소프트웨어 선택자는 다음과 같다.
 
 ```text
-pytest -o addopts= -q platform/services/gateway/tests/test_feedback3_vectors.py
+pytest -o addopts= -q platform/services/gateway/tests/test_feedback3_vectors.py platform/services/gateway/tests/test_tof_feedback3.py
 ```
 
 원 feedback3 PTY2개와 ControlFacts 실제 PTY3개는 pyserial 준비/승인 대기 상태이며 이 codec 선택과 별개다. mock/development-fd 또는 단순 codec 성공을 그5개의 PASS·실제 USB/MCU·타이머/실측 센서·정지 수락으로 바꾸지 않는다.
@@ -317,5 +321,7 @@ pytest -o addopts= -q platform/services/gateway/tests/test_feedback3_vectors.py
 | 원 누계/품질·steering error·Vehicle | [odometry.py](../../platform/services/gateway/xenova_gateway/odometry.py) `observe_mapped`; [absolute_meter.py](../../platform/services/gateway/xenova_gateway/absolute_meter.py) |
 | 실제 단일 owner·원 E·link failure | [output_owner.py](../../platform/services/gateway/xenova_gateway/output_owner.py) |
 | private 설치 profile | [operator_profile.py](../../platform/services/gateway/xenova_gateway/operator_profile.py) `load_feedback3/private_profile` |
+| 선택 ToF raw queue·조립·원 capture mapping | [tof_feedback3.py](../../platform/services/gateway/xenova_gateway/tof_feedback3.py) `TofInbox/TofAssembler`; [verified_runner.py](../../platform/services/gateway/xenova_gateway/verified_runner.py) `configure_mapper_tof/_mapper_tof_once` |
+| 원 ToF 최신 사본·J 전달/HWM | [mapper_uplink.py](../../platform/services/gateway/xenova_gateway/mapper_uplink.py) `submit_tof/offer_tof/revoke_tof` |
 
 가상 [virtual_feedback3.py](../../platform/services/gateway/examples/virtual_feedback3.py)는 시험 대역이며 firmware 구현 기준 전체나 물리 센서 대용이 아니다. 기본 zero steering error 등 일부 옛 가상 설정은 현 quality 계약에서 유효하지 않을 수 있으므로 실물 설정으로 복사하지 않는다.

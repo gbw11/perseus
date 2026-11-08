@@ -133,6 +133,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                         j_profile=UplinkProfile.load(settings.mapper_uplink_profile)
                         uplink=GatewayMapperUplink(j_profile,host,client.identity.agent_instance_id).start()
                         runner.mapper_uplink=uplink
+                        if not runner.configure_mapper_tof(j_profile):
+                            log.warning('Selected ToF source unavailable; mapper clock/Vehicle and local control remain independent')
                         if j_profile.scene_policy is not None:runner.configure_scene(j_profile.scene_policy)
                     except (OSError,ValueError) as error:
                         # J 미설정/실패는 실제 clock trust를 만들지 않는다. 로컬 MANUAL/STOP은 유지한다.
