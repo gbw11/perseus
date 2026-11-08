@@ -6,6 +6,7 @@
 
 from collections import deque
 from dataclasses import asdict, replace
+from hashlib import sha256
 import socket
 import struct
 import threading
@@ -17,6 +18,7 @@ from uuid import UUID
 from xenova_drive_world import schema, encode, decode
 from xenova_drive_world.mapper_clock import (ClockPolicy, MapperClockOwner, build_probe, candidate_body)
 from xenova_vehicle.runtime.source_identity import SourcePolicy
+from xenova_vehicle.storage.contracts import canonical
 from xenova_vehicle.transport.jio_profile import JetsonJioProfile
 from xenova_vehicle.transport.jetson_jio import JetsonJio, _new_paho, PREFIX, VEHICLE_TOPIC, WORLD_TOPIC
 
@@ -40,8 +42,24 @@ def source():
 
 
 def bind(owner, fields=None):
-    return owner.replace_source(source() if fields is None else fields, pi_host_boot=uid(1),
+    fields=source() if fields is None else fields
+    changed=owner.replace_source(fields, pi_host_boot=uid(1),
         gateway_instance=uid(4), device_session=uid(2), pi_session=uid(5))
+    owner.replace_publication(publication(fields))
+    return changed
+
+
+def publication(fields=None, *, revision=1, scene=None):
+    fields=source() if fields is None else fields
+    return dict(service_instance=uid(50),mapper_worker=uid(51),raw_binding_sha256='c'*64,
+        **{key:fields[key] for key in ('mapper_instance','map_epoch','frame_epoch','odom_epoch',
+            'configuration','calibration','primitive')},scene_admission_ref=scene,source_binding_revision=str(revision))
+
+
+def qualify_clock(owner):
+    """실제 shared owner가 만든 returned Probe13을 callback으로 받는다. 실물 시계 수락은 아니다."""
+    deliver(owner,f'{PREFIX}/mapper/oak-1/clock/request.pb',returned_probe())
+    if owner.current_lease is None:raise AssertionError('fixture needs its actual returned clock lease')
 
 
 def vehicle(sequence=1):
@@ -133,7 +151,8 @@ class FakeClient:
         return 0
     def publish(self, topic, raw, **kwargs):
         self.calls.append(('publish', threading.get_ident()))
-        info = Info(); self.published.append((topic, raw, info)); return info
+        info = Info();info.done=topic!=WORLD_TOPIC
+        self.published.append((topic, raw, info)); return info
     def disconnect(self): self.calls.append(('disconnect', threading.get_ident()))
 
 
@@ -264,15 +283,16 @@ class JetsonJioTests(unittest.TestCase):
         self.assertEqual(owner.take_inputs(), ())
 
     def test_world_latest_preserves_original_bytes_expiry_and_sequence_without_refresh(self):
-        clock = Clock(); owner = JetsonJio(profile(), clock=clock); bind(owner)
-        raw = world(); self.assertTrue(owner.offer_world(raw, expires_j_us=1000000))
-        self.assertFalse(owner.offer_world(raw, expires_j_us=1100000))
-        self.assertEqual(owner._world.expires_us, 1000000)
-        newer = world(2); self.assertTrue(owner.offer_world(newer, expires_j_us=1000000))
+        clock = Clock(1300200); owner = JetsonJio(profile(), clock=clock); bind(owner);qualify_clock(owner)
+        publication_sha=sha256(canonical(publication())).hexdigest()
+        raw = world(); self.assertTrue(owner.offer_world(raw, expires_j_us=1400000,publication_sha256=publication_sha))
+        self.assertFalse(owner.offer_world(raw, expires_j_us=1500000,publication_sha256=publication_sha))
+        self.assertEqual(owner._world.expires_us, 1400000)
+        newer = world(2); self.assertTrue(owner.offer_world(newer, expires_j_us=1400000,publication_sha256=publication_sha))
         self.assertEqual(owner._world.raw, newer)
-        self.assertFalse(owner.offer_world(raw, expires_j_us=1000000))
-        clock.now = 1000000
-        self.assertFalse(owner.offer_world(world(3), expires_j_us=1000000))
+        self.assertFalse(owner.offer_world(raw, expires_j_us=1400000,publication_sha256=publication_sha))
+        clock.now = 1400000
+        self.assertFalse(owner.offer_world(world(3), expires_j_us=1400000,publication_sha256=publication_sha))
 
     def test_actual_source_replacement_fences_all_old_refs_and_same_source_renewal_is_noop(self):
         owner = JetsonJio(profile(), clock=Clock(1300200)); bind(owner)
@@ -317,30 +337,32 @@ class JetsonJioTests(unittest.TestCase):
     def test_non_daemon_owner_has_one_actual_inflight_and_latest_world_while_backpressured(self):
         fake = FakeClient(); owner_ids = []
         def factory(*args): owner_ids.append(threading.get_ident()); return fake
-        owner = JetsonJio(profile(), clock=Clock(), client_factory=factory); bind(owner)
-        owner.offer_world(world(), expires_j_us=1000000); owner.start()
+        owner = JetsonJio(profile(), clock=Clock(1300200), client_factory=factory); bind(owner);qualify_clock(owner)
+        publication_sha=sha256(canonical(publication())).hexdigest()
+        owner.offer_world(world(), expires_j_us=1400000,publication_sha256=publication_sha); owner.start()
         self.addCleanup(lambda: (owner.stop(), owner.join(1)))
-        self.wait_for(lambda: len(fake.published) == 1)
+        worlds=lambda:[row for row in fake.published if row[0]==WORLD_TOPIC]
+        self.wait_for(lambda: len(worlds()) == 1)
         self.assertFalse(owner._thread.daemon)
-        owner.offer_world(world(2), expires_j_us=1000000)
-        owner.offer_world(world(3), expires_j_us=1000000)
-        time.sleep(.015); self.assertEqual(len(fake.published), 1)
-        fake.published[0][2].done = True
-        self.wait_for(lambda: len(fake.published) == 2)
-        self.assertEqual((fake.published[1][0], fake.published[1][1]), (WORLD_TOPIC, world(3)))
+        owner.offer_world(world(2), expires_j_us=1400000,publication_sha256=publication_sha)
+        owner.offer_world(world(3), expires_j_us=1400000,publication_sha256=publication_sha)
+        time.sleep(.015); self.assertEqual(len(worlds()), 1)
+        worlds()[0][2].done = True
+        self.wait_for(lambda: len(worlds()) == 2)
+        self.assertEqual((worlds()[1][0], worlds()[1][1]), (WORLD_TOPIC, world(3)))
         owner.stop(); self.assertTrue(owner.join(1))
         self.assertEqual(set(row[1] for row in fake.calls), set(owner_ids))
         self.assertNotEqual(owner_ids[0], threading.get_ident())
 
     def test_expired_queued_world_is_dropped_after_network_delay_without_timestamp_refresh(self):
-        fake = FakeClient(); clock = Clock(); fake.gate = threading.Event()
-        owner = JetsonJio(profile(), clock=clock, client_factory=lambda *args: fake); bind(owner)
-        owner.offer_world(world(), expires_j_us=900300); owner.start()
+        fake = FakeClient(); clock = Clock(1300200); fake.gate = threading.Event()
+        owner = JetsonJio(profile(), clock=clock, client_factory=lambda *args: fake); bind(owner);qualify_clock(owner)
+        owner.offer_world(world(), expires_j_us=1300300,publication_sha256=sha256(canonical(publication())).hexdigest()); owner.start()
         self.addCleanup(lambda: (fake.gate.set(), owner.stop(), owner.join(1)))
         self.wait_for(fake.entered_loop.is_set)
-        clock.now = 900300; fake.gate.set()
+        clock.now = 1300300; fake.gate.set()
         self.wait_for(lambda: owner.snapshot()['counts']['expired'] == 1)
-        self.assertEqual(fake.published, [])
+        self.assertEqual([row for row in fake.published if row[0]==WORLD_TOPIC], [])
         owner.stop(); self.assertTrue(owner.join(1))
 
     def test_join_reports_an_actual_still_alive_owner_instead_of_claiming_closed(self):

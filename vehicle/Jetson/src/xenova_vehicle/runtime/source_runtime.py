@@ -123,6 +123,7 @@ class SupervisorSource:
                 mapper_boot=self.mapper_boot,clock_epoch=self.clock_epoch)
             self.origin=origin
             self.jio.replace_source(self.source,**origin)
+            self.jio.replace_publication(binding)
         elif self.context.sha256!=context.sha256:
             raise ValueError('same source incarnation changed its storage context')
         request=packet.header['request_id']
@@ -144,6 +145,7 @@ class SupervisorSource:
         on_publication(binding,context)
         self.context=context
         self.jio.replace_source(self.source,**self.origin)  # 같은 source이므로 token/clock/odom은 유지한다.
+        self.jio.replace_publication(binding)
         metadata=dict(source=self.source,origin=self.origin,geometry_origin=context.geometry_origin_fields,
             context_sha256=context.sha256)
         revision=int(binding['source_binding_revision'])
@@ -203,10 +205,12 @@ class SupervisorSource:
             if packet.kind=='SOURCE_IDENTITY':
                 self._identity(packet,bind_ready=bind_ready,on_publication=on_publication)
             elif packet.kind=='WORLD_CANDIDATE':
-                if self.owner.binding is None or packet.header['metadata']!={
-                        'publication_sha256':self.owner.binding_sha256}:
-                    raise ValueError('world candidate has no current original publication binding')
-                self.jio.offer_world(packet.body,expires_j_us=packet.expires_us)
+                metadata=packet.header['metadata']
+                if set(metadata)!={'publication_sha256'}:raise ValueError('world candidate metadata fields differ')
+                if self.owner.binding is None or metadata['publication_sha256']!=self.owner.binding_sha256:
+                    self.counts['world_fenced']+=1;continue
+                self.jio.offer_world(packet.body,expires_j_us=packet.expires_us,
+                    publication_sha256=metadata['publication_sha256'])
             elif packet.kind=='SURVEY_SUMMARY':
                 try:self._survey(packet,on_publication,now)
                 except (ValueError,TypeError,OverflowError):self.counts['survey_rejected']+=1
@@ -311,8 +315,10 @@ class MapperSource:
     def _offer_output(self,kind,raw,metadata,issued_us,expires_us):
         now=self.clock()
         if (type(issued_us) is not int or type(expires_us) is not int
-                or not issued_us<=now<expires_us<=issued_us+5_000_000):
+                or not issued_us<=now or not issued_us<expires_us<=issued_us+5_000_000):
             raise ValueError('original mapper output event/expiry required')
+        if now>=expires_us:
+            self.counts['output_expired']+=1;return False
         original=(raw,canonical(metadata),issued_us,expires_us)
         previous=self._output_heads.get(kind)
         if previous is not None and previous[0]==raw and previous[1]==original[1]:
@@ -321,6 +327,25 @@ class MapperSource:
         self._output_heads[kind]=original
         self._outputs[kind]=(raw,metadata,issued_us,expires_us,str(uuid4()))
         return True
+
+    def _flush(self):
+        """기한/문맥을 잃은 미송신 출력만 폐기한다. input/identity/DB 오류는 그대로 전파한다."""
+        original=self.link.pending
+        if original is not None and original.kind in ('WORLD_CANDIDATE','SURVEY_SUMMARY'):
+            now=self.clock()
+            expired=now>=original.expires_us
+            current=None if self.publication is None else sha256(canonical(self.publication)).hexdigest()
+            if expired or original.header['metadata'].get('publication_sha256')!=current:
+                self.link.discard_pending(original)
+                self.counts['output_expired' if expired else 'output_fenced']+=1
+        try:return self.link.flush()
+        except TimeoutError:
+            original=self.link.pending
+            if (original is None or original.kind not in ('WORLD_CANDIDATE','SURVEY_SUMMARY')
+                    or self.clock()<original.expires_us):raise
+            self.link.discard_pending(original)
+            self.counts['output_expired']+=1
+            return None
 
     def offer_world(self,raw,*,publication_sha256,issued_us,expires_us):
         """현재 원 publication의 최신 world1개를 stage한다. 이미 선택된 packet은 바꾸지 않는다."""
@@ -383,7 +408,7 @@ class MapperSource:
         self.counts['publication_changed']+=1
 
     def pump(self):
-        now=self.clock();self.link.flush()
+        now=self.clock();self._flush()
         for packet in self.link.poll():
             if not packet.issued_us<=now<packet.expires_us:
                 if packet.kind=='SOURCE_PUBLICATION':raise TimeoutError('original scene publication delivery expired')
@@ -470,7 +495,7 @@ class MapperSource:
             if not issued<=now<expires:raise TimeoutError('original bootstrap transport expired')
             if self.link.send(kind,{},body,request_id=request,issued_us=issued,expires_us=expires) is not None:
                 del self._bootstrap_pending[key]
-            self.link.flush();return
+            self._flush();return
         if self.publication is None and self._proposal_packet is None and self.material is not None and self._vehicle_head is not None:
             bootstrap=self.material[1]
             # Restore requires actual compute LOAD validation; initial copy alone does not choose identity.
@@ -481,7 +506,7 @@ class MapperSource:
             expires=now+5_000_000 if bootstrap['status']=='EMPTY' else min(now+5_000_000,self._bootstrap_report.expires_us)
             if now>=expires:raise TimeoutError('original complete source report expired before identity')
             self._proposal_packet=self.link.send('SOURCE_IDENTITY',self._proposal,issued_us=now,expires_us=expires)
-            self.link.flush()
+            self._flush()
         if self._proposal_packet is not None and self.publication is None and now>=self._proposal_packet.expires_us:
             raise TimeoutError('original source identity proposal expired without ACK')
         for kind in tuple(self._outputs):
@@ -490,7 +515,7 @@ class MapperSource:
                 del self._outputs[kind];self.counts['output_expired']+=1;continue
             if self.link.send(kind,metadata,raw,request_id=request,issued_us=issued,expires_us=expires) is not None:
                 del self._outputs[kind]
-            self.link.flush()
+            self._flush()
             break
 
     def context_bytes(self):
