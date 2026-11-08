@@ -38,7 +38,7 @@ static inline void atomic_set(atomic_t *v,long n){*v=n;}
 static inline int atomic_cas(atomic_t *v,long a,long b){if(*v!=a)return 0;*v=b;return 1;}
 struct k_mutex {int unused;};struct k_thread {int unused;};
 struct test_identity {char vm_id[37],boot_id[37],host_boot_id[37],execution_id[37],publisher_id[37];};
-struct xt_bootstrap {struct test_identity identity;char auto_instance_id[37],world_broker_ipv4[32],broker_ipv4[32],
+struct xt_bootstrap {struct test_identity identity;char auto_instance_id[37],manual_instance_id[37],world_broker_ipv4[32],broker_ipv4[32],
  world_profile[65],world_username[65],world_password[65],username[65],password[65];int world_port,port;};
 struct xd_inputs {bool connected;struct {int error;char sender[65],instance[37];
  char payload[XM_MAX_DRIVING_BYTES+1];size_t length;} control;};
@@ -134,12 +134,13 @@ int main(int argc,char **argv){
  assert(argc==3);uint8_t wire[DW_WIRE_MAX];FILE *f=fopen(argv[1],"rb");assert(f);
  size_t length=fread(wire,1,sizeof(wire),f);fclose(f);const char *scenario=argv[2];
  engine=&fixture_engine;dw_pool_init(&engine->maps);context_available=true;strcpy(gateway,gateway_id);
- probe_sent=1000000;probe_sequence=1;
+ probe_sent=1000000;auto_probe_sequence=1;
  if(!strcmp(scenario,"network-slow"))fake_now=1040001;
  if(!strcmp(scenario,"entry-failure"))clock_fail_call=1;
  if(!strcmp(scenario,"nonclock-entry-failure")){
   clock_fail_call=1;clock_available=true;current_clock.lower=4993000;current_clock.upper=5002000;
   current_clock.expires_guest=1510000;strcpy(current_clock.gateway,gateway_id);
+  strcpy(current_clock.vm,vm);strcpy(current_clock.execution,execution);strcpy(current_clock.app_instance,instance);strcpy(current_clock.host_boot,host);
  }
  if(!strcmp(scenario,"diag-failure"))clock_fail_call=2;
  if(!strcmp(scenario,"context-failure")){context_rc=-EAGAIN;clock_fail_call=1;}
@@ -151,7 +152,7 @@ int main(int argc,char **argv){
  unsigned accepted=rc==0;
  if(!strcmp(scenario,"cap")||!strcmp(scenario,"filtered")||!strcmp(scenario,"drop")){
   for(unsigned k=1;k<50;k++){
-   fake_now=1010000;probe_sent=1000000;probe_sequence=1;
+   fake_now=1010000;probe_sent=1000000;auto_probe_sequence=1;
    assert(link_received(NULL,wire,length,INT64_MAX)==0);accepted++;
   }
   memcpy(&engine->maps.trust,&current_clock.trust,sizeof(current_clock.trust));
@@ -253,7 +254,7 @@ def native(request,tmp_path_factory):
     args=['cc','-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-ffunction-sections','-fdata-sections',
         '-Wl,--gc-sections','-Wl,--wrap=dw_link_decode','-fsanitize=undefined',
         *(['-DCONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS=1'] if request.param else []),
-        *['-I'+str(p) for p in (include,HOME/'zephyr/src',HOME/'planner',world,world/'generated',world/'nanopb',mqtt/'include',mqtt/'third_party/jsmn')],
+        *['-I'+str(p) for p in (include,HOME/'zephyr/src',HOME/'planner',world,world/'generated',world/'nanopb',mqtt/'include',mqtt/'third_party/jsmn',HOME.parent/'common/xenova-drive-runtime/include')],
         str(source),str(world/'world.c'),str(world/'generated/world.pb.c'),*[str(p) for p in sorted((mqtt/'src').glob('*.c'))],
         *[str(world/'nanopb'/name) for name in ('pb_common.c','pb_decode.c','pb_encode.c')],'-lm','-o',str(binary)]
     build=subprocess.run(args,capture_output=True,text=True)

@@ -2,6 +2,7 @@
 /* One Jetson map socket, one Pi state socket, and small vehicle input on the
  * existing Pi control owner. Blocking one connection never waits in a tracker. */
 #include "lattice_input.h"
+#include <xenova/sha256.h>
 #include "lattice_app.h"
 #include "pb_encode.h"
 #include <zephyr/sys/atomic.h>
@@ -229,7 +230,7 @@ static void map_diagnostic(unsigned phase,int rc,int returned,size_t bytes){
   index,(unsigned)bytes,rc,returned,phase);
 }
 #define CLOCK_DIAG(phase,rc,body,t4,clock_rc) \
- clock_diagnostic(phase,rc,(body)->probe.sequence,(body)->probe.guest_send_us,probe_sequence,probe_sent, \
+ clock_diagnostic(phase,rc,(body)->probe.sequence,(body)->probe.guest_send_us,auto_probe_sequence,probe_sent, \
   (body)->pi_receive_us,(body)->pi_send_us,t4,clock_rc)
 #define MAP_DIAG(phase,rc,returned,bytes) map_diagnostic(phase,rc,returned,bytes)
 #define VEHICLE_DIAG(phase,rc,returned,sample,mapped,now,source_error) vehicle_diagnostic(phase,rc,returned,sample,mapped,now,source_error)
@@ -260,15 +261,27 @@ K_THREAD_STACK_DEFINE(map_stack,8192);
 K_THREAD_STACK_DEFINE(link_stack,8192);
 K_MUTEX_DEFINE(input_context_lock);
 K_MUTEX_DEFINE(applied_lock);
-static struct dl_clock current_clock;
+struct guest_clock_slot {
+ struct dl_clock pending,confirmed;
+ xenova_drive_GuestClockReceipt receipt,sent_receipt;
+ xenova_drive_DirectionGateWitness gate;dw_vehicle vehicle;
+ uint64_t sequence,sent,gate_received_guest;
+ bool pending_valid,confirmed_valid,sent_has_receipt,gate_available;
+};
+static struct guest_clock_slot guest_clocks[2];
+static struct dw_trust latest_trust;
+#define current_clock (guest_clocks[0].confirmed)
+#define clock_available (guest_clocks[0].confirmed_valid)
+#define auto_probe_sequence (guest_clocks[0].sequence)
+#define probe_sent (guest_clocks[0].sent)
 static char gateway[37];
-static bool clock_available,context_available;
+static bool context_available;
 static atomic_t stop,reason;
 static bool map_started,link_started,map_joined,link_joined;
 static xenova_drive_AppliedState applied;
 static bool application_pending;
-static uint64_t probe_sequence,probe_sent,next_probe,next_snapshot;
-static uint64_t received_vehicle;
+static uint64_t next_probe,next_snapshot;
+static atomic_ullong received_vehicle;
 static uint64_t accepted_maps,rejected_maps,rejected_links,rejected_vehicles;
 static xenova_drive_MissionGrant current_mission;
 static bool mission_available,budget_pending,budget_send_pending,budget_reply_available;
@@ -339,7 +352,7 @@ static int cache_scene(const xenova_drive_SceneGrant *grant,const struct xt_boot
     (current_clock.upper>0&&(uint64_t)current_clock.upper>INT64_MAX-guest)||
     (int64_t)guest+current_clock.upper<0)return -EAGAIN;
  uint64_t now=(uint64_t)((int64_t)guest+current_clock.upper);
- enum dw_result source=dw_pool_refresh(&engine->maps,&current_clock.trust);
+ enum dw_result source=dw_pool_refresh(&engine->maps,&latest_trust);
  if(source)return source==DW_BUSY?-EBUSY:-EPROTO;
  enum dw_result accepted=dw_pool_scene(&engine->maps,grant,now);
  return accepted==DW_OK||accepted==DW_STALE?0:accepted==DW_BUSY?-EBUSY:-EPROTO;
@@ -348,7 +361,8 @@ void dl_context(const struct xd_inputs *inputs){
  if(k_mutex_lock(&input_context_lock,K_NO_WAIT))return;
  bool valid=inputs->connected&&!inputs->control.error&&!strcmp(inputs->control.sender,"dom0-gateway")&&inputs->control.instance[0];
  if(!valid||strcmp(gateway,inputs->control.instance)){
-  clock_available=false;mission_available=false;mission_wire_size=0;gateway[0]=0;
+  for(unsigned i=0;i<2;i++){guest_clocks[i].confirmed_valid=false;guest_clocks[i].pending_valid=false;guest_clocks[i].gate_available=false;guest_clocks[i].sent=0;}
+  mission_available=false;mission_wire_size=0;gateway[0]=0;
   if(engine)dw_scene_fence(&engine->maps);
  }
  context_available=valid;
@@ -359,17 +373,49 @@ void dl_context(const struct xd_inputs *inputs){
  }
  k_mutex_unlock(&input_context_lock);
 }
-int dl_clock_get(struct dl_clock *out,uint64_t *now_pi){
+static bool same_receipt(const xenova_drive_GuestClockReceipt *a,const xenova_drive_GuestClockReceipt *b){
+ return a->probe_sequence==b->probe_sequence&&a->guest_receive_us==b->guest_receive_us&&
+  a->reply_sha256.size==32&&b->reply_sha256.size==32&&!memcmp(a->reply_sha256.bytes,b->reply_sha256.bytes,32);
+}
+static int clock_get_role(unsigned role,struct dl_clock *out,uint64_t *now_pi){
+ if(!out||!now_pi||role>1)return -EINVAL;
+ struct xt_bootstrap boot;if(xd_context_get(&boot))return -EAGAIN;
  uint64_t guest=clock_us();if(!guest||guest>INT64_MAX)return -EIO;
  if(k_mutex_lock(&input_context_lock,K_NO_WAIT))return -EBUSY;
- int rc=context_available&&clock_available&&guest<=current_clock.expires_guest?0:-EAGAIN;
- if(!rc)*out=current_clock;
+ const struct guest_clock_slot *slot=&guest_clocks[role];
+ const char *app=role?boot.manual_instance_id:boot.auto_instance_id;
+ int rc=context_available&&slot->confirmed_valid&&guest<slot->confirmed.expires_guest&&
+  !strcmp(slot->confirmed.vm,boot.identity.vm_id)&&!strcmp(slot->confirmed.execution,boot.identity.execution_id)&&
+  !strcmp(slot->confirmed.app_instance,app)&&!strcmp(slot->confirmed.host_boot,boot.identity.host_boot_id)&&
+  !strcmp(slot->confirmed.gateway,gateway)?0:-EAGAIN;
+ if(!rc){*out=slot->confirmed;if(!role)out->trust=latest_trust;}
  k_mutex_unlock(&input_context_lock);
  if(!rc){
   if((out->upper>0&&(uint64_t)out->upper>INT64_MAX-guest)||(int64_t)guest+out->upper<0)return -ERANGE;
   *now_pi=(uint64_t)((int64_t)guest+out->upper);
  }
  return rc;
+}
+int dl_clock_get(struct dl_clock *out,uint64_t *now_pi){return clock_get_role(0,out,now_pi);}
+int dl_manual_clock_get(struct dl_clock *out,uint64_t *now_pi){int rc=clock_get_role(1,out,now_pi);return !rc&&!out->acknowledged?-EAGAIN:rc;}
+int dl_direction_get(bool manual,xenova_drive_DirectionGateWitness *out,uint64_t now){
+ if(!out)return -EINVAL;
+ unsigned role=manual?1:0;struct dl_clock clock;uint64_t current;
+ int rc=clock_get_role(role,&clock,&current);if(rc)return rc;
+ if(!clock.acknowledged)return -EAGAIN;
+ if(now<current)now=current;
+ if(k_mutex_lock(&input_context_lock,K_NO_WAIT))return -EBUSY;
+ struct guest_clock_slot *slot=&guest_clocks[role];
+ rc=slot->gate_available&&slot->gate.control_generation==control_generation&&slot->gate.producer_role==role+1&&
+  slot->gate.valid_until_pi_us>now?0:-EAGAIN;
+ if(!rc)*out=slot->gate;
+ k_mutex_unlock(&input_context_lock);if(rc)return rc;
+ dw_vehicle vehicle;if(!engine||dw_vehicle_latest(&engine->odometry,&vehicle))return -EAGAIN;
+ if(!vehicle.has_pi_session||!vehicle.has_gateway_instance||strcmp(vehicle.gateway_instance,clock.gateway)||
+    strcmp(out->pi_session,vehicle.pi_session)||strcmp(out->device_session,vehicle.device_session)||
+    vehicle.sequence<out->vehicle_sequence||now<vehicle.pi_sample_us||
+    now-vehicle.pi_sample_us+vehicle.clock_error_us>lp_selected_config.pose_age_us)return -EXDEV;
+ return 0;
 }
 int dl_mission_get(xenova_drive_MissionGrant *out,uint64_t now){
  if(!out)return -EINVAL;
@@ -503,48 +549,105 @@ static int link_received(void *unused,const uint8_t *bytes,size_t count,int64_t 
  }
  if(incoming.which_payload==xenova_drive_DriveLink_clock_tag){
   const xenova_drive_ClockReply *reply=&incoming.payload.clock;const xenova_drive_ClockProbe *probe=&reply->probe;
-  uint64_t now=clock_rc?0:received_us;
-  if(clock_rc)atomic_set(&reason,DW_TIME);
-  if(!probe_sent||probe->sequence!=probe_sequence||probe->guest_send_us!=probe_sent||now<probe_sent||
+  unsigned role=!strcmp(probe->app_instance,boot.auto_instance_id)?0:!strcmp(probe->app_instance,boot.manual_instance_id)?1:2;
+  if(role>1||clock_rc||!received_us||received_us>INT64_MAX){rejected_links++;CLOCK_DIAG(clock_rc?6:1,-EPROTO,reply,received_us,clock_rc);return -EPROTO;}
+  struct guest_clock_slot *slot=&guest_clocks[role];uint64_t sent=slot->sent,now=received_us;
+  if(!sent||probe->sequence!=slot->sequence||probe->guest_send_us!=sent||now<sent||
    strcmp(probe->vm,boot.identity.vm_id)||strcmp(probe->execution,boot.identity.execution_id)||
-   strcmp(probe->app_instance,boot.auto_instance_id)||strcmp(reply->host_boot,boot.identity.host_boot_id)||
-   reply->pi_receive_us>reply->pi_send_us||reply->pi_send_us>INT64_MAX||now>INT64_MAX||
-   strcmp(reply->vehicle.vehicle,lp_selected_config.vehicle)||strcmp(reply->vehicle.calibration,lp_selected_config.calibration)||
+   strcmp(reply->host_boot,boot.identity.host_boot_id)||reply->pi_receive_us>reply->pi_send_us||
+   reply->pi_send_us>INT64_MAX||strcmp(reply->vehicle.vehicle,lp_selected_config.vehicle)||
+   strcmp(reply->vehicle.calibration,lp_selected_config.calibration)||
    (reply->has_trust&&(strcmp(reply->trust.configuration,lp_selected_config.id)||strcmp(reply->trust.primitive,lp_selected_assets.sha256)))){
-   rejected_links++;CLOCK_DIAG(clock_rc?6:1,-EPROTO,reply,received_us,clock_rc);return -EPROTO;
+   rejected_links++;CLOCK_DIAG(1,-EPROTO,reply,received_us,clock_rc);return -EPROTO;
   }
-  int64_t lower=(int64_t)reply->pi_send_us-(int64_t)now;
-  int64_t upper=(int64_t)reply->pi_receive_us-(int64_t)probe_sent;
+  int64_t lower=(int64_t)reply->pi_send_us-(int64_t)now,upper=(int64_t)reply->pi_receive_us-(int64_t)sent;
 #if defined(CONFIG_XENOVA_DRIVE_NATIVE_TEST)
-  if(clock_trace_count<16){uint64_t *row=clock_trace[clock_trace_count++];row[0]=probe_sent;row[1]=now;row[2]=reply->pi_receive_us;row[3]=reply->pi_send_us;}
+  if(clock_trace_count<16){uint64_t *row=clock_trace[clock_trace_count++];row[0]=sent;row[1]=now;row[2]=reply->pi_receive_us;row[3]=reply->pi_send_us;}
 #endif
+  if(reply->has_guest_clock_valid_until_pi_us){
+   uint64_t e=reply->guest_clock_valid_until_pi_us,span=e-reply->pi_receive_us,rtt=now-sent;
+   unsigned ppm=lp_selected_config.guest_drift_ppm,error=lp_selected_config.guest_timestamp_error_us;
+   if(e<=reply->pi_receive_us||span>1000000||rtt>1000000||!ppm||ppm>=1000000||!error||error>=1000000)return -EPROTO;
+   /* 원 E 전체를 덮는다. Pi acceptance 때 알려진 RTT+lease보다 좁게 잡지 않는다.
+    * paired profile의 원 Pi support window를 사용하며 모든 계산은 checked integer다. */
+   /* Pi support를 guest 기간으로 감쌀 때의 같은 보수 drift 식이다.
+    * Pi owner의 ceil(ppm*duration/(1e6-ppm))보다 좁은 경계를 만들지 않는다. */
+   uint64_t duration=2*span+rtt,denominator=1000000-ppm;
+   if(duration>(UINT64_MAX-denominator+1)/ppm)return -ERANGE;
+   uint64_t pad=2*(uint64_t)error+(duration*ppm+denominator-1)/denominator;
+   if(pad>INT64_MAX||lower<INT64_MIN+(int64_t)pad||upper>INT64_MAX-(int64_t)pad)return -ERANGE;
+   lower-=(int64_t)pad;upper+=(int64_t)pad;
+  }
   if(upper<lower||(uint64_t)upper-(uint64_t)lower>lp_selected_config.clock_error_us){
    rejected_links++;CLOCK_DIAG(2,-ETIME,reply,received_us,clock_rc);return -ETIME;
   }
+  if((upper>0&&(uint64_t)upper>INT64_MAX-now)||(int64_t)now+upper<0)return -ERANGE;
+  uint64_t pi_now=(uint64_t)((int64_t)now+upper),expiry=0;
+  /* Pi가 원 reply 생성 전에 정한 E만 보존한다. ACK 수신은 기한 갱신이 아니다. */
+  bool numeric=reply->has_guest_clock_valid_until_pi_us&&reply->guest_clock_valid_until_pi_us>pi_now;
+  if(numeric){uint64_t e=reply->guest_clock_valid_until_pi_us;
+   if(e>INT64_MAX||(upper<0&&(uint64_t)(-(upper+1))+1>INT64_MAX-e)||(upper>0&&e<(uint64_t)upper))return -ERANGE;
+   expiry=(uint64_t)((int64_t)e-upper);
+  }
+  xenova_drive_GuestClockReceipt receipt={0};receipt.probe_sequence=probe->sequence;receipt.guest_receive_us=now;
+  receipt.reply_sha256.size=32;if(!xdr_sha256(bytes,count,receipt.reply_sha256.bytes))return -EINVAL;
   if(k_mutex_lock(&input_context_lock,K_NO_WAIT)){CLOCK_DIAG(3,-EBUSY,reply,received_us,clock_rc);return -EBUSY;}
   if(!context_available||strcmp(gateway,reply->gateway_instance)){
    k_mutex_unlock(&input_context_lock);CLOCK_DIAG(4,-EXDEV,reply,received_us,clock_rc);return -EXDEV;
   }
-  if(reply->has_current_mission){int granted=cache_grant(&reply->current_mission,&boot);if(granted&&granted!=-ESTALE){k_mutex_unlock(&input_context_lock);return granted;}}
-  else mission_available=false;
-  bool had_clock=clock_available;struct dw_trust previous_source=current_clock.trust;
-  struct dl_clock *out=&current_clock;memset(out,0,sizeof(*out));out->lower=lower;out->upper=upper;
-  out->expires_guest=now+lp_selected_config.clock_lease_us;strcpy(out->gateway,gateway);
-  const xenova_drive_WorldTrust *t=&reply->trust;struct dw_trust *d=&out->trust;
-  strcpy(d->vehicle,reply->vehicle.vehicle);strcpy(d->mapper_boot,t->mapper_boot);strcpy(d->mapper_instance,t->mapper_instance);
-  strcpy(d->map_epoch,t->map_epoch);strcpy(d->frame_epoch,t->frame_epoch);strcpy(d->odom_epoch,reply->vehicle.odom_epoch);
-  strcpy(d->configuration,t->configuration);strcpy(d->calibration,reply->vehicle.calibration);strcpy(d->primitive,t->primitive);
-  strcpy(d->clock.epoch,t->clock_epoch);d->clock.lower_offset_us=t->lower_offset_us;d->clock.upper_offset_us=t->upper_offset_us;
-  d->clock.expires_pi_us=t->expires_pi_us;d->clock.max_error_us=MIN(t->max_error_us,lp_selected_config.clock_error_us);d->max_live_age_us=lp_selected_config.live_age_us;
-  /* Same-source time renewal preserves the Scene generation. Missing/changed
-   * source cannot keep retained output alive until another map arrives. */
-  if(engine){
-   enum dw_result refreshed=reply->has_trust?dw_pool_refresh(&engine->maps,d):DW_SOURCE;
-   bool same_pending=refreshed==DW_BUSY&&had_clock&&dw_trust_same_source(&previous_source,d);
-   if(refreshed&&!same_pending)dw_scene_fence(&engine->maps);
+  /* Echo만으로 승인하지 않는다. 실제 보낸 receipt와 명시 Pi ACK를 모두 대조한다. */
+  if(slot->pending_valid&&slot->sent_has_receipt&&probe->has_receipt&&reply->has_accepted_receipt&&
+     same_receipt(&slot->receipt,&slot->sent_receipt)&&same_receipt(&slot->sent_receipt,&probe->receipt)&&
+     same_receipt(&slot->sent_receipt,&reply->accepted_receipt)&&now<slot->pending.expires_guest){
+   slot->confirmed=slot->pending;slot->confirmed.acknowledged=true;slot->confirmed_valid=true;
   }
-  clock_available=true;k_mutex_unlock(&input_context_lock);
-  CLOCK_DIAG(5,0,reply,received_us,clock_rc);probe_sent=0;return 0;
+  if(!reply->has_guest_clock_valid_until_pi_us&&now<=(uint64_t)INT64_MAX-lp_selected_config.clock_lease_us){
+   /* 구형 reply는 기존 legacy profile에만 사용한다. command3 ACK로 승격하지 않는다. */
+   struct dl_clock legacy={.lower=lower,.upper=upper,.expires_guest=now+lp_selected_config.clock_lease_us};
+   strcpy(legacy.gateway,gateway);strcpy(legacy.vm,probe->vm);strcpy(legacy.execution,probe->execution);
+   strcpy(legacy.app_instance,probe->app_instance);strcpy(legacy.host_boot,reply->host_boot);
+   slot->confirmed=legacy;slot->confirmed_valid=true;
+  }
+  slot->pending_valid=numeric;
+  if(numeric){struct dl_clock *out=&slot->pending;memset(out,0,sizeof(*out));out->lower=lower;out->upper=upper;
+   out->expires_guest=expiry;out->expires_pi=reply->guest_clock_valid_until_pi_us;out->probe_sequence=probe->sequence;
+   strcpy(out->gateway,gateway);strcpy(out->vm,probe->vm);strcpy(out->execution,probe->execution);
+   strcpy(out->app_instance,probe->app_instance);strcpy(out->host_boot,reply->host_boot);slot->receipt=receipt;
+   strcpy(out->trust.vehicle,reply->vehicle.vehicle);strcpy(out->trust.odom_epoch,reply->vehicle.odom_epoch);
+   strcpy(out->trust.calibration,reply->vehicle.calibration);
+  }
+  slot->gate_available=reply->has_direction_gate;
+  if(slot->gate_available){slot->gate=reply->direction_gate;slot->gate_received_guest=now;}
+  slot->vehicle=reply->vehicle;slot->sent=0;
+  if(!role){
+   if(reply->has_current_mission){int granted=cache_grant(&reply->current_mission,&boot);if(granted&&granted!=-ESTALE){k_mutex_unlock(&input_context_lock);return granted;}}
+   else mission_available=false;
+   struct dw_trust previous_source=latest_trust;bool had_source=latest_trust.vehicle[0]!=0;
+   const xenova_drive_WorldTrust *t=&reply->trust;struct dw_trust d={0};
+   strcpy(d.vehicle,reply->vehicle.vehicle);strcpy(d.mapper_boot,t->mapper_boot);strcpy(d.mapper_instance,t->mapper_instance);
+   strcpy(d.map_epoch,t->map_epoch);strcpy(d.frame_epoch,t->frame_epoch);strcpy(d.odom_epoch,reply->vehicle.odom_epoch);
+   strcpy(d.configuration,t->configuration);strcpy(d.calibration,reply->vehicle.calibration);strcpy(d.primitive,t->primitive);
+   strcpy(d.clock.epoch,t->clock_epoch);d.clock.lower_offset_us=t->lower_offset_us;d.clock.upper_offset_us=t->upper_offset_us;
+   d.clock.expires_pi_us=t->expires_pi_us;d.clock.max_error_us=MIN(t->max_error_us,lp_selected_config.clock_error_us);d.max_live_age_us=lp_selected_config.live_age_us;
+   if(engine){enum dw_result refreshed=reply->has_trust?dw_pool_refresh(&engine->maps,&d):DW_SOURCE;
+    bool same_pending=refreshed==DW_BUSY&&had_source&&dw_trust_same_source(&previous_source,&d);
+    if(refreshed&&!same_pending)dw_scene_fence(&engine->maps);
+   }
+   latest_trust=d;if(!slot->confirmed.acknowledged)slot->confirmed.trust=d;
+  }
+  /* fresh Vehicle/Gate와 원 confirmed numeric을 분리한다. */
+  bool confirmed=slot->confirmed_valid&&now<slot->confirmed.expires_guest;struct dl_clock mapping=slot->confirmed;
+  k_mutex_unlock(&input_context_lock);
+  if(confirmed&&engine){dw_vehicle sample=reply->vehicle;uint64_t current=0;
+   if((mapping.upper<=0||(uint64_t)mapping.upper<=INT64_MAX-now)&&(int64_t)now+mapping.upper>=0)current=(uint64_t)((int64_t)now+mapping.upper);
+   uint64_t width=(uint64_t)mapping.upper-(uint64_t)mapping.lower;
+   if(current>=sample.pi_sample_us&&current-sample.pi_sample_us+sample.clock_error_us<=lp_selected_config.pose_age_us&&width<=UINT32_MAX-sample.clock_error_us){
+    sample.clock_error_us+=(uint32_t)width;enum dw_result added=dw_odom_add(&engine->odometry,&sample);
+    if(added==DW_EPOCH&&!dw_odom_reset(&engine->odometry))added=dw_odom_add(&engine->odometry,&sample);
+    if(!added)received_vehicle=sample.pi_sample_us;
+   }
+  }
+  CLOCK_DIAG(5,0,reply,received_us,clock_rc);return 0;
  }
  if(incoming.which_payload==xenova_drive_DriveLink_scene_grant_tag){
   if(k_mutex_lock(&input_context_lock,K_NO_WAIT))return -EBUSY;
@@ -707,13 +810,25 @@ static void state(void *a,void *b,void *c){
    (void)LINK_POLL(&link_client);uint64_t now=clock_us();
    if(link_client.connected&&now>=next_probe){
     struct xt_bootstrap boot;
-    if(!xd_context_get(&boot)&&probe_sequence<UINT64_MAX){
-     memset(&outgoing,0,sizeof(outgoing));outgoing.major=2;outgoing.which_payload=xenova_drive_DriveLink_probe_tag;
-     xenova_drive_ClockProbe *p=&outgoing.payload.probe;strcpy(p->vm,boot.identity.vm_id);
-     strcpy(p->execution,boot.identity.execution_id);strcpy(p->app_instance,boot.auto_instance_id);
-     p->sequence=++probe_sequence;p->guest_send_us=now;probe_sent=now;
-     (void)binary_publish(&link_client,out_topic,&outgoing);next_probe=now+lp_selected_config.clock_lease_us/2;
+    if(!xd_context_get(&boot))for(unsigned role=0;role<2;role++){
+     const char *role_app=role?boot.manual_instance_id:boot.auto_instance_id;if(!role_app[0])continue;
+     uint64_t sent_at=clock_us();if(!sent_at||sent_at>INT64_MAX)break;
+     if(k_mutex_lock(&input_context_lock,K_NO_WAIT))break;
+     struct guest_clock_slot *slot=&guest_clocks[role];
+     /* role마다 outstanding 하나이며 손실은 새 probe로 회복한다. */
+     bool send=(!slot->sent||(sent_at>=slot->sent&&sent_at-slot->sent>=lp_selected_config.clock_lease_us/2))&&slot->sequence<INT64_MAX;
+     if(send){memset(&outgoing,0,sizeof(outgoing));outgoing.major=2;outgoing.which_payload=xenova_drive_DriveLink_probe_tag;
+      xenova_drive_ClockProbe *p=&outgoing.payload.probe;strcpy(p->vm,boot.identity.vm_id);
+      strcpy(p->execution,boot.identity.execution_id);strcpy(p->app_instance,role_app);
+      p->sequence=++slot->sequence;p->guest_send_us=sent_at;slot->sent=sent_at;
+      p->has_receipt=slot->pending_valid&&sent_at<slot->pending.expires_guest;
+      if(p->has_receipt)p->receipt=slot->receipt;
+      slot->sent_has_receipt=p->has_receipt;if(p->has_receipt)slot->sent_receipt=p->receipt;
+     }
+     k_mutex_unlock(&input_context_lock);if(send)(void)binary_publish(&link_client,out_topic,&outgoing);
     }
+    uint64_t interval=MIN(lp_selected_config.clock_lease_us/4,lp_selected_config.pose_age_us/4);
+    next_probe=now+(interval>2000?interval:2000);
    }
    if(link_client.connected&&!k_mutex_lock(&applied_lock,K_NO_WAIT)){
     bool send=application_pending;

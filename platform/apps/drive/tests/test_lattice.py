@@ -23,7 +23,7 @@ def library(tmp_path_factory):
     output=tmp_path_factory.mktemp('lattice-product')/'lattice.so'
     world=HOME/'world';planner=HOME/'planner'
     sources=[world/'world.c',world/'generated/world.pb.c',*(world/'nanopb'/v for v in ('pb_common.c','pb_decode.c','pb_encode.c')),
-             planner/'lattice.c',planner/'engine.c',planner/'generated/primitives.c',HOME/'tests/lattice_bridge.c']
+             planner/'task_reference.c',planner/'lattice.c',planner/'engine.c',planner/'generated/primitives.c',HOME/'tests/lattice_bridge.c']
     cmd=['cc','-std=c11','-D_POSIX_C_SOURCE=200809L','-DTEST_PRIMITIVE_SHA="'+fixture.PRIMITIVE+'"','-O2','-g','-Wall','-Wextra','-Werror',
          '-fsanitize=undefined','-shared','-fPIC',*[f'-I{p}' for p in (world,world/'generated',world/'nanopb',planner)],
          *map(str,sources),'-lm','-o',str(output)]

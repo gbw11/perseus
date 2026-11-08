@@ -5,8 +5,8 @@ import subprocess
 from uuid import UUID
 
 import pytest
-from test_world import HOME, fixture, modern_world
-from test_engine import lane_grant
+from test_world import HOME, fixture
+from test_engine import lane_grant, modern_world
 from xenova_drive_world import schema, encode
 
 def world_for_scene(grant, trust, *, observed_mapper_us=1_000_000):
@@ -54,7 +54,7 @@ def scene_probe(tmp_path_factory):
     world=HOME/'world';planner=HOME/'planner'
     sources=[world/'world.c',world/'generated/world.pb.c',
         *[world/'nanopb'/name for name in ('pb_common.c','pb_decode.c','pb_encode.c')],
-        planner/'lattice.c',planner/'engine.c',planner/'generated/primitives.c',
+        planner/'task_reference.c',planner/'lattice.c',planner/'engine.c',planner/'generated/primitives.c',
         HOME/'tests/scene_consumption_probe.c']
     command=['cc','-std=c11','-O2','-g','-Wall','-Wextra','-Werror',
         '-fsanitize=address,undefined',

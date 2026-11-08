@@ -49,4 +49,33 @@ void manual_target(const struct manual_cfg *cfg, uint32_t keys, float *v_mps, fl
 void manual_step(const struct manual_cfg *cfg, const struct manual_inputs *in, struct manual_command *out,
 		 const char **state);
 
+/* input2/3 계산자의 실제 Pi clock/차량/권위 검산 결과. wire나 copied READY가
+ * 아니라 호출 시점의 소비자 증거다. STOP 준비는 원 STOP/APPLIED+fresh stationary를
+ * 확인한 경계만 true로 준다. 실제 같은 방향/SID 승계에서는 Gateway가 검산한
+ * 원 gate carry도 사용할 수 있으며 단순히 측정속도 0이라고 true로 만들지 않는다.
+ * continuation은 실제 같은 SID 승계 검산 결과다. 최초 prepared B의 current
+ * continuation은 별도 stop_ready/serial 번호를 발명하지 않고 한 번 진입한다. */
+struct manual_lease_facts {
+ uint64_t now_pi_us,command_until_pi_us,stop_sequence;
+ bool current,stop_ready,continuation;
+};
+struct manual_lease_gate {
+ struct xm_manual_input last;
+ uint64_t rejected_action,used_stop_sequence;
+ uint32_t generation;
+ int direction;
+ bool seen,blocked,waiting_stop,running,continuation_closed;
+};
+/* gate는 실제 joined app 실행 수명에 속한다. fault/fence/만료·mode 전환으로
+ * zero-init하여 최초 continuation permit을 재발급하지 않는다. 새 실행만 초기화한다. */
+struct manual_lease_command {
+ struct manual_command target;
+ uint64_t valid_until_pi_us;
+ bool stop;
+};
+/* 원 입력 E·순번·generation을 수정하지 않는다. nonzero 실패는 STOP 결과이며
+ * 원 action을 기다렸다가 자동 실행하지 않는다. legacy manual_step과 분리한다. */
+int manual_lease_step(const struct manual_cfg *,struct manual_lease_gate *,const struct xm_manual_input *,
+ const struct xm_vehicle_control *,const struct manual_lease_facts *,struct manual_lease_command *);
+
 #endif /* XENOVA_MANUAL_H_ */

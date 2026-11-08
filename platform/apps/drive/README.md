@@ -511,3 +511,38 @@ R41 보드의 같은 소스 진단형23에서 원 실행에 맞는 AUTO 명령85
 `CONTROL_APPLY_UNCONFIRMED`로 끝났고 출력권은 차단됐다. PTY 주행·정상 복귀·메모리 반환까지
 통과한 결과는 아니다. 원 명령·기한·현재성·권한을 각각 구별한
 [실보드 후속 기록](../../../docs/verification/recovery-scenario-closure-20261030.md#clock-retry-submit-20261106)을 따른다.
+
+
+### 선택 차로·양방향 추적과 원 clock 확인
+
+현대 LaneModel 실행 경로는 `task_reference.c`에서 선택 차로와 공동 station basis를 분리한다.
+같은 immutable path의 home/from/selected/changing과 원 basis prefix를 State tag33으로 내보내며,
+feature8과 본문 존재는 일치해야 한다. 채택은 원 Vehicle sequence의 실제 표본, 현재 차량 오차,
+현재 source/basis, 전체 path와 원 Scene/Mission을 다시 검사한다. 현대 profile의 본문 없는
+사본은 채택하지 않으며 기존 legacy World0/1의 일반 경로는 이 조건으로 일괄 차단하지 않는다.
+
+`lp_start_signed()`는 명시한 point goal의 전진·후진과 최대2 cusp를 같은 work budget으로 검색한다.
+node key에 gear/cusp가 포함되고 경로는 최대3 segment와 명시적 zero cusp pair를 보존한다.
+추적기는 현재 segment의 단조 progress·원 표본 시각·이동 가능 창을 사용한다. body-frame 후진
+곡률에 별도 servo 부호 반전을 더하지 않으며 종점 저장 속도0을 carrot의 전체 속도로 사용하지
+않는다. 종점은 현재·제동 예상 위치와 yaw를 함께 확인한다. 이 검색 API의 free-space algorithm
+profile과 실제 parking Mission/slot 선택은 구분한다. kind2 parking phase owner는 후속 연결이다.
+
+현대 command3은 원 실제 completion의 calculation sequence/end timestamp, 확인된 원 numeric
+clock probe sequence와 원 E를 보존한다. 실제 MQTT DriveLink 전체 raw bytes의 SHA256/P4를
+다음 Probe에 전달하고, Pi의 명시 `accepted_receipt`가 같은 원 receipt와 일치할 때만 이전 numeric
+lease를 확인한다. 새 Reply의 Vehicle/Gate는 fresh 상태이고 numeric lease와 별도로 소비한다.
+AUTO/MANUAL은 기존 state 소켓의 서로 다른 app identity로 확인하며 MANUAL은 Jetson World를
+요구하지 않는다. 구형 Reply의 로컬 clock 경로는 legacy용이며 command3 승인으로 승격하지 않는다.
+
+CUSP는 원 STOP calculation과 Pi serial STOP sequence를 구별한다. 최초 phase E와 원 STOP job을
+pin하고, 실제 현재 Gate/Vehicle/원 full job·다음 기어를 대조한 뒤 한 번만 진행한다.
+HOLD_STEER는 별도 명령이며 원 STOP phase와 개별100ms 출력 기한을 늘리지 않는다.
+StateCopy의 READY는 이 증거를 대신하지 않는다. 일반 FOLLOW/MANUAL의 준비된 A/B 승계를
+CUSP 예외로 일괄 낮추지 않는다.
+
+`lattice-lab-1`의 direction phase10s, guest timestamp error1000us·drift100ppm은 명시한
+소프트웨어 실험 설정이며 실측 운영 한계가 아니다. Pi GuestClockPolicy와 같은 설치 profile로
+pin해야 한다. 원 ReplyE−PiReceive span과 guest RTT의 보수 오차 확장을 적용하고 원 Pi E는
+ACK/clock renewal/송신 때 다시 발급하지 않는다. 물리 mount·steering·제동·clock 오차 수락은
+해당 실측 profile의 책임이다.

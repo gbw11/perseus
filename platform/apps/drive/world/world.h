@@ -17,6 +17,7 @@
 #define DW_LOCALIZATION_BOUNDS 8u
 #define DW_WORLD_FEATURES 15u
 #define DW_STATE_FEATURES 7u
+#define DW_TASK_REFERENCE 8u
 #define DW_CELL_ROAD 8u
 typedef xenova_drive_Pose dw_pose;
 typedef xenova_drive_Point dw_point;
@@ -96,6 +97,8 @@ void dw_odom_init(struct dw_odometry *);
 /* Authenticated input owner changes epoch; old map anchors become unusable. */
 enum dw_result dw_odom_reset(struct dw_odometry *);
 enum dw_result dw_vehicle_latest(struct dw_odometry *,dw_vehicle *);
+/* 원 State의 Vehicle sequence를 최신 표본으로 대체하지 않는 유한 exact 조회. */
+enum dw_result dw_vehicle_sequence(struct dw_odometry *,uint64_t,dw_vehicle *);
 enum dw_result dw_current_pose(const dw_world *,struct dw_odometry *,uint64_t,uint64_t,dw_pose *,dw_vehicle *);
 bool dw_pose_finite(dw_pose);
 float dw_angle(float);

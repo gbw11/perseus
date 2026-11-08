@@ -36,6 +36,15 @@ static bool nil_uuid(const uint8_t *p){
  for(unsigned i=0;i<16;i++)if(p[i])return false;
  return true;
 }
+static bool source_uuid_text(const char *text){
+ bool nonzero=false;
+ if(strlen(text)!=36)return false;
+ for(unsigned i=0;i<36;i++){
+  if(i==8||i==13||i==18||i==23){if(text[i]!='-')return false;}
+  else{if(!((text[i]>='0'&&text[i]<='9')||(text[i]>='a'&&text[i]<='f')))return false;nonzero|=text[i]!='0';}
+ }
+ return nonzero;
+}
 static bool scene_pair(const uint8_t *uuid,uint64_t revision){return nil_uuid(uuid)==(revision==0);}
 static bool simple(const dw_point *points,size_t count,bool closed){
  size_t edges=closed?count:count-1;
@@ -218,11 +227,15 @@ static size_t exact_bytes(const pb_msgdesc_t *desc,unsigned field){
  if(desc==xenova_drive_MapperClockProbe_fields)return field==7?16:0;
  if(desc==xenova_drive_MapperClockReply_fields)return field==5?16:0;
  if(desc==xenova_drive_SceneGrant_fields)return field==17?16:field==21||field==24?32:0;
+ if(desc==xenova_drive_GuestClockReceipt_fields)return field==2?32:0;
+ if(desc==xenova_drive_DirectionGateWitness_fields)return field==9||field==12?16:0;
  if(desc==xenova_drive_SurveySummary_fields)return field==2||field==3?16:field==15||field==16?32:0;
  if(desc==xenova_drive_TofObservation_fields)return field==25?16:field==17?128:field==18||field==19?64:0;
  return 0;
 }
 static size_t message_cap(const pb_msgdesc_t *desc){
+ if(desc==xenova_drive_GuestClockReceipt_fields)return 64;
+ if(desc==xenova_drive_DirectionGateWitness_fields)return 512;
  if(desc==xenova_drive_LaneModel_fields)return 1408;
  if(desc==xenova_drive_ParkingSlot_fields)return 256;
  if(desc==xenova_drive_MapLocalization_fields||desc==xenova_drive_SceneAdmissionRef_fields)return 96;
@@ -231,7 +244,7 @@ static size_t message_cap(const pb_msgdesc_t *desc){
  if(desc==xenova_drive_MissionBudgetReply_fields)return 1536;
  if(desc==xenova_drive_SurveySummary_fields)return 288;
  if(desc==xenova_drive_MissionGrant_fields||desc==xenova_drive_MapperClockProbe_fields||desc==xenova_drive_MapperClockReply_fields||
-    desc==xenova_drive_SceneGrant_fields||desc==xenova_drive_TofObservation_fields)return 1024;
+    desc==xenova_drive_SceneGrant_fields||desc==xenova_drive_TofObservation_fields||desc==xenova_drive_TaskReferenceState_fields)return 1024;
  return DW_WIRE_MAX;
 }
 static bool wire_valid(const uint8_t *p,size_t n,const pb_msgdesc_t *desc,unsigned depth) {
@@ -506,8 +519,21 @@ static enum dw_result budget_reply_validate(const xenova_drive_MissionBudgetRepl
     m->has_grant!=(m->result==1)||(m->has_grant&&m->grant.kind!=2))return DW_ARRAY;
  return m->has_grant?grant_validate(&m->grant):DW_OK;
 }
+static enum dw_result task_state_validate(const dw_state *state){
+ if(!state->has_task_reference)return DW_OK;
+ const xenova_drive_TaskReferenceState *task=&state->task_reference;
+ if(!(state->world_features&DW_LANE_MODEL)||!task->home_lane_id||!task->from_lane_id||!task->selected_lane_id||
+    (task->changing?task->from_lane_id==task->selected_lane_id:task->from_lane_id!=task->selected_lane_id)||
+    !positive63(task->basis_revision)||task->basis_prefix_count<2||task->basis_prefix_count>64)return DW_SOURCE;
+ if(!open_basis(task->basis_prefix,task->basis_prefix_count))return DW_GEOMETRY;
+ size_t encoded=0;
+ if(!pb_get_encoded_size(&encoded,xenova_drive_TaskReferenceState_fields,task)||encoded>1024)return DW_TOO_LARGE;
+ return DW_OK;
+}
 static enum dw_result state_validate(const dw_state *out) {
- if(out->major!=2||!features(out->world_features)||!out->has_state_features||out->state_features!=DW_STATE_FEATURES)return DW_VERSION;
+ uint32_t expected=DW_STATE_FEATURES|(out->has_task_reference?DW_TASK_REFERENCE:0);
+ if(out->major!=2||!features(out->world_features)||!out->has_state_features||out->state_features!=expected)return DW_VERSION;
+ enum dw_result task_result=task_state_validate(out);if(task_result)return task_result;
  if(!out->has_mission||!out->complete||out->path_count<2||out->path_count>512||out->tracker_index>=out->path_count||
     !out->source_generation||!out->state_revision||!out->path_revision||!out->maneuver_revision||
     !out->vehicle_sequence||!out->calculation_sequence||out->direction< -1||out->direction>1||out->maneuver_phase>2)return DW_ARRAY;
@@ -559,9 +585,40 @@ enum dw_result dw_link_decode(const uint8_t *p,size_t n,xenova_drive_DriveLink *
  if(out->which_payload==xenova_drive_DriveLink_snapshot_tag)return state_validate(&out->payload.snapshot);
  if(out->which_payload==xenova_drive_DriveLink_accepted_tag)return state_validate(&out->payload.accepted.state);
  if(out->which_payload==xenova_drive_DriveLink_clock_tag){
-  if(out->payload.clock.pi_receive_us>out->payload.clock.pi_send_us)return DW_TIME;
-  enum dw_result rc=vehicle_validate(&out->payload.clock.vehicle);if(rc)return rc;
-  return out->payload.clock.has_current_mission?grant_validate(&out->payload.clock.current_mission):DW_OK;
+  const xenova_drive_ClockReply *r=&out->payload.clock;const xenova_drive_ClockProbe *p=&r->probe;
+  if(p->has_receipt&&(!positive63(p->receipt.probe_sequence)||p->receipt.reply_sha256.size!=32||
+     !positive63(p->receipt.guest_receive_us)||p->receipt.probe_sequence>=p->sequence||p->receipt.guest_receive_us>p->guest_send_us))return DW_ARRAY;
+  if(r->has_guest_clock_valid_until_pi_us&&r->guest_clock_valid_until_pi_us<=r->pi_receive_us)return DW_TIME;
+  if(r->has_accepted_receipt){
+   const xenova_drive_GuestClockReceipt *ack=&r->accepted_receipt;
+   if(!r->has_guest_clock_valid_until_pi_us||!p->has_receipt||ack->reply_sha256.size!=32||
+      ack->probe_sequence!=p->receipt.probe_sequence||ack->guest_receive_us!=p->receipt.guest_receive_us||
+      memcmp(ack->reply_sha256.bytes,p->receipt.reply_sha256.bytes,32))return DW_ARRAY;
+  }
+  if(r->has_direction_gate){
+   const xenova_drive_DirectionGateWitness *g=&r->direction_gate;
+   if(!g->control_generation||!positive63(g->vehicle_sequence)||!positive63(g->valid_until_pi_us)||
+      !positive63(g->gate.gate_revision)||g->gate.state>4||g->gate.requested_direction< -1||g->gate.requested_direction>1||
+      (g->gate.state&&!positive63(g->gate.stop_command_sequence))||g->mission_id.size!=16||g->driver_session.size!=16||
+      g->segment_index>=3||g->cusp_index>=512||!source_uuid_text(g->pi_session)||!source_uuid_text(g->device_session))return DW_ARRAY;
+   if(g->producer_role==1){
+    if(!positive63(g->calculation_sequence)||!positive63(g->plan_revision)||!positive63(g->phase_revision)||
+       !positive63(g->mission_revision)||!positive63(g->grant_revision)||!g->gate.requested_direction||
+       nil_uuid(g->mission_id.bytes)||!nil_uuid(g->driver_session.bytes)||g->driver_action_seq||g->driver_state_seq)return DW_SOURCE;
+   }else if(g->producer_role==2){
+    if(!nil_uuid(g->mission_id.bytes)||g->mission_revision||g->grant_revision||g->plan_revision||g->phase_revision||
+       g->segment_index||g->cusp_index||nil_uuid(g->driver_session.bytes)||!positive63(g->driver_state_seq))return DW_SOURCE;
+   }else return DW_SOURCE;
+   if(g->gate.state&&(g->vehicle_sequence>r->vehicle.sequence||strcmp(g->device_session,r->vehicle.device_session)||
+      !r->vehicle.has_pi_session||strcmp(g->pi_session,r->vehicle.pi_session)||strcmp(r->vehicle.host_boot,r->host_boot)||
+      !r->vehicle.has_gateway_instance||strcmp(r->vehicle.gateway_instance,r->gateway_instance)))return DW_SOURCE;
+   if(g->gate.state==4&&g->producer_role==1&&(!r->has_current_mission||
+      memcmp(g->mission_id.bytes,r->current_mission.mission_id.bytes,16)||g->mission_revision!=r->current_mission.mission_revision||
+      g->grant_revision!=r->current_mission.grant_revision||g->control_generation!=r->current_mission.control_generation))return DW_SOURCE;
+  }
+  if(r->pi_receive_us>r->pi_send_us)return DW_TIME;
+  enum dw_result rc=vehicle_validate(&r->vehicle);if(rc)return rc;
+  return r->has_current_mission?grant_validate(&r->current_mission):DW_OK;
  }
  if(out->which_payload==xenova_drive_DriveLink_scene_grant_tag)return dw_scene_grant_validate(&out->payload.scene_grant);
  if(out->which_payload==xenova_drive_DriveLink_mission_grant_tag)return grant_validate(&out->payload.mission_grant);
@@ -799,6 +856,13 @@ enum dw_result dw_vehicle_latest(struct dw_odometry *h,dw_vehicle *out){
  if(atomic_flag_test_and_set_explicit(&h->lock,memory_order_acquire))return DW_BUSY;
  enum dw_result rc=h->count?DW_OK:DW_NO_REFERENCE;
  if(!rc)*out=h->samples[(h->next+DW_ODOM_SLOTS-1)%DW_ODOM_SLOTS];
+ atomic_flag_clear_explicit(&h->lock,memory_order_release);return rc;
+}
+enum dw_result dw_vehicle_sequence(struct dw_odometry *h,uint64_t sequence,dw_vehicle *out){
+ if(!h||!out||!sequence)return DW_NO_REFERENCE;
+ if(atomic_flag_test_and_set_explicit(&h->lock,memory_order_acquire))return DW_BUSY;
+ enum dw_result rc=DW_NO_REFERENCE;
+ for(size_t i=0;i<h->count;i++)if(h->samples[i].sequence==sequence){*out=h->samples[i];rc=DW_OK;break;}
  atomic_flag_clear_explicit(&h->lock,memory_order_release);return rc;
 }
 static enum dw_result odom_add(struct dw_odometry *h,const dw_vehicle *v) {

@@ -20,6 +20,8 @@ extern "C" {
 #define XM_SCHEMA_VERSION    "1.0"
 #define XM_MAX_BYTES         (64u * 1024u)
 #define XM_MAX_DRIVING_BYTES 1024u
+#define XM_MAX_PROFILE_BYTES 4096u /* 명시 input2/3·command2/3 envelope */
+#define XM_COMMAND2_BYTES    1536u /* bounded command payload workspace */
 #define XM_ID_MAX            64   /* vm_id·app_id·source_id 최대 길이 + NUL */
 #define XM_TOPIC_MAX         128
 #define XM_UUID_LEN          36
@@ -188,6 +190,44 @@ struct xm_manual_sample {
 };
 /* Strict manual-session-1 payload; counters are original source evidence. */
 int xm_manual_sample_parse(struct xm_span payload,struct xm_manual_sample *out);
+
+/* input2/3는 원 Pi clock의 불변 입력이다. 수신·복사로 source/E를 갱신하지 않는다.
+ * kind/profile는 parser가 배정하며 legacy keys/session1은 -ENOMSG다. */
+enum xm_manual_kind { XM_MANUAL_NEUTRAL_ONLY, XM_MANUAL_PULSE, XM_MANUAL_HELD };
+struct xm_manual_input {
+ char session[XM_UUID_LEN+1],source_instance[XM_UUID_LEN+1];
+ char input_epoch[XM_UUID_LEN+1],device_instance[XM_UUID_LEN+1];
+ char reason[24];
+ uint64_t sample,action,state,source_pi_us,expires_pi_us,grant_revision,key_event_seq;
+ uint32_t generation,keys;
+ enum xm_manual_kind kind;
+ unsigned profile;
+ bool valid;
+};
+int xm_manual_input_parse(struct xm_span,struct xm_manual_input *);
+
+/* A7의 exact 22 fields. STOP도 전 필드를 명시한다. 출력 권한/clock 변환은
+ * 계산자와 Gateway 책임이고 codec은 유한값·role별 sentinel을 검사한다. */
+struct xm_drive_command2 {
+ uint32_t generation,stop_reason,segment_index,cusp_index;
+ char producer_role[8],command_kind[12],mission_id[XM_UUID_LEN+1],driver_session[XM_UUID_LEN+1];
+ float v_mps,steer_rad;
+ uint64_t mission_revision,grant_revision,calculation_sequence,vehicle_sequence,world_sequence;
+ uint64_t plan_revision,phase_revision,completed_guest_us,valid_until_pi_us,driver_action_seq,driver_state_seq;
+};
+int xm_drive_command2_parse(struct xm_span,struct xm_drive_command2 *);
+int xm_drive_command2_json(char *,size_t,const struct xm_drive_command2 *);
+/* 명시 command3는 원 Pi↔guest clock receipt sequence와 next_direction을 추가한다.
+ * command2의 exact22/API는 유지한다. seq0은 안전 STOP에만 허용한다. */
+struct xm_drive_command3 {
+ struct xm_drive_command2 command;
+ uint64_t clock_probe_sequence;
+ int32_t next_direction; /* AUTO pending cusp STOP/HOLD only; other commands 0 */
+};
+int xm_drive_command3_parse(struct xm_span,struct xm_drive_command3 *);
+int xm_drive_command3_json(char *,size_t,const struct xm_drive_command3 *);
+/* Profile opt-in only; legacy type limits remain unchanged. */
+size_t xm_message_max_bytes(const char *type,struct xm_span payload);
 
 /* perception.result (계약 5.4). 좌표는 차량 기준 지면: x 전방, y 왼쪽 + (m) */
 #define XM_PERCEPTION_MAX_OBSTACLES 8

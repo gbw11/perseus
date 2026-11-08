@@ -51,7 +51,7 @@ struct xm_zclient {
 	uint8_t rx_buf[CONFIG_XENOVA_MQTT_RX_BUF];
 	uint8_t tx_buf[CONFIG_XENOVA_MQTT_TX_BUF];
 	uint8_t payload[CONFIG_XENOVA_MQTT_RX_BUF];
-	char out[XM_MAX_DRIVING_BYTES + 256];
+	char out[XM_MAX_PROFILE_BYTES + 1];
 
 	struct xm_identity id;
 	struct xm_seq_tracker seq;

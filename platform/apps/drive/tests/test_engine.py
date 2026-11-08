@@ -6,7 +6,15 @@ from uuid import UUID
 import pytest
 from test_lattice import library,fixture,encode,obstacle
 from world_codec import schema,decode
-from test_world import modern_world
+from test_world import modern_world as _modern_world
+
+def modern_world():
+    value=_modern_world();value.reference_vehicle_pose.y=1.2
+    return value
+
+def exported_state(lib,engine):
+    out=C.create_string_buffer(32768);n=lib.engine_state(engine,out,len(out));assert n>0
+    return decode(out.raw[:n],schema.DriveState)
 
 
 def lane_grant(*,revision=3):
@@ -476,7 +484,8 @@ def test_state2_metadata_survives_actual_apply_and_next_export_without_minting_a
         command=(C.c_float*4)()
         assert library.engine_track_grant(source,grant_wire,len(grant_wire),1220000,command)==0
         state=exported_state(library,source)
-        assert state.major==2 and state.state_features==7 and state.mission.kind==1
+        assert state.major==2 and state.state_features==15 and state.mission.kind==1
+        assert state.HasField("task_reference") and state.task_reference.selected_lane_id==1
         assert state.mission.phase==10 and state.mission.grant_revision==3
         assert state.mission.mission_id==grant.mission_grant.mission_id
         assert len(state.segments)==1 and state.segments[0].signed_direction==1

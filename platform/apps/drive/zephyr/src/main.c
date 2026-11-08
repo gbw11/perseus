@@ -147,6 +147,10 @@ static void provenance(const struct drive_completion *work,enum drive_task task)
  struct xd_received *in=task==DRIVE_TASK_AUTO?&source.perception:&source.input;
  in->seq=work->source.input_seq;in->received_ms=work->source.input_received_ms;
  in->error=work->source.input_length?0:-ENODATA;
+ /* 현대 MANUAL의 최종 송신 guard는 계산 당시 원 입력을 다시 검산한다.
+  * 최신 RX body로 대체하거나 metadata만 있는 빈 payload를 넘기지 않는다. */
+ in->length=work->source.input_length;
+ if(in->length)memcpy(in->payload,work->source.input,in->length);
 }
 static int offer(enum drive_task task,uint64_t release,uint64_t sequence,uint64_t iteration_begin)
 {
@@ -215,7 +219,7 @@ static int command_time(const struct drive_completion *work,int64_t tick,int64_t
 int main(void)
 {
  char control[XM_TOPIC_MAX],input[XM_TOPIC_MAX],perception[XM_TOPIC_MAX];
- char events[XM_TOPIC_MAX],json[160];
+ char events[XM_TOPIC_MAX],json[XM_COMMAND2_BYTES+1];
  xm_topic_vehicle_control(control,sizeof(control));xm_topic_manual_input(input,sizeof(input));
  xm_topic_app_events(perception,sizeof(perception),"perception");
  drive_controller_init(&controller);
@@ -320,16 +324,29 @@ int main(void)
 #endif
    if(selected.mode!=DRIVE_STOP&&command_due){
     if((rc=xd_command_input(work->sample.binary_input?"world.track":automatic?"perception.result":"drive.input")))break;
-    int64_t until=0,age=0;
-    status=command_time(work,tick,&until,&age);
-    if(status&&status!=-ETIME){rc=status;break;}
-    if(!status&&until>0&&(rc=xd_command_bound(until)))break;
-    /* A late result is recorded by the existing no-submit error path; it
-     * does not terminate the app or grant a renewed candidate deadline. */
-    int encoded=status?status:xm_drive_command_json(json,sizeof(json),selected.generation,work->sample.v_mps,work->sample.steer_rad);
+    int64_t until=0,age=0;int encoded;
+#if defined(CONFIG_XENOVA_DRIVE_LATTICE)
+    struct xm_drive_command3 modern={0};uint64_t original_guest_until=0;
+    if(work->sample.modern_command){
+     status=drive_lattice_command(work,&modern,&original_guest_until);
+     bool stop=!strcmp(modern.command.command_kind,"STOP");
+     if(!status&&!stop){
+      int64_t unused_bound=0;status=command_time(work,tick,&unused_bound,&age);
+      if(!status)status=xd_command_bound_us(original_guest_until);
+     }else if(stop&&!work->sample.binary_input)age=tick-work->source.input_received_ms;
+     /* STOP은 만료한 계산/clock 때문에 보류하지 않는다. body는 원 completion을 나타낸다. */
+     encoded=status?status:xm_drive_command3_json(json,sizeof(json),&modern);
+     if(encoded>0)drive_lattice_command_attempt(work,&modern);
+    }else
+#endif
+    {
+     status=command_time(work,tick,&until,&age);
+     if(status&&status!=-ETIME){rc=status;break;}
+     if(!status&&until>0&&(rc=xd_command_bound(until)))break;
+     encoded=status?status:xm_drive_command_json(json,sizeof(json),selected.generation,work->sample.v_mps,work->sample.steer_rad);
+    }
     xd_command(&client,events,json,encoded,selected.generation,work->sample.v_mps,work->sample.steer_rad,
-     work->sample.binary_input?work->sample.input_sequence:work->source.input_seq,work->source.control_seq,
-     age,
+     work->sample.binary_input?work->sample.input_sequence:work->source.input_seq,work->source.control_seq,age,
      automatic?controller.auto_cfg.perception_timeout_ms:controller.manual_cfg.input_timeout_ms);
    }
    if(automatic&&work->sample.auto_reason!=last_reason){
