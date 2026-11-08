@@ -27,6 +27,12 @@ def _digest(value):
     return hashlib.sha256(json.dumps(value,sort_keys=True,separators=(',',':'),allow_nan=False).encode()).hexdigest()
 
 
+def _physical_registration_strip(strip):
+    # 영상/가림 경계는 실제 유한 paint 끝이 아니므로 양쪽 생산 경로에서 제외한다.
+    ends=('physical_junction','observed_paint_end')
+    return strip.observed and not strip.closed and strip.start_kind in ends and strip.end_kind in ends
+
+
 def _inside(point, polygon):
     if not polygon:
         return False
@@ -204,7 +210,7 @@ class PerceptionPipeline:
         points=[]
         if graph is not None:
             for strip in graph.strips:
-                if not strip.observed:
+                if not _physical_registration_strip(strip):
                     continue
                 # 각 component에 같은 수의 sample을 둔다. 긴 선을 독립 관측으로 늘리지 않는다.
                 for index in sorted({len(strip.points_xy)//3,2*len(strip.points_xy)//3}):
@@ -215,7 +221,7 @@ class PerceptionPipeline:
         p=pose.sample
         segments=[]
         for strip in graph.strips:
-            if not strip.observed:
+            if not _physical_registration_strip(strip):
                 continue
             a,b=strip.points_xy[0],strip.points_xy[-1]
             curve_error=max(segment_distance(v,a,b) for v in strip.points_xy)
@@ -223,7 +229,8 @@ class PerceptionPipeline:
             error=strip.error_m+curve_error+p.position_error_m+2*radius*math.sin(min(math.pi,p.yaw_error_rad)/2)
             segments.append(SegmentFeature(transform_point(a,(p.x,p.y,p.yaw)),transform_point(b,(p.x,p.y,p.yaw)),
                 error,'strip:'+str(strip.local_id),capture))
-        return FrozenReference(revision,self.calibration.sha256,tuple(segments))
+        return FrozenReference(revision,self.calibration.sha256,tuple(segments),
+            feature_policy='PHYSICAL_STRIP_ENDPOINTS_V1')
 
     def process(self, observation, *, now_us=None, pose=None, checkpoint=None, completed_clock=None,
                 motion_qualified=False,needed_mask=None,cycle_bound_us=None,completion_bound_us=None,diagnostics=None,
@@ -379,11 +386,14 @@ class PerceptionPipeline:
         registration=None
         geometry_qualified=(self.calibration.metric_qualified and self.calibration.time_qualified
                             and observation.capture_interval is not None)
-        quarantined=alignment_invalid or pose is not None and not geometry_qualified
+        unqualified_reference=(self.reference is not None
+            and self.reference.feature_policy!='PHYSICAL_STRIP_ENDPOINTS_V1')
+        # 옛 유한 segment의 끝점 의미를 새 영상으로 소급 승인하거나 같은 map을 재seed하지 않는다.
+        quarantined=unqualified_reference or alignment_invalid or pose is not None and not geometry_qualified
         if operational_localization and self._alignment is not None and not alignment_current(now_us):quarantined=True
         if pose is not None and rgb_new and geometry_qualified and self._last_tape is not None and self._last_tape.status=='VALID':
             points=self._features(self._last_tape,capture)
-            if points and self.reference is not None and self.reference.segments:
+            if points and self.reference is not None and self.reference.segments and not unqualified_reference:
                 registration=register(points,self.reference,pose.prior,self.profile.registration,calibration_id=self.calibration.sha256)
                 if registration.status=='BOUNDED':
                     x,y,yaw=registration.representative

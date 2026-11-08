@@ -1021,6 +1021,8 @@ def restore_pipeline(pipeline,complete,current_scope):
 
     반환 SourceComplete가 원 retained atlas/배열/clock을 보존한다. 새 관측 정합 전 alignment,
     motion/use권·live FREE를 복원하지 않는다. 원 META가 없는 legacy는 명시 NOT_READY다.
+    reference의 old4 필드는 UNSPECIFIED로 읽으며 nonidentity map의 재정합 근거로
+    승격하지 않는다. new5의 feature_policy만 원 생산자의 명시 의미로 보존한다.
     """
     from ..mapping.alignment import MapOdomAlignment
     if (type(pipeline) is not PerceptionPipeline or type(complete) is not SourceComplete or type(current_scope) is not SceneEvidenceScope
@@ -1090,8 +1092,17 @@ def restore_pipeline(pipeline,complete,current_scope):
     gates={name:_gate(state['gates'][name],current_scope.raw_binding) for name in ('rgb_gate','depth_gate','nn_gate')}
     reference=None
     if state['reference'] is not None:
-        ref=state['reference'];reference=FrozenReference(ref['revision'],ref['calibration_id'],
-            tuple(SegmentFeature(tuple(v['a']),tuple(v['b']),v['error_m'],v['component'],v['capture_id']) for v in ref['segments']),ref['shared_error_m'])
+        ref=state['reference'];old_fields={'revision','calibration_id','segments','shared_error_m'}
+        if (type(ref) is not dict or set(ref) not in (old_fields,old_fields|{'feature_policy'})
+                or type(ref['segments']) is not list or len(ref['segments'])>64
+                or any(type(v) is not dict or set(v)!={'a','b','error_m','component','capture_id'} for v in ref['segments'])):
+            raise MapCheckpointNotReady('unsupported exact original reference fields')
+        try:
+            reference=FrozenReference(ref['revision'],ref['calibration_id'],
+                tuple(SegmentFeature(tuple(v['a']),tuple(v['b']),v['error_m'],v['component'],v['capture_id']) for v in ref['segments']),
+                ref['shared_error_m'],ref.get('feature_policy','UNSPECIFIED'))
+        except (TypeError,ValueError) as error:
+            raise MapCheckpointNotReady('invalid original reference feature metadata') from error
         if reference.calibration_id!=pipeline.calibration.sha256:raise MapCheckpointNotReady('original reference calibration mismatch')
         if {segment.capture_id for segment in reference.segments}!=set(state['reference_provenance']):
             raise MapRestoreNotReady('original reference geometry/source roots differ')
@@ -1129,6 +1140,8 @@ def restore_pipeline(pipeline,complete,current_scope):
     identity=state['map_from_odom_identity'] and state['alignment'] is None
     if not identity and (reference is None or not reference.segments):
         raise MapRestoreNotReady('storage COMPLETE has no reference for actual nonidentity map relocalization')
+    if not identity and reference.feature_policy!='PHYSICAL_STRIP_ENDPOINTS_V1':
+        raise MapRestoreNotReady('original nonidentity reference endpoint policy is unspecified')
     if already:
         if pipeline.grid.clock_id!=current_scope.raw_binding.fields['clock_epoch']:
             raise MapRestoreNotReady('current restored source clock changed')
