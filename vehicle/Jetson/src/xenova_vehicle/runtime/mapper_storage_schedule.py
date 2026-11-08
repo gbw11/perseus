@@ -32,7 +32,7 @@ class MapperStorageSchedule:
     """interval_us는 신규 local 일정 선택이며 1..5초다. 2초를 암묵 기본값으로 넣지 않는다.
 
     checkpoint_arguments는 CP가 실제 due일 때만 호출하는 compute-local callback이다.
-    원 scene/subsystem_state를 제공할 수 있고 반환 dict의 허용 key는 그 둘뿐이다.
+    원 scene/subsystem_state 또는 snapshot 뒤 실행할 local scene_at_snapshot을 제공한다.
     자료 미준비 revision의 큰 prepare는 새 accepted revision 전까지 다시 호출하지 않는다.
     """
 
@@ -246,8 +246,8 @@ class MapperStorageSchedule:
         if revision == self._prepare_revision: return self._set('CHECKPOINT_REVISION_NOT_READY')
         self._prepare_revision = revision
         arguments = {} if self._arguments is None else self._arguments()
-        if type(arguments) is not dict or set(arguments) - {'scene', 'subsystem_state'}:
-            raise ValueError('only original scene/subsystem_state checkpoint arguments allowed')
+        if type(arguments) is not dict or set(arguments) - {'scene', 'subsystem_state', 'scene_at_snapshot'}:
+            raise ValueError('only original scene/subsystem_state or local snapshot callback allowed')
         try:
             request = owner.queue_checkpoint(self._job(now_us), now_us=now_us, **arguments)
         except (MappingNotReady, MapCheckpointNotReady, CatalogNotReady):

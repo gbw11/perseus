@@ -81,6 +81,22 @@ class _StopWork(Exception):
     pass
 
 
+def relay_publications(port, source, *, clock=j_us):
+    """M-main의 최신 두 후보를 원 기한으로 넘긴다. queue 수락은 실제 발행/사용 승인이 아니다."""
+    accepted_count=0
+    for kind in ('SURVEY_SUMMARY','WORLD_CANDIDATE'):
+        report=port.peek(kind,now_us=clock())
+        if report is None:continue
+        options=dict(publication_sha256=report.publication_sha256,
+            issued_us=report.issued_us,expires_us=report.expires_us)
+        if kind=='SURVEY_SUMMARY':
+            accepted=source.offer_survey_summary(report.raw,grant_sha256=report.grant_sha256,**options)
+        else:accepted=source.offer_world(report.raw,**options)
+        if accepted:
+            port.acknowledge(report);accepted_count+=1
+    return accepted_count
+
+
 def _exception_message(error, limit=1024):
     """원 args의 유한 텍스트만 남긴다. SDK payload repr/임의 __str__를 호출하지 않는다."""
     parts = []
@@ -687,15 +703,7 @@ def mapper_main(endpoint, boot):
                 if report is not None:source.accept_bootstrap(report)
             control.tick()
             if publication_port is not None:
-                for kind in ('SURVEY_SUMMARY','WORLD_CANDIDATE'):
-                    report=publication_port.peek(kind,now_us=j_us())
-                    if report is None:continue
-                    options=dict(publication_sha256=report.publication_sha256,
-                        issued_us=report.issued_us,expires_us=report.expires_us)
-                    if kind=='SURVEY_SUMMARY':
-                        accepted=source.offer_survey_summary(report.raw,grant_sha256=report.grant_sha256,**options)
-                    else:accepted=source.offer_world(report.raw,**options)
-                    if accepted:publication_port.acknowledge(report)
+                relay_publications(publication_port,source)
             for packet in incoming:
                 if storage_client is not None and storage_client.receive(packet):continue
                 if packet.kind != 'SLOT':

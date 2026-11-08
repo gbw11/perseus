@@ -591,31 +591,34 @@ class ParkingBridge:
             self.context.odom_epoch, snapshot['revision'], registration_revision,
             summary.get('geometric_model_qualified') is True and prior_qualified
             and (self.calibration_profile is None or self.calibration_profile.metric_qualified), input_kind=self._kind)
-        rows = []; checked = pairs = 0; complete = True; reasons = []
-        for aisle in aisles:
-            remaining = self.profile.hypothesis_cap - checked
-            if remaining <= 0:
-                complete = False; reasons.append('DECLARED_AISLE_WORK_CAP'); break
-            value = extract_slots(result.tape, aisle, source=source, body=self.body,
-                profile=replace(self.profile, hypothesis_cap=remaining))
-            base = len(rows)
-            rows.extend(replace(c, local_id=base + i) for i, c in enumerate(value.candidates))
-            checked += value.hypotheses_checked; pairs += value.pair_count
-            complete &= value.complete; reasons.extend(value.reasons)
-        conflicting = set()
-        for i, a in enumerate(rows):
-            for j, b in enumerate(rows[:i]):
-                if a.corners and b.corners and polygons_touch(a.corners, b.corners, interior=True):
-                    conflicting.update((i, j))
-        for i in conflicting:
-            rows[i] = replace(rows[i], geometry_state=AMBIGUOUS, reasons=rows[i].reasons + ('DECLARED_ROLE_AMBIGUITY',))
-        state = 'UNKNOWN' if not complete else 'AMBIGUOUS' if conflicting else 'PARTIAL' if any(c.geometry_state != VALID for c in rows) else 'VALID' if rows else 'EMPTY'
-        geometry = SlotGeometryResult(tuple(rows), source, complete, state, tuple(reasons), checked, pairs)
         cached_geometry = self._applied_rgb == stamp.key
         if cached_geometry:
             if capture_prior != self._applied_prior or aisles != self._applied_aisles:
                 raise ValueError('same capture cannot acquire a new pose/role interpretation')
+            # 같은 원 RGB의 geometry만 재사용한다. 아래의 현재 map occupancy 검사는 계속한다.
             geometry = self._applied_geometry
+            reasons = list(geometry.reasons)
+        else:
+            rows = []; checked = pairs = 0; complete = True; reasons = []
+            for aisle in aisles:
+                remaining = self.profile.hypothesis_cap - checked
+                if remaining <= 0:
+                    complete = False; reasons.append('DECLARED_AISLE_WORK_CAP'); break
+                value = extract_slots(result.tape, aisle, source=source, body=self.body,
+                    profile=replace(self.profile, hypothesis_cap=remaining))
+                base = len(rows)
+                rows.extend(replace(c, local_id=base + i) for i, c in enumerate(value.candidates))
+                checked += value.hypotheses_checked; pairs += value.pair_count
+                complete &= value.complete; reasons.extend(value.reasons)
+            conflicting = set()
+            for i, a in enumerate(rows):
+                for j, b in enumerate(rows[:i]):
+                    if a.corners and b.corners and polygons_touch(a.corners, b.corners, interior=True):
+                        conflicting.update((i, j))
+            for i in conflicting:
+                rows[i] = replace(rows[i], geometry_state=AMBIGUOUS, reasons=rows[i].reasons + ('DECLARED_ROLE_AMBIGUITY',))
+            state = 'UNKNOWN' if not complete else 'AMBIGUOUS' if conflicting else 'PARTIAL' if any(c.geometry_state != VALID for c in rows) else 'VALID' if rows else 'EMPTY'
+            geometry = SlotGeometryResult(tuple(rows), source, complete, state, tuple(reasons), checked, pairs)
         association = self.catalog.associate(geometry, capture_prior, prior_qualified=prior_qualified, profile=self.association_profile)
         allocation_wait = len(association.births) > self.catalog.available_ids
         new_geometry = False; new_occupancy = False; provenance_wait = False

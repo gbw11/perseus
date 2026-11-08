@@ -87,6 +87,22 @@ RGB와 depth gate가 진행된 뒤 새 source에 결박한다. 오래된 원 sna
 state에서 옛 hazard를 자동 재사용하지 않는다. 이후 새 FREE로 occupied를 제거할 때는 기존
 원 depth/ToF proof·시각·순번/현재 source 검사를 유지한다. ToF 장착을 필수로 추가하지 않는다.
 
+## 승인 ToF 자산과 현재 표본
+
+`SceneEvidenceScope(..., approved_tof_assets=...)`는 역사 COMPLETE descriptor 검증에만
+쓰는 로컬 `(external_leaf_name, TofLeaf)` 목록이며 최대 2개다. 실제 Mapping/Processor는
+`MapperProfile.sensors.tof_sources`를 명시한다. 승인 bundle의 exact leaf/configuration/driver/
+거리 convention을 대조하고, 과거 context의 원 instance/generation·raw key·Pi 시각을 보존한다.
+현재 fresh 표본이 없어도 같은 승인 자산의 과거 기록을 검증할 수 있지만 현재 TOF context는
+계속 실제 fresh instance/generation을 요구한다. 자료 복원이 새 Scene/센서 사용권은 아니다.
+
+생성자 인자 `None`은 기존 호출을 위해 검증된 현재 `tof_sources`에서만 자산을 도출한다.
+명시 `()`는 승인 자산 없음이며 과거 ToF를 수락하는 wildcard가 아니다. 등록된 선택적
+unqualified leaf도 목록에는 보존하되, 실제 현재/과거 ToF proof를 소비할 때는 기존 네 가지
+qualification을 계속 요구한다. RGB-only scope는 선택적 leaf의 미수락 때문에 막지 않는다.
+자산 제거·변경이나 method SHA 변경을 표본 부재와 혼동하지 않고 기존 NOT_READY로 남긴다.
+이 구분은 wire/SQL·원 proof·관측 기한·필수 sensor mask를 바꾸지 않는다.
+
 ## 실제 ParkingBridge 문맥
 
 SceneEvidenceScope는 현재 Bridge의 실제 method 원문을 승인 비교 대상으로 등록한다.
@@ -132,6 +148,27 @@ World에 그대로 복사하고, 최종 채택은 원 Scene version/절대 만�
 관측은 원 시각·순번 증가와 기존 freshness/pose bracket을 검사한다. 정지 창의 실제 Vehicle
 sample max gap은 계속 별도 검산하며 RGB 처리 간격에 그 수치를 적용하지 않는다.
 
+## ADMITTED 증분 CP의 실제 cutoff와 호환 범위
+
+최초 frozen base의 `collection_end_pi_us` 의미와 원 manifest는 그대로다. 새 descendant CP는
+실제 Collector snapshot 뒤 최초 payload를 만들기 전에 `collection_end_pi_us`를 그 사본의
+`durable_cutoff_pi_us`와 정확히 같게 고정한다. 원 begin/base evidence SHA/station/Scene 계보와
+grant의 최초 만료를 유지한다. 실제 원 capture와 등록된 보간 Vehicle 부모의 Pi hull, 현재
+승인 clock의 Pi 현재 상한 안에서만 허용하며 현재 시각이나 `now+4h`로 수집 범위를 만들지 않는다.
+원 CELL/관측의 시각·FREE age도 갱신하지 않는다.
+
+이 경계는 compute-local `scene_at_snapshot` callback으로 연결하며 static scene descriptor와
+동시에 지정하지 않는다. 선택 시점부터 eligible ADMITTED가 아니면 일반 geometry-only CP를
+만들 수 있다. 원 frozen/archive 소유권은 별도로 보존한다. eligible일 때 선택한 callback이
+snapshot 전에 stale이 되면 그 사본만 거절·해제하고 geometry-only로 몰래 낮추지 않는다.
+
+`base_evidence_sha256`가 있는 descendant의 Scene 복원은 end와 durable cutoff의 exact 일치,
+현재 원 grant/clock/위험·원 만료를 검사한다. **이 수정 전에 생성되어 nominal180초 end와
+실제 durable cutoff가 다른 descendant도 Scene 복원에서는 거절한다.** 필드 모양과 SQL schema가
+같다는 이유로 모든 과거 Scene 복원과 호환된다고 해석하지 않는다. 원 bytes와 geometry 자료는
+계속 읽을 수 있지만 이전 CP의 end/시각/hash를 다시 쓰지 않는다. 새 증분 producer와 이 소비
+검증을 함께 배포하며, 새 CP는 자기 실제 transaction/descriptor를 가진다.
+
 ## 원 key의 부정 사건
 
 등록 source/Pi/Gateway와 이미 수락한 원 grant key가 정확한 terminal3/4만 current ClockLease
@@ -144,6 +181,6 @@ SOURCE_SCENE으로 전달한다. Mapper는 기존 Scene의 원 key만 철회하�
 만들지 않는다. 최신 positive grant는 현재 실제 lease의 source admission revision과 반드시
 같아야 한다. 정상 numerical clock 갱신과 의미상 source revision 전환은 구분한다.
 
-Pi/Gateway/VM의 실제 grant 전달·C 소비/계획 fence, actual Processor/전체 video 상주 흐름,
-장시간 incremental CP cutoff, ToF 없는 cold-start·회피·후진 주차 및 물리 성능 검증은 별도
-통합 대상이다. 구현 경과와 실행 결과는 저장소 README 대신 외부 making-reports에 남긴다.
+실제 Pi/Gateway/VM 기기 사이의 grant 전달·계획 fence, 전체 Processor의 프레임 채택·발행과
+장시간 OAK 상주 흐름, ToF 미장착 cold-start·회피·후진 주차 및 물리 성능은 별도 통합 대상이다.
+구현 경과와 실행 결과는 저장소 README 대신 외부 making-reports에 남긴다.

@@ -133,13 +133,19 @@ class MapperMapping:
     physical profile이 준비되면 최초 원 PROVENANCE 요청을 한 번만 생성한다. 실패/만료/
     UNKNOWN을 새 UUID/nonce/기한으로 자동 재발행하지 않는다. scene-only 전환은 이미
     수락한 range cursor를 유지하지만 실제 geometry source 교체는 새 owner를 요구한다.
+    선택 clock_us는 원 compute 완료 clock이며 codec에도 그대로 전달한다. None은
+    실제 monotonic clock을 유지하고 시각/기한/현재 수락을 생성하지 않는다.
     """
     def __init__(self,context_port,mailbox,raw_binding,calibration,profile,*,initial_storage_material,
                  complete=None,provenance_block_count=1<<20,job_lifetime_us=5_000_000,
-                 crossing=None,aisle_lane_indices=None):
+                 crossing=None,aisle_lane_indices=None,clock_us=None):
         if (type(context_port) is not MappingContextPort or type(mailbox) is not MapperStorageMailbox
                 or type(raw_binding) is not RawBinding or type(calibration) is not CalibrationProfile or type(profile) is not MapperProfile):
             raise ValueError('actual context port/mailbox/raw/calibration/mapper profile required')
+        if clock_us is not None and not callable(clock_us):
+            raise ValueError('optional original completion clock must be callable')
+        # None은 codec의 실제 monotonic clock이다. 원 now_us를 완료시각으로 고정하지 않는다.
+        self._completion_clock=clock_us
         if (type(initial_storage_material) is not tuple or len(initial_storage_material)!=2
                 or type(initial_storage_material[0]) is not dict or type(initial_storage_material[1]) is not dict):
             raise ValueError('original admitted D binding/bootstrap required')
@@ -244,7 +250,7 @@ class MapperMapping:
         if self._scope is not None and (self._scope._tof!=tuple(sources) or self._scope.context!=context):
             old=(*old,self._scope)
         scope=SceneEvidenceScope(context,self.raw,self.calibration,self.profile.sha256,
-            tof_sources=tuple(sources),historical_scopes=old)
+            tof_sources=tuple(sources),approved_tof_assets=self.profile.sensors.tof_sources,historical_scopes=old)
         if self.catalogs is not None:
             scope=scope.with_parking_method(self.catalogs._accepted.parking.method)
         if self._complete is not None and not self._restore_done:
@@ -285,7 +291,7 @@ class MapperMapping:
             map_frame_id='odom:'+self._context.odom_epoch,body=self.calibration.body,
             method_manifest_sha256=self.profile.sha256,input_kind='LIVE',calibration_profile=self.calibration,
             parking_aisles=self.profile.parking_aisles,aisle_lane_indices=self._roles,crossing=self._crossing,
-            lane_profile=self.profile.pipeline.registration)
+            lane_profile=self.profile.pipeline.registration,clock_us=self._completion_clock)
         scope=scope.with_parking_method(catalogs._accepted.parking.method)
         collector.rebind_scope(scope)
         if self._complete is not None:scope=catalogs.restore_complete(self._complete,current_scope=scope,now_us=now_us);collector.rebind_scope(scope)
@@ -377,7 +383,8 @@ class MapperMapping:
                     delivery=self.catalogs.take_delivery()
                     if delivery is not None:self._consume(delivery,now_us)
             return bound
-        self.mailbox.compute_encode_pending(current_context_sha256=self._context.sha256,now_us=now_us)
+        self.mailbox.compute_encode_pending(current_context_sha256=self._context.sha256,now_us=now_us,
+            clock_us=self._completion_clock)
         if self._pending is not None:
             pending=self._pending
             if pending.via_catalog:
@@ -395,7 +402,15 @@ class MapperMapping:
                     self._pending=None;return 'UNSTARTED_EXPIRED'
                 if not pending.via_catalog:self.mailbox.compute_offer(pending.request,now_us=now_us)
                 return 'WAIT_ORIGINAL_D_JOB'
-        if self.mailbox.main_peek() is not None:return 'WAIT_PHYSICAL_RELEASE'
+        peek=self.mailbox.main_peek()
+        if peek is not None:
+            catalog_pending=None if self.catalogs is None else self.catalogs.pending
+            if catalog_pending is not None and catalog_pending.request is peek.request:
+                # 독립 catalog 작업의 원 consumer가 완료를 읽어야 mailbox도 비워진다.
+                # delivery는 기존 일정 owner가 take_delivery로 받도록 남긴다.
+                status=self.catalogs.maintenance(now_us=now_us)
+                if self.mailbox.main_peek() is None:return status
+            return 'WAIT_PHYSICAL_RELEASE'
         if self.collector is None:
             if self._range_request is not None:return 'PROVENANCE_ORIGINAL_TERMINAL'
             if json_bytes(self._material,2048)['bootstrap']['status']=='COMPLETE' and self._complete is None:return 'WAIT_SOURCE_COMPLETE'
@@ -575,9 +590,11 @@ class MapperMapping:
         if draft.collector is not None:self._cursor_floor=max(self._cursor_floor,draft.collector._next)
         self._staged=None
 
-    def queue_checkpoint(self,job,*,now_us,scene=None,subsystem_state=None):
-        """명시 원 job으로 확정 상태를 고정한다. 이 함수는 D offer/fsync를 하지 않는다."""
+    def queue_checkpoint(self,job,*,now_us,scene=None,subsystem_state=None,scene_at_snapshot=None):
+        """D offer/fsync 없이 원 job을 고정한다. local callback은 snapshot 뒤 최초 encode 전에만 호출한다."""
         self._owner();uint(now_us)
+        if scene_at_snapshot is not None and (scene is not None or not callable(scene_at_snapshot)):
+            raise ValueError('choose static scene or one local snapshot callback')
         if (not self.ready or self._pipeline is None or self._staged is not None or self._pending is not None
                 or self.mailbox.main_peek() is not None or type(job) is not StorageJob or job.context is not self._context):
             raise MappingNotReady('accepted source/map and one original current checkpoint job required')
@@ -588,7 +605,19 @@ class MapperMapping:
             if type(subsystem_state) is not dict or set(subsystem_state)&set(state):raise ValueError('independent original subsystem state required')
             state.update(subsystem_state)
         if not self._head_ready:
-            request=self.collector.capture(self._pipeline,job,now_us=now_us,scene=scene,subsystem_state=state)
+            snapshot=None
+            try:
+                if scene_at_snapshot is not None:
+                    snapshot=self.collector.snapshot(self._pipeline,job,now_us=now_us,subsystem_state=state)
+                    self.collector.current_tile_references(self._pipeline,snapshot)
+                    try:scene=scene_at_snapshot(snapshot)
+                    except ValueError as error:raise MappingNotReady('original Scene snapshot validation failed') from error
+                    if type(scene) is not dict or 'mapper_state' in scene:raise MappingNotReady('local Scene callback must preserve snapshot ownership')
+                request=self.collector.capture(self._pipeline,job,now_us=now_us,scene=scene,subsystem_state=state)
+            except BaseException:
+                if snapshot is not None and self.collector._pending is None and self.collector._draft_snapshot is snapshot:
+                    self.collector.discard_snapshot(snapshot)
+                raise
             self._pending=MappingPending('CHECKPOINT',request)
         else:
             metadata={} if scene is None else dict(scene)
@@ -597,6 +626,12 @@ class MapperMapping:
             metadata['mapper_state']=snapshot.mapper_state_ref
             request=None
             try:
+                if scene_at_snapshot is not None:
+                    self.collector.current_tile_references(self._pipeline,snapshot)
+                    try:metadata=scene_at_snapshot(snapshot)
+                    except ValueError as error:raise MappingNotReady('original Scene snapshot validation failed') from error
+                    if type(metadata) is not dict or 'mapper_state' in metadata:raise MappingNotReady('local Scene callback must preserve snapshot ownership')
+                    metadata=dict(metadata,mapper_state=snapshot.mapper_state_ref)
                 request=self.catalogs.prepare_checkpoint(job,base_evidence=snapshot.evidence,now_us=now_us,
                     tiles=snapshot.tiles,tile_references=snapshot.tile_references,
                     durable_cutoff_pi_us=snapshot.durable_cutoff_pi_us,scene=metadata)

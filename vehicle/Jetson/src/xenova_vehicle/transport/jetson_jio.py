@@ -7,6 +7,7 @@ Paho는 start 뒤 non-daemon owner 안에서만 생성하고 단일 loop로 구�
 
 from collections import Counter
 from dataclasses import dataclass
+from hashlib import sha256
 import json
 import socket
 import threading
@@ -22,7 +23,8 @@ VEHICLE_TOPIC = PREFIX + '/vehicle/state.pb'
 SOURCE_FIELDS = frozenset(('vehicle', 'device', 'mapper_boot', 'mapper_instance', 'clock_epoch',
     'map_epoch', 'frame_epoch', 'odom_epoch', 'configuration', 'calibration', 'primitive'))
 COUNTERS = ('received', 'rejected', 'duplicate', 'replaced', 'sent', 'expired', 'source_replaced',
-    'connect_failed', 'network_failed', 'oversize', 'reply_failed', 'world_rejected')
+    'connect_failed', 'network_failed', 'oversize', 'reply_failed', 'world_rejected',
+    'world_fenced', 'world_dispatch_started')
 
 
 def j_us():
@@ -62,10 +64,40 @@ class _Source:
 
 
 @dataclass(frozen=True)
+class _Publication:
+    raw: bytes
+    sha256: str
+    scene_ref: bytes | None
+
+
+@dataclass(frozen=True)
 class _World:
     raw: bytes
     expires_us: int
     token: object
+    publication: _Publication
+    scene_ref: bytes | None
+    grant_sha256: str | None
+
+
+@dataclass(frozen=True)
+class _ClockWindow:
+    """실제 restored lease에서 추출한 현재 수명이다. 원 lease bytes는 별도로 보존한다."""
+    lower_j_us: int
+    expires_j_us: int
+    lower_offset_us: int
+    upper_offset_us: int
+    source_revision: int
+
+
+@dataclass(frozen=True)
+class _SceneWindow:
+    scene_ref: bytes
+    grant_sha256: str
+    lifecycle_state: int
+    source_revision: int
+    issued_pi_us: int
+    expires_pi_us: int
 
 
 @dataclass(frozen=True)
@@ -123,6 +155,7 @@ class JetsonJio:
         self._source = None; self._token = object(); self._world = self._probe = None
         self._vehicle = self._scene = self._probe_input = None; self._tof = {0: (), 1: ()}
         self._lease = None; self._current_scene = self._summary = None
+        self._publication = self._clock_window = self._scene_window = None
         self._heads = {}; self._counts = Counter({key: 0 for key in COUNTERS})
         self._connected = False; self._failure = self._last_rejection = None
         self._inflight = False; self._world_head = None; self._pi_revision = 0
@@ -152,28 +185,86 @@ class JetsonJio:
             if source == self._source:
                 return False
             self._source = source; self._token = object(); self._world = self._probe = self._lease = None
+            self._publication = self._clock_window = self._scene_window = None
             self._current_scene = self._summary = None
             self._vehicle = self._scene = self._probe_input = None; self._tof = {0: (), 1: ()}; self._heads = {}
             self._world_head = None; self._pi_revision = 0
             self._counts['source_replaced'] += 1
         return True
 
-    def offer_world(self, raw, *, expires_j_us):
+    def replace_publication(self, binding):
+        """원 S binding만 교체한다. source/clock/HWM과 이미 시작한 dispatch는 되돌리지 않는다."""
+        from google.protobuf.json_format import ParseDict
+        from xenova_drive_world import encode, schema
+        from ..runtime.source_identity import scene_ref_fields
+        from ..runtime.storage_messages import publication_binding
+        checked=publication_binding(binding)
+        raw=_canonical(checked)
+        scene=checked['scene_admission_ref']
+        scene_raw=None if scene is None else encode(ParseDict(scene_ref_fields(scene),schema.SceneAdmissionRef()))
+        publication=_Publication(raw,sha256(raw).hexdigest(),scene_raw)
+        with self._lock:source,token=self._source,self._token
+        if source is None:raise ValueError('publication has no current original source')
+        fields=source.fields
+        if any(checked[key]!=fields[key] for key in (
+                'mapper_instance','map_epoch','frame_epoch','odom_epoch','configuration','calibration','primitive')):
+            raise ValueError('publication changed current source geometry')
+        with self._lock:
+            if self._token is not token:return False
+            if self._publication is not None and self._publication.raw==raw:return False
+            self._publication=publication
+            if self._world is not None:self._counts['world_fenced']+=1
+            self._world=None
+        return True
+
+    def _world_current_locked(self, item, now):
+        clock=self._clock_window
+        if (self._stop.is_set() or item.token is not self._token or self._source is None
+                or item.publication is not self._publication or clock is None
+                or not clock.lower_j_us<=now<clock.expires_j_us):return False
+        if item.scene_ref is not None:
+            scene=self._scene_window
+            if (item.publication.scene_ref!=item.scene_ref or scene is None
+                    or scene.scene_ref!=item.scene_ref or scene.grant_sha256!=item.grant_sha256
+                    or scene.lifecycle_state!=2 or scene.source_revision!=clock.source_revision
+                    or scene.issued_pi_us>now+clock.lower_offset_us
+                    or now+clock.upper_offset_us>=scene.expires_pi_us):return False
+        return True
+
+    def _claim_world(self, item):
+        """이 짧은 lock이 새 dispatch의 시작점이다. 이후 fence는 이미 시작한 송신을 회수하지 못한다."""
+        with self._lock:
+            now=self.clock()
+            if now>=item.expires_us:
+                self._counts['expired']+=1;return False
+            if not self._world_current_locked(item,now):
+                self._counts['world_fenced']+=1;return False
+            self._counts['world_dispatch_started']+=1
+            return True
+
+    def offer_world(self, raw, *, expires_j_us, publication_sha256):
         """원 world와 절대기한을 최신1에 둔다. encode/접수는 발행 완료나 사용 승인이 아니다."""
         from xenova_drive_world import decode, schema
         if type(raw) is not bytes or not 0 < len(raw) <= 32768 or type(expires_j_us) is not int or not 0 < expires_j_us < 1 << 63:
             raise ValueError('bounded original world bytes/absolute expiry required')
         with self._lock:
-            source, token = self._source, self._token
-        if source is None:
+            source, token, publication, scene = self._source, self._token, self._publication, self._scene_window
+        if source is None or publication is None or publication.sha256!=publication_sha256:
+            self._count('world_fenced')
             return False
         value = decode(raw, schema.WorldSnapshot); fields = source.fields; now = self.clock()
+        if now>=expires_j_us:
+            self._count('expired');return False
         if (any(getattr(value, key) != fields[key] for key in SOURCE_FIELDS if key != 'device')
-                or not value.completed_us <= value.published_us <= now < expires_j_us):
+                or not value.completed_us <= value.published_us <= now):
             self._count('world_rejected'); return False
-        item = _World(raw, expires_j_us, token)
+        from xenova_drive_world import encode
+        scene_ref=encode(value.scene) if value.HasField('scene') else None
+        item = _World(raw, expires_j_us, token, publication, scene_ref,
+            None if scene_ref is None or scene is None else scene.grant_sha256)
         with self._lock:
-            if self._token is not token or self._stop.is_set():
+            if not self._world_current_locked(item,now):
+                self._counts['world_fenced']+=1
                 return False
             if self._world_head is not None:
                 sequence, previous = self._world_head
@@ -228,6 +319,7 @@ class JetsonJio:
         """실제 source 철회 사건. 원 pending publish를 새 source의 결과로 재사용하지 않는다."""
         with self._lock:
             self._source=None;self._token=object();self._world=self._probe=self._lease=None
+            self._publication=self._clock_window=self._scene_window=None
             self._current_scene=self._summary=None
             self._vehicle=self._scene=self._probe_input=None;self._tof={0:(),1:()};self._heads={}
             self._world_head=None;self._pi_revision=0
@@ -244,6 +336,7 @@ class JetsonJio:
             thread = self._thread
             return dict(connected=self._connected, alive=thread is not None and thread.is_alive(),
                 stopped=self._stop.is_set(), source_bound=self._source is not None, world_pending=self._world is not None,
+                publication_sha256=None if self._publication is None else self._publication.sha256,
                 probe_pending=self._probe is not None, publish_inflight=self._inflight,
                 inputs=(self._vehicle is not None) + len(self._tof[0]) + len(self._tof[1]) + (self._scene is not None) + (self._probe_input is not None),
                 counts=dict(self._counts), failure=self._failure, last_rejection=self._last_rejection)
@@ -284,7 +377,7 @@ class JetsonJio:
         with self._lock:
             source, token, lease = self._source, self._token, self._lease
             known_scene, known_scene_head = self._current_scene, self._heads.get('scene')
-        known_negative = False
+        known_negative = False;clock_window=scene_window=None
         if message.retain or len(message.payload) > 1024:
             self._reject('RETAINED_OR_SIZE'); return
         raw = bytes(message.payload); p = self.profile.source_policy
@@ -319,6 +412,10 @@ class JetsonJio:
                 if returned is not None:
                     from xenova_drive_world import decode as decode_trust
                     trust = decode_trust(returned.trust_bytes, schema.WorldTrust)
+                    returned.pi_interval_to_j((returned.probe_pi_send_us,returned.probe_pi_send_us),received)
+                    clock_window=_ClockWindow(returned.probe_pi_send_us-trust.upper_offset_us,
+                        returned.expires_pi_us-trust.upper_offset_us,trust.lower_offset_us,
+                        trust.upper_offset_us,returned.source_revision)
                     deadline = min(deadline, value.pi_send_us + TIMEOUT_US - trust.upper_offset_us)
                 probe = _Probe(item, token, deadline, source)
                 head = ('PROBE', value.pi_client_instance); sequence = value.probe_seq; destination = 'probe'
@@ -355,6 +452,9 @@ class JetsonJio:
                             or received + trust.upper_offset_us >= value.valid_until_pi_us):
                         raise ValueError('SCENE_EXPIRED')
                 item = JioInput('SCENE', raw, received, lease=None if known_negative else lease)
+                from xenova_drive_world import encode
+                scene_window=_SceneWindow(encode(value.scene),sha256(raw).hexdigest(),value.lifecycle_state,
+                    value.source_admission_revision,value.issued_pi_us,value.valid_until_pi_us)
                 head = ('SCENE', value.scene.admission_id, value.scene.admission_revision)
                 sequence = value.lifecycle_revision; destination = 'scene'
             else:
@@ -392,8 +492,10 @@ class JetsonJio:
                 # 새 원 Probe가 prior trust를 돌려주지 않으면 옛 lease로 센서 입력을
                 # 계속 현재화하지 않는다. Pi의 revision과 S binding 숫자는 비교하지 않는다.
                 self._pi_revision = value.admission_revision; self._lease = item.lease
+                self._clock_window=clock_window
             elif destination == 'scene':
                 self._scene = self._current_scene = item
+                self._scene_window=scene_window
                 self._summary = None
             else:
                 old = self._tof[destination]
@@ -490,19 +592,23 @@ class JetsonJio:
                                     selected = self._world; self._world = None; kind = 'world'
                             if selected is not None:
                                 expires = selected.expires_us
-                                if selected.token is not self._token or now >= expires:
-                                    self._count('expired')
+                                if kind=='world':
+                                    raw=selected.raw;topic=WORLD_TOPIC
+                                    dispatch=self._claim_world(selected)
                                 else:
-                                    raw = self._reply(selected) if kind == 'reply' else selected.raw
-                                    topic = f'{PREFIX}/mapper/{self.profile.device}/clock/reply.pb' if kind == 'reply' else WORLD_TOPIC
-                                    # 이 marker 뒤 단 한 publish만 한다. reconnect에서 J3/원 bytes를 재생성하지 않는다.
-                                    if selected.token is not self._token or self.clock() >= expires:
+                                    dispatch=selected.token is self._token and now<expires
+                                    if dispatch:
+                                        raw=self._reply(selected)
+                                        topic=f'{PREFIX}/mapper/{self.profile.device}/clock/reply.pb'
+                                        dispatch=selected.token is self._token and self.clock()<expires
+                                    if not dispatch:
                                         self._count('expired')
-                                    else:
-                                        info = client.publish(topic, raw, qos=0, retain=False)
-                                        if info.rc != 0:
-                                            raise OSError('J_MQTT_PUBLISH')
-                                        inflight = info, min(expires, self.clock() + TIMEOUT_US), selected.token
+                                if dispatch:
+                                    # 원 dispatch claim 뒤 IO를 한다. 송신 시작 뒤의 철회는 recall이 아니다.
+                                    info = client.publish(topic, raw, qos=0, retain=False)
+                                    if info.rc != 0:
+                                        raise OSError('J_MQTT_PUBLISH')
+                                    inflight = info, min(expires, self.clock() + TIMEOUT_US), selected.token
                     except ValueError:
                         self._count('reply_failed')
                     except (OSError, RuntimeError):

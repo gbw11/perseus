@@ -20,13 +20,15 @@ class JioPort:
         self.profile=SimpleNamespace(source_policy=policy,device=device)
         self.inputs=deque();self.bound=None;self.fenced=False;self.worlds=[]
         self.current_scene=self.current_lease=None;self.summaries=[]
+        self.publication=None
 
     def take_inputs(self):
         result=tuple(self.inputs);self.inputs.clear();return result
 
     def replace_source(self,source,**origin):self.bound=(source,origin)
+    def replace_publication(self,binding):self.publication=canonical(binding)
     def fence_source(self):self.fenced=True
-    def offer_world(self,raw,*,expires_j_us):self.worlds.append((raw,expires_j_us))
+    def offer_world(self,raw,*,expires_j_us,publication_sha256):self.worlds.append((raw,expires_j_us))
     def offer_survey_summary(self,raw,*,grant_sha256,expires_j_us):
         self.summaries.append((raw,grant_sha256,expires_j_us));return True
 

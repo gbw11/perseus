@@ -151,6 +151,7 @@ class DataLink:
         self.endpoint,self.peer,self.role,self.clock=endpoint,peer,role,clock
         self.owner=threading.current_thread()
         self._pending=None
+        self._send_unknown=False
         self._next=1
         self._highwater=0
         self._last=None
@@ -160,6 +161,24 @@ class DataLink:
     def _check_owner(self):
         if threading.current_thread() is not self.owner:
             raise RuntimeError('binary endpoint belongs to a different thread')
+
+    @property
+    def pending(self):
+        """아직 full-send되지 않은 원 immutable packet이다. native 소유권 진술은 아니다."""
+        self._check_owner()
+        return self._pending
+
+    def discard_pending(self, original):
+        """M의 미송신 출력만 원 handle로 폐기한다. 사용한 순번은 환불하지 않는다."""
+        self._check_owner()
+        if (type(original) is not DataPacket or self.role!='M'
+                or original.kind not in ('WORLD_CANDIDATE','SURVEY_SUMMARY')):
+            raise ValueError('only original pending mapper output may be discarded')
+        if self._pending is not original:return False
+        if self._send_unknown:raise RuntimeError('partial or unknown binary send cannot be discarded')
+        self._pending=None
+        self.counts['discarded_output']+=1
+        return True
 
     def send(self,kind,metadata,body=b'',*,request_id=None,issued_us=None,expires_us=None):
         self._check_owner()
@@ -188,12 +207,18 @@ class DataLink:
         if self.closed:raise EOFError('binary data endpoint is closed')
         packet=self._pending
         if packet is None:return None
+        if self._send_unknown:raise RuntimeError('binary send outcome is unknown')
         if self.clock()>=packet.expires_us:
             raise TimeoutError('original pending binary packet expired before actual send')
         started=self.clock()
         try:sent=self.endpoint.send(packet.raw)
         except BlockingIOError:return None
-        if sent!=len(packet.raw):raise OSError('partial seqpacket binary send')
+        except OSError:
+            self._send_unknown=True
+            raise
+        if sent!=len(packet.raw):
+            self._send_unknown=True
+            raise OSError('partial seqpacket binary send')
         completed=self.clock()
         self._pending=None
         self.counts['sent']+=1

@@ -87,6 +87,7 @@ class _Worker:
     exited_us: int | None = None
     reaped: bool = False
     last_heartbeat_us: int | None = None
+    phase_observation: tuple | None = None
     held: object = None
     pid: int | None = None
     exitcode: int | None = None
@@ -536,6 +537,7 @@ class _Runtime:
                 self.event('HELLO', role=role)
             elif message.kind == 'HEARTBEAT':
                 host.last_heartbeat_us = message.issued_us
+                host.phase_observation=(message.payload['worker_state'],message.issued_us,message.expires_us,now)
                 if role == 'A':
                     self._a_stage(message.payload['worker_state'], message.issued_us)
                 elif role=='D' and message.payload['worker_state']=='FAILED':
@@ -660,6 +662,37 @@ class _Runtime:
             self.a_phase = state
         elif state == 'STREAMING':
             self.a_phase = state
+
+    def _worker_phase(self, role, now):
+        """검산된 heartbeat의 마지막 진술이다. 현재 CPU/World 성공으로 변환하지 않는다."""
+        host=self.workers[role]
+        observation=host.phase_observation
+        if observation is None:return None
+        state,issued,expires,received=observation
+        current=(not self.stopping and not self.recovery.suppressed(role,host)
+            and not host.eof and not host.reaped and host.exited_us is None
+            and issued<=now<expires and now-issued<1_000_000)
+        return dict(state=state,issued_j_us=str(issued),expires_j_us=str(expires),
+                    received_j_us=str(received),current=current,basis='HEARTBEAT')
+
+    def _mapper_diagnostics(self, now):
+        host=self.workers.get('M')
+        phase=None if host is None else self._worker_phase('M',now)
+        waits={'WAIT_INPUT':['INPUT'],'WAIT_CLOCK':['PI_J_CLOCK'],'WAIT_ODOM':['ODOM'],
+               'WAIT_STORAGE':['MAP_AND_PROVENANCE']}
+        observed=None if phase is None else waits.get(phase['state'],[])
+        watch=None if host is None else host.compute_watch
+        active=None if watch is None else watch.active
+        terminal=None if watch is None else watch.last_terminal
+        return dict(phase=phase,last_observed_waits=observed,
+            external_waits=observed if phase is not None and phase['current'] else None,
+            parser_warmup_observed=self.nn_ready_us is not None,
+            last_fresh_parser_j_us=None if self.last_fresh_parser_us is None else str(self.last_fresh_parser_us),
+            cpu_active=None if active is None else dict(job_id=active.job_id,source_sequence=str(active.source_sequence),
+                started_j_us=str(active.started_us),expires_j_us=str(active.expires_us),progressed_j_us=str(active.progressed_us)),
+            cpu_last_terminal=None if terminal is None else dict(job_id=terminal[0],source_sequence=str(terminal[1]),
+                completed_j_us=str(terminal[2]),reason=terminal[3]),
+            world_current=None)
 
     def _sent(self, host):
         for sent in host.link.take_sent():
@@ -1027,6 +1060,8 @@ class _Runtime:
                       and host.stopped.payload['status'] == 'STOPPED' for host in self.workers.values())
         complete = (self.resident_started_us is not None and self.recovery.active is None and stopped and self.native_closed
                     and self.candidate_written and not self.log.is_alive and self.log.terminal_error is None and self.failure is None)
+        ended=j_us()
+        mapper_diagnostics=self._mapper_diagnostics(ended)
         result = dict(schema_version=1, scope='NORMAL_RESIDENT_CAPTURE_PARSER_STORAGE_NOT_DRIVING', complete=complete,
             exit_code=0 if complete else 1, service_instance=self.service, resource_epoch=self.epoch,
             release_sha256=None if self.artifacts is None else self.artifacts['release_sha256'],
@@ -1034,7 +1069,7 @@ class _Runtime:
             raw_binding=None if self.binding is None else dict(sha256=self.binding.sha256, fields=self.binding.fields),
             parent_native_modules={name: name in sys.modules for name in ('depthai', 'numpy', 'cv2', 'sqlite3')},
             reason=self.stop_reason, error=self.failure, error_trace=self.failure_trace, metric_ready=False, world_valid=False,
-            external_waits=['PI_J_CLOCK', 'ODOM', 'METRIC_CALIBRATION', 'MAP_AND_PROVENANCE'],
+            external_waits=mapper_diagnostics['external_waits'],mapper_diagnostics=mapper_diagnostics,
             capture_ready=self.capture_ready_us is not None, nn_ready=self.nn_ready_us is not None,
             storage_ready=self.storage_ready_us is not None, fixed_token_count=6 if self.handles is not None else 0,
             resource_state=None if self.manifest is None else self.manifest.state,
@@ -1045,13 +1080,14 @@ class _Runtime:
             recoveries=list(self.recovery.receipts),
             supervisor_exit_confirmed=False, resource_tracker_exit_confirmed=False,
             resident_started_j_us=None if self.resident_started_us is None else str(self.resident_started_us),
-            ended_j_us=str(j_us()), events=list(self.events),
+            ended_j_us=str(ended), events=list(self.events),
             raw_broker=None if self.broker is None else self.broker.summary(),
             db_broker=None if self.db_broker is None else self.db_broker.summary(),
             jio=None if self.jio is None else self.jio.snapshot(),
             workers={role: dict(pid=host.pid, worker_instance=host.peer.worker_instance,
                 channel_epoch=host.peer.channel_epoch, reaped=host.reaped, exitcode=host.exitcode,
                 stopped=None if host.stopped is None else host.stopped.payload,
+                phase=self._worker_phase(role,ended),
                 unsent_on_link_failure=None if host.failed_pending is None else host.failed_pending.raw_bytes.decode('ascii'),
                 transport=dict(host.link.counts)) for role, host in self.workers.items()})
         return result
