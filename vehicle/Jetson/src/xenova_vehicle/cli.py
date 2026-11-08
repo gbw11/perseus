@@ -20,6 +20,22 @@ def _timeout(value: str) -> float:
     return seconds
 
 
+def _http_host(value: str) -> str:
+    import ipaddress
+    try:
+        if str(ipaddress.IPv4Address(value)) != value:
+            raise ValueError('noncanonical IPv4')
+    except ValueError as error:
+        raise argparse.ArgumentTypeError('HTTP host must be a numeric IPv4 address') from error
+    return value
+
+
+def _http_port(value: str) -> int:
+    if not value.isascii() or not value.isdecimal() or not 1 <= int(value) <= 65535:
+        raise argparse.ArgumentTypeError('HTTP port must be in1..65535')
+    return int(value)
+
+
 def _doctor_command(args: argparse.Namespace) -> int:
     from .doctor import diagnose, render_text
 
@@ -172,6 +188,9 @@ def _runtime_command(args: argparse.Namespace) -> int:
     from .runtime.resident_storage import StorageProfile
 
     try:
+        if args.http_port is not None and args.http_host is None:
+            raise ValueError('--http-port requires explicit --http-host')
+        http_address=None if args.http_host is None else (args.http_host,args.http_port or 8080)
         profile = load_yolop_profile(args.profile)
         storage = StorageProfile(str(args.database.expanduser().absolute()), args.database_open_policy)
         service_scope = None
@@ -194,7 +213,8 @@ def _runtime_command(args: argparse.Namespace) -> int:
             if not 1<=len(mapper_bytes)<=65536:raise ValueError('mapper configuration must fit in64KiB')
         report = run_runtime(profile, args.state_dir, storage, args.output or args.output_root,
             duration_s=args.duration_s, service_scope=service_scope, output_root=args.output_root is not None,
-            perception_profile_bytes=perception_bytes,jio_profile=jio_profile,mapper_profile_bytes=mapper_bytes)
+            perception_profile_bytes=perception_bytes,jio_profile=jio_profile,mapper_profile_bytes=mapper_bytes,
+            http_address=http_address)
     except (OSError, ValueError, RuntimeError) as exc:
         print(f"runtime: {exc}", file=sys.stderr)
         return 2
@@ -268,6 +288,8 @@ def main(argv: list[str] | None = None) -> int:
     runtime.add_argument('--perception-profile',type=Path,help='explicit physical/provisional calibration for owned-copy local-map processing')
     runtime.add_argument('--jio-profile',type=Path,help='optional owner-only MQTT/source policy profile for original Pi inputs and world publication')
     runtime.add_argument('--mapper-profile',type=Path,help='optional explicit local mapper schema1 for capture timing, sensors, geometry and stopping bounds')
+    runtime.add_argument('--http-host',type=_http_host,help='opt-in numeric IPv4 listen address for read-only OAK JPEG; default off')
+    runtime.add_argument('--http-port',type=_http_port,default=None,help='HTTP port1..65535; requires --http-host, default8080')
     perception=commands.add_parser('perception-bench',help='offline sensor-to-local-map diagnostics; no control authority')
     perception.add_argument('--source',choices=('synthetic','yolop-replay'),default='synthetic',help='explicit sensor provenance')
     perception.add_argument('--dataset',type=Path,help='existing paired synthetic or validated YOLOP diagnostic recording')

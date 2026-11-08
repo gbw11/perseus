@@ -48,6 +48,7 @@ def runtime_for_spawn(process, *, mapper=False, selector_fail=False):
     value.context = SimpleNamespace(Process=Mock(return_value=process))
     value.selector = Selector(selector_fail); value.workers = {'A': SimpleNamespace(bind=object())}
     value.binding = None; value.jio = None; value.manifest = SimpleNamespace(runtime=SimpleNamespace(boot_id=uid(6)))
+    value.http_address = None; value.http = None; value.http_error = None; value._video_owner = None
     value.clock_epoch = uid(7); value.source_revision = 0; value.birth_pending = set(); value.failure = None
     value.storage_material = lambda: None; value.event = Mock()
     return value
@@ -180,6 +181,7 @@ class ResidentStartupCleanupTests(unittest.TestCase):
     def run_initial_failure(self, *, log_error=None, request_error=None, jio_start_error=False):
         runtime = resident_runtime._Runtime.__new__(resident_runtime._Runtime)
         runtime.jio_profile = object(); runtime.jio = None; runtime.workers = {}; runtime.failure = None
+        runtime.http_address = None; runtime.http = None
         runtime.selector = Selector(); runtime.log = LogOwner(start_error=log_error)
         runtime._request = Mock(side_effect=request_error)
         ThreadOwner.instances = []; ThreadOwner.fail_after_start = jio_start_error

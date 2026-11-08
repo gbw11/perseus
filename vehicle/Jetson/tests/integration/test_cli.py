@@ -68,6 +68,39 @@ for name in ('xenova_vehicle.doctor', 'xenova_vehicle._doctor_probe',
             self.assertEqual(result.returncode, 2)
             self.assertFalse(output.exists())
 
+    def test_runtime_video_help_is_light_and_invalid_address_never_starts_runtime(self):
+        code = """
+import sys
+from xenova_vehicle import cli
+try:
+    cli.main(['runtime', '--help'])
+except SystemExit as exc:
+    assert exc.code == 0
+for name in ('xenova_vehicle.doctor', 'xenova_vehicle.runtime.resident_runtime',
+             'xenova_vehicle.runtime.http_video', 'xenova_vehicle.oak.yolop_device',
+             'depthai', 'cv2', 'numpy', 'sqlite3'):
+    assert name not in sys.modules, name
+"""
+        result = subprocess.run([sys.executable, '-c', code], capture_output=True,
+            text=True, encoding='utf-8', timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('--http-host', result.stdout)
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / 'not-created'
+            base = ('runtime', '--profile', 'missing.json', '--state-dir', directory,
+                '--database', str(Path(directory) / 'not-created.sqlite3'), '--output', str(output))
+            for extra in (('--http-host', 'localhost'), ('--http-host', '::1'),
+                    ('--http-port', '0'), ('--http-port', '65536'), ('--http-port', 'nan')):
+                with self.subTest(extra=extra):
+                    result = self.invoke(*base, *extra)
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertIn('HTTP', result.stderr)
+            result = self.invoke(*base, '--http-port', '8080')
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn('--http-port requires explicit --http-host', result.stderr)
+            self.assertFalse(output.exists())
+            self.assertFalse((Path(directory) / 'not-created.sqlite3').exists())
+
     def test_real_json_command_always_reports_its_scope_and_exit_status(self):
         result = self.invoke("doctor", "--json", "--timeout", "5")
         report = json.loads(result.stdout)

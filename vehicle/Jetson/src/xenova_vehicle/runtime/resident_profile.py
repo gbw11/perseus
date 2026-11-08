@@ -44,7 +44,7 @@ def parser_manifest_sha256():
     return _sha(parser_manifest())
 
 
-def runtime_artifacts(profile, perception_profile_bytes=None,mapper_profile_bytes=None):
+def runtime_artifacts(profile, perception_profile_bytes=None,mapper_profile_bytes=None,*,jpeg_enabled=False):
     """같은 명시 profile과 local source에서 canonical 참조 및 출판할 원 manifest를 돌려준다.
 
     model_id는 승인 blob의 기대 SHA다. 실제 모델 bytes와 SDK Blob 검사는 A가
@@ -53,12 +53,22 @@ def runtime_artifacts(profile, perception_profile_bytes=None,mapper_profile_byte
     from ..oak.yolop_asset import BLOB_SHA256
     from .raw_slot import HEADER_BYTES, METADATA_BYTES, PROFILE, SLOT_BYTES, MAX_NN_BYTES
 
+    if type(jpeg_enabled) is not bool:
+        raise ValueError('runtime JPEG graph selection must be an exact bool')
     parser = parser_manifest()
-    graph = canonical(dict(version=1, scope='HOST_GRAPH_REQUEST_NOT_DEVICE_READBACK', profile=profile.to_dict(),
+    graph_profile = profile.to_dict()
+    if jpeg_enabled:
+        graph_profile['jpeg_enabled'] = True
+    graph = canonical(dict(version=1, scope='HOST_GRAPH_REQUEST_NOT_DEVICE_READBACK', profile=graph_profile,
         implementation=_sources(('oak/device.py', 'oak/yolop_device.py', 'oak/yolop_asset.py'))))
-    formats = canonical(dict(version=1, profile_id=PROFILE, slot_bytes=SLOT_BYTES,
+    format_fields = dict(version=1, profile_id=PROFILE, slot_bytes=SLOT_BYTES,
         header_bytes=HEADER_BYTES, metadata_bytes=METADATA_BYTES, max_nn_bytes=MAX_NN_BYTES,
-        sources=_sources(('runtime/raw_slot.py', 'runtime/resident_samples.py'))))
+        sources=_sources(('runtime/raw_slot.py', 'runtime/resident_samples.py')))
+    if jpeg_enabled:
+        format_fields['jpeg'] = dict(profile='encoded-jpeg-1', header_bytes=1024, body_bytes=256*1024,
+            capture_age_us=500_000, transfer_us=250_000,
+            sources=_sources(('oak/jpeg.py', 'runtime/jpeg_stream.py', 'runtime/resident_video.py')))
+    formats = canonical(format_fields)
     calibration_bundle=None
     manifests={'parser-manifest.json': parser, 'graph-profile-manifest.json': graph,
                'format-table-manifest.json': formats}

@@ -9,6 +9,7 @@ CLEANUP_CANDIDATE까지만 기록한다. 비정상 재기동을 새 자원 set�
 from collections import deque
 from dataclasses import dataclass
 import multiprocessing
+import ipaddress
 import os
 from pathlib import Path
 import selectors
@@ -36,6 +37,7 @@ from .resident_transport import ResidentLink, j_us
 from .resident_workers import WorkerBoot, acquisition_main, mapper_main
 from .resident_recovery import ResidentRecovery
 from .resource_manifest import ResourceManifest
+from .runtime_status import RuntimeStatus
 
 
 def _identifier():
@@ -65,6 +67,16 @@ def _decimal(value):
     return parsed
 
 
+@dataclass(frozen=True)
+class _StageObservation:
+    stage: str
+    sequence: int | None
+    completed_us: int
+    raw_binding_sha256: str | None
+    state: str
+    reason: str | None
+
+
 @dataclass
 class _Worker:
     peer: LifecyclePeer
@@ -88,6 +100,9 @@ class _Worker:
     reaped: bool = False
     last_heartbeat_us: int | None = None
     phase_observation: tuple | None = None
+    heartbeat_progress: tuple | None = None
+    stage_observations: tuple = ()
+    parser_fresh_observation: _StageObservation | None = None
     held: object = None
     pid: int | None = None
     exitcode: int | None = None
@@ -104,7 +119,7 @@ class _Worker:
 
 class _Runtime:
     def __init__(self, profile, state_directory, storage_profile, output, duration_s, service_scope=None, output_root=False,
-                 perception_profile_bytes=None,jio_profile=None,mapper_profile_bytes=None):
+                 perception_profile_bytes=None,jio_profile=None,mapper_profile_bytes=None,http_address=None):
         self.profile, self.state_directory = profile, str(Path(state_directory).expanduser().absolute())
         self.storage_profile, self.output, self.duration_s = storage_profile, Path(output).expanduser().absolute(), duration_s
         self.context = multiprocessing.get_context('spawn')
@@ -116,6 +131,16 @@ class _Runtime:
         self.perception_profile_bytes=perception_profile_bytes
         self.jio_profile=jio_profile
         self.mapper_profile_bytes=mapper_profile_bytes
+        if http_address is not None:
+            if (type(http_address) is not tuple or len(http_address)!=2
+                    or type(http_address[0]) is not str
+                    or str(ipaddress.IPv4Address(http_address[0]))!=http_address[0]
+                    or type(http_address[1]) is not int or not 1<=http_address[1]<=65535):
+                raise ValueError('explicit numeric HTTP address and port1..65535 required')
+        self.http_address=http_address
+        self.http=None
+        self.http_error=None
+        self._video_owner=None
         if mapper_profile_bytes is not None and jio_profile is None:
             raise ValueError('operational mapper configuration requires the explicit JIO/source policy')
         if jio_profile is not None:
@@ -163,6 +188,10 @@ class _Runtime:
         self.log_stop_requested = False
         self.output_owned = False
         self.events = deque(maxlen=64)
+        self.latest_runtime_status = None
+        self.runtime_status_error = None
+        self.runtime_publication_error = None
+        self._next_runtime_status_us = 0
         self.recovery = ResidentRecovery(self)
 
     def _admit_runtime(self, store, batch, request):
@@ -178,7 +207,8 @@ class _Runtime:
     def _prepare(self):
         self.output.mkdir(mode=0o700)
         self.output_owned = True
-        artifacts = runtime_artifacts(self.profile,self.perception_profile_bytes,self.mapper_profile_bytes)
+        artifacts = runtime_artifacts(self.profile,self.perception_profile_bytes,self.mapper_profile_bytes,
+            jpeg_enabled=self.http_address is not None)
         if self.mapper_profile_bytes is not None:
             from .mapper_profile import MapperProfile
             from ..perception.calibration import CalibrationProfile
@@ -293,13 +323,16 @@ class _Runtime:
 
     def _configure_binding(self):
         streams = {name: _identifier() for name in ('rgb_video', 'depth_right', 'nn_input0', 'nn_output0')}
+        if self.http_address is not None:
+            streams['jpeg']=_identifier()
         value = dict(service_instance=self.service, acquisition_worker=self.identities['A'][0],
             pipeline_instance=_identifier(), capture_epoch=_identifier(), stream_instances=streams,
             sdk_bridge_epoch=_identifier(), clock_epoch=self.clock_epoch, device_id=self.profile.device_mxid,
             **{k: self.artifacts[k] for k in ('model_id', 'parser_id', 'graph_profile_sha256', 'calibration_bundle', 'format_table_sha256')})
         self.binding = RawBinding(value)
         self.raw_profile = RawBindingProfile(value['device_id'], value['clock_epoch'], value['model_id'],
-            value['parser_id'], value['graph_profile_sha256'], value['format_table_sha256'], value['calibration_bundle'], True, False)
+            value['parser_id'], value['graph_profile_sha256'], value['format_table_sha256'], value['calibration_bundle'],
+            True, self.http_address is not None)
         self.scope = RawScope(self.service, self.handles.raw.arena_id,
             Endpoint(self.identities['A'][1], self.identities['A'][0]), self.binding.sha256,
             self.handles.raw.name, self.handles.raw.size_bytes)
@@ -308,11 +341,17 @@ class _Runtime:
         deadline_us = self.recovery.operation_cap if deadline_us is None else deadline_us
         worker_id, epoch = self.identities[role]
         peer = LifecyclePeer(self.service, epoch, worker_id, role, self.artifacts['release_sha256'])
-        parent=child=data_parent=data_child=data_peer=None
+        parent=child=data_parent=data_child=data_peer=jpeg_parent=jpeg_child=None
         mapper_instance=process=host=None
         tracked=False
         try:
             parent,child=control_pair()
+            if role=='A' and self.raw_profile.jpeg_enabled:
+                jpeg_parent,jpeg_child=socket.socketpair()
+                for endpoint in (jpeg_parent,jpeg_child):
+                    endpoint.setblocking(False)
+                    endpoint.setsockopt(socket.SOL_SOCKET,socket.SO_SNDBUF,65_536)
+                    endpoint.setsockopt(socket.SOL_SOCKET,socket.SO_RCVBUF,65_536)
             if role=='M' and self.jio_profile is not None:
                 from .data_channel import DataPeer,data_pair
                 data_parent,data_child=data_pair()
@@ -337,7 +376,8 @@ class _Runtime:
                     mapper_device=None if data_child is None else self.jio_profile.device,
                     clock_policy=None if data_child is None else self.jio_profile.clock_policy,
                     mapper_profile_bytes=self.artifacts['manifests'].get('mapper-profile.json') if role=='M' else None,
-                    mapper_profile_sha256=self.artifacts.get('mapper_profile_sha256') if role=='M' else None)
+                    mapper_profile_sha256=self.artifacts.get('mapper_profile_sha256') if role=='M' else None,
+                    jpeg_endpoint=jpeg_child)
             source_owner=None
             if data_parent is not None:
                 from .data_channel import DataLink
@@ -354,6 +394,9 @@ class _Runtime:
             # 사용자 공간 구성 실패는 실제 child를 만들기 전에 모두 드러낸다.
             process.start()
             self.workers[role]=host;tracked=True
+            if jpeg_parent is not None:
+                self._replace_video_channel(host,jpeg_parent)
+                jpeg_parent=None
             host.pid=process.pid
             self.birth_pending.add(role)
             if data_parent is not None:
@@ -369,7 +412,7 @@ class _Runtime:
                 host.pid=process.pid;self.workers[role]=host;tracked=True
                 self.birth_pending.add(role)
             if not tracked:
-                for endpoint in (parent,data_parent):
+                for endpoint in (parent,data_parent,jpeg_parent):
                     if endpoint is not None:
                         try:endpoint.close()
                         except OSError:self.failure=self.failure or 'pre-spawn endpoint close failed'
@@ -379,10 +422,45 @@ class _Runtime:
             raise
         finally:
             # 실제 spawn 뒤에도 부모의 child-side 사본만 닫는다. parent는 tracked host가 소유한다.
-            for endpoint in (child,data_child):
+            for endpoint in (child,data_child,jpeg_child):
                 if endpoint is not None:
                     try:endpoint.close()
                     except OSError:self.failure=self.failure or 'child-side endpoint close failed'
+
+    def _replace_video_channel(self, host, endpoint):
+        """새 A의 영상 FD만 넘긴다. 영상 제공 실패로 장치/모델 owner를 철회하지 않는다."""
+        transferred=False
+        try:
+            if self.http is not None:
+                fields=self.binding.fields
+                if (self.workers.get('A') is not host
+                        or fields['acquisition_worker']!=host.peer.worker_instance):
+                    raise ValueError('video channel differs from the current actual A owner')
+                scope=tuple(fields[name] for name in
+                    ('service_instance','acquisition_worker','pipeline_instance','capture_epoch'))
+                self.http.replace_channel(endpoint,scope)
+                self._video_owner=host
+                transferred=True
+        except (OSError,ValueError,RuntimeError) as error:
+            self.http_error=type(error).__name__
+        finally:
+            if not transferred:
+                try:endpoint.close()
+                except OSError as error:self.http_error=type(error).__name__
+
+    def _refresh_video(self):
+        """알려진 A 철회만 영상에 전달한다. M/D 대기·재기동은 건강한 영상을 유지한다."""
+        owner=self._video_owner
+        if owner is None:
+            return
+        if (self.stopping or self.workers.get('A') is not owner or owner.eof or owner.reaped
+                or owner.exited_us is not None or owner.stop is not None or owner.stopped is not None
+                or self.recovery.suppressed('A',owner)
+                or self._status_stage(owner,'SESSION_CLOSED') is not None):
+            if self.http is not None:
+                try:self.http.replace_channel(None,None)
+                except (OSError,ValueError,RuntimeError) as error:self.http_error=type(error).__name__
+            self._video_owner=None
 
     def storage_material(self):
         """실제 D discovery/BIND가 끝난 작은 원본만 반환한다. EMPTY에서 catalog head를 만들지 않는다."""
@@ -537,7 +615,9 @@ class _Runtime:
                 self.event('HELLO', role=role)
             elif message.kind == 'HEARTBEAT':
                 host.last_heartbeat_us = message.issued_us
-                host.phase_observation=(message.payload['worker_state'],message.issued_us,message.expires_us,now)
+                payload=message.payload
+                host.phase_observation=(payload['worker_state'],message.issued_us,message.expires_us,now)
+                host.heartbeat_progress=(payload['last_progress_sequence'],payload['last_progress_j_us'])
                 if role == 'A':
                     self._a_stage(message.payload['worker_state'], message.issued_us)
                 elif role=='D' and message.payload['worker_state']=='FAILED':
@@ -652,6 +732,12 @@ class _Runtime:
             self.event('NN_READY', completed_j_us=str(completed))
         if role == 'A':
             self._a_stage(payload['state'], completed)
+        host=self.workers[role]
+        raw_sha=host.bind.binding.sha256 if type(host.bind) is RawBindMessage else None
+        observation=_StageObservation(payload['stage'],sequence,completed,raw_sha,payload['state'],payload['reason'])
+        host.stage_observations=tuple(item for item in host.stage_observations if item.stage!=observation.stage)+(observation,)
+        if role=='M' and payload['stage'] in ('NN_READY','PARSER_COMPLETED') and payload['reason']!='STALE_INPUT':
+            host.parser_fresh_observation=observation
 
     def _a_stage(self, state, event_us):
         durations = {'ASSET_CHECK': 15_000_000, 'DEVICE_BOOT': 30_000_000,
@@ -693,6 +779,140 @@ class _Runtime:
             cpu_last_terminal=None if terminal is None else dict(job_id=terminal[0],source_sequence=str(terminal[1]),
                 completed_j_us=str(terminal[2]),reason=terminal[3]),
             world_current=None)
+
+    def _status_raw_owner(self, role, now):
+        """원 RAW ACK는 session 결합이고, 전송 ACK의5초를 상주 수명으로 재사용하지 않는다."""
+        host=self.workers.get(role)
+        if (host is None or self.binding is None or not host.admitted or not host.hello
+                or host.stop is not None or host.stopped is not None):
+            return False
+        if role=='A' and self._status_stage(host,'SESSION_CLOSED') is not None:
+            return False
+        phase=self._worker_phase(role,now)
+        if phase is None or not phase['current']:
+            return False
+        if phase['state'] in ('FAILED','FAILED_CONFIG','FAILED_NEEDS_SERVICE','STOPPED','CLOSED',
+                              'QUIESCING','DRAINING','CLOSING'):
+            return False
+        bind,ack=host.bind,host.bind_ack
+        return (type(bind) is RawBindMessage and type(ack) is RawBindAck
+            and ack.original_bind is bind and ack.accepted and bind.context.peer==host.peer
+            and bind.binding.sha256==self.binding.sha256
+            and bind.binding.fields['acquisition_worker']==self.workers.get('A',host).peer.worker_instance)
+
+    def _status_stage(self, host, stage):
+        if host is None or self.binding is None:
+            return None
+        return next((item for item in host.stage_observations
+                     if item.stage==stage and item.raw_binding_sha256==self.binding.sha256),None)
+
+    def _status_state(self, now):
+        if self.failure is not None or self.log.terminal_error is not None:
+            return 'FAILED'
+        if self.stopping:
+            stopped=bool(self.workers) and all(host.reaped and host.exitcode==0 and host.stopped is not None
+                and host.stopped.payload['status']=='STOPPED' for host in self.workers.values())
+            if stopped and self.native_closed and self.candidate_written and not self.log.is_alive:
+                return 'STOPPED'
+            return 'QUIESCING'
+        if self.recovery.active is not None:
+            return 'RECOVERING'
+        if self.resident_started_us is None:
+            return 'STARTING'
+        for role in ('A','M','D'):
+            host=self.workers.get(role)
+            phase=None if host is None else self._worker_phase(role,now)
+            if (host is None or not host.admitted or not host.hello or phase is None or not phase['current']
+                    or host.stop is not None or host.stopped is not None
+                    or role=='A' and self._status_stage(host,'SESSION_CLOSED') is not None
+                    or phase['state'] in ('FAILED','FAILED_CONFIG','FAILED_NEEDS_SERVICE','STOPPED','CLOSED',
+                                          'QUIESCING','DRAINING','CLOSING')):
+                return 'DEGRADED'
+        return 'RUNNING'
+
+    def runtime_status(self, now):
+        """실제 owner의 작은 원 진술만 투영한다. I/O·clock 읽기·metric/출력 승인이 없다."""
+        if type(now) is not int or not 0<=now<2**64:
+            raise ValueError('runtime status requires actual u64 J snapshot time')
+        if self.jio_profile is None:
+            return None
+        acquisition,mapper=self.workers.get('A'),self.workers.get('M')
+        a_current=self._status_raw_owner('A',now)
+        m_current=self._status_raw_owner('M',now)
+        asset=self._status_stage(acquisition,'ASSET_VALID')
+        graph=self._status_stage(acquisition,'GRAPH_STARTED')
+        ready=self._status_stage(acquisition,'CAPTURE_READY')
+        pair=self._status_stage(acquisition,'CAPTURE_PAIR')
+        graph_current=bool(a_current and asset is not None and graph is not None
+            and acquisition.bind_ack.issued_us<=asset.completed_us<=graph.completed_us<=now)
+        capture=bool(a_current and acquisition.phase_observation[0]=='STREAMING'
+            and ready is not None and pair is not None
+            and acquisition.bind_ack.issued_us<=ready.completed_us<=pair.completed_us<=now
+            and now-pair.completed_us<500_000)
+        nn_ready=self._status_stage(mapper,'NN_READY')
+        parsed=None if mapper is None else mapper.parser_fresh_observation
+        parsed_current=bool(m_current and nn_ready is not None and parsed is not None
+            and parsed.raw_binding_sha256==self.binding.sha256
+            and mapper.bind_ack.issued_us<=nn_ready.completed_us<=parsed.completed_us<=now
+            and now-parsed.completed_us<5_000_000)
+        nn_enabled=self.raw_profile is None or self.raw_profile.nn_enabled
+        parser='UNAVAILABLE'
+        if nn_enabled and not self.stopping and mapper is not None:
+            phase=self._worker_phase('M',now)
+            if phase is not None and phase['state']=='FAILED':
+                parser='FAILED'
+            elif nn_ready is not None:
+                parser='VALID' if parsed_current else 'STALE'
+            elif m_current:
+                parser='WARMUP'
+        residency='NONE'
+        if graph_current:
+            residency=('PAIRED_OUTPUT' if m_current and nn_ready is not None
+                and mapper.bind_ack.issued_us<=nn_ready.completed_us<=now else 'GRAPH_STARTED')
+        raw=None if self.binding is None else self.binding.fields
+        source=None if mapper is None else mapper.source
+        publication=None if source is None else source.owner.binding
+        workers=[]
+        for role in ('A','M','D'):
+            host=self.workers.get(role)
+            if host is None:continue
+            progress=host.heartbeat_progress
+            workers.append(dict(role=role,instance=host.peer.worker_instance,
+                state='STARTING' if host.phase_observation is None else host.phase_observation[0],
+                last_progress_sequence=None if progress is None else progress[0],
+                last_progress_j_us=None if progress is None else progress[1]))
+        return RuntimeStatus(dict(profile='mapper-runtime-1',vehicle=self.jio_profile.source_policy.vehicle,
+            device=self.jio_profile.device,service_instance=self.service,
+            mapper_boot=None if self.manifest is None else self.manifest.runtime.boot_id,
+            mapper_instance=None if publication is None else publication['mapper_instance'],
+            pipeline_instance=None if raw is None else raw['pipeline_instance'],clock_epoch=self.clock_epoch,
+            release_sha256=None if self.artifacts is None else self.artifacts['release_sha256'],
+            runtime_state=self._status_state(now),
+            source_binding_revision=None if publication is None else publication['source_binding_revision'],
+            snapshot_j_us=str(now),capture_ready=capture,metric_ready=False,
+            model=dict(requirement='REQUIRED' if nn_enabled else 'ABSENT',
+                blob_sha256=None if raw is None else raw['model_id'],residency_evidence=residency,
+                inference_state='UNAVAILABLE',parser_state=parser,last_input_j_us=None,last_result_j_us=None),
+            workers=workers,reason='METRIC_UNASSESSED'))
+
+    def _refresh_runtime_status(self, now, *, force=False):
+        """latest1만 교환한다. 원 snapshot을 읽는 consumer가 원 age를 검사해야 한다."""
+        if not force and now<self._next_runtime_status_us:
+            return
+        self._next_runtime_status_us=min((1<<64)-1,now+1_000_000)
+        try:
+            self.latest_runtime_status=self.runtime_status(now)
+            self.runtime_status_error=None
+        except ValueError as error:
+            self.latest_runtime_status=None
+            self.runtime_status_error=type(error).__name__
+        jio=getattr(self,'jio',None)
+        if self.latest_runtime_status is not None and jio is not None:
+            try:
+                jio.offer_runtime(self.latest_runtime_status)
+                self.runtime_publication_error=None
+            except ValueError as error:
+                self.runtime_publication_error=type(error).__name__
 
     def _sent(self, host):
         for sent in host.link.take_sent():
@@ -836,6 +1056,8 @@ class _Runtime:
         if self.broker is not None:
             self.broker.fence(self.stop_us)
         if self.db_broker is not None:self.db_broker.fence('STOP')
+        http=getattr(self,'http',None)
+        if http is not None:http.stop()
         self.event('QUIESCING', reason=reason)
 
     def _stop_one(self, host, began_us, reason):
@@ -917,7 +1139,7 @@ class _Runtime:
                 if not self.log_stop_requested:
                     self.log.request_stop()
                     self.log_stop_requested = True
-                return not self.log.is_alive
+                return not self.log.is_alive and (self.http is None or not self.http.is_alive)
             if self.native_started and not self.cleanup_attempted:
                 self._request('CLEANUP', 'NATIVE_CLOSE')
             else:
@@ -931,7 +1153,7 @@ class _Runtime:
         if not self.log_stop_requested:
             self.log.request_stop()
             self.log_stop_requested = True
-        return not self.log.is_alive
+        return not self.log.is_alive and (self.http is None or not self.http.is_alive)
 
     def _timers(self):
         now = j_us()
@@ -998,6 +1220,10 @@ class _Runtime:
 
     def run(self, signal_value):
         try:
+            if self.http_address is not None:
+                from .http_video import VideoHttpServer
+                self.http=VideoHttpServer(*self.http_address)
+                self.http.start()
             if self.jio_profile is not None:
                 from ..transport.jetson_jio import JetsonJio
                 self.jio=JetsonJio(self.jio_profile)
@@ -1018,6 +1244,8 @@ class _Runtime:
                         self._advance()
                         self.recovery.step()
                         self.recovery.healthy()
+                    self._refresh_runtime_status(j_us())
+                    self._refresh_video()
                     for key, _ in self.selector.select(0.01):
                         kind, role = key.data
                         if kind == 'exit':
@@ -1050,6 +1278,12 @@ class _Runtime:
                     if not self.jio.join(1.):
                         self.failure=self.failure or 'S-jio owner is still alive after bounded join'
                 except Exception as error:self.failure=self.failure or 'S-jio close: '+type(error).__name__
+            if self.http is not None:
+                try:
+                    self.http.stop()
+                    if not self.http.join(1.):
+                        self.failure=self.failure or 'S-http owner is still alive after bounded join'
+                except Exception as error:self.failure=self.failure or 'S-http close: '+type(error).__name__
             try:self.selector.close()
             finally:
                 self.log.request_stop()
@@ -1059,9 +1293,11 @@ class _Runtime:
         stopped = all(host.reaped and host.exitcode == 0 and host.stopped is not None
                       and host.stopped.payload['status'] == 'STOPPED' for host in self.workers.values())
         complete = (self.resident_started_us is not None and self.recovery.active is None and stopped and self.native_closed
-                    and self.candidate_written and not self.log.is_alive and self.log.terminal_error is None and self.failure is None)
+                    and self.candidate_written and not self.log.is_alive and self.log.terminal_error is None and self.failure is None
+                    and (self.http is None or not self.http.is_alive))
         ended=j_us()
         mapper_diagnostics=self._mapper_diagnostics(ended)
+        self._refresh_runtime_status(ended,force=True)
         result = dict(schema_version=1, scope='NORMAL_RESIDENT_CAPTURE_PARSER_STORAGE_NOT_DRIVING', complete=complete,
             exit_code=0 if complete else 1, service_instance=self.service, resource_epoch=self.epoch,
             release_sha256=None if self.artifacts is None else self.artifacts['release_sha256'],
@@ -1076,7 +1312,8 @@ class _Runtime:
             log_exited=not self.log.is_alive, log_error=self.log.terminal_error,
             resource_cleanup_confirmed=self.native_closed, all_worker_exits_confirmed=stopped,
             requires_service_reap=(self.log.is_alive or any(not host.reaped for host in self.workers.values())
-                or self.jio is not None and self.jio.snapshot()['alive']),
+                or self.jio is not None and self.jio.snapshot()['alive']
+                or self.http is not None and self.http.is_alive),
             recoveries=list(self.recovery.receipts),
             supervisor_exit_confirmed=False, resource_tracker_exit_confirmed=False,
             resident_started_j_us=None if self.resident_started_us is None else str(self.resident_started_us),
@@ -1084,6 +1321,11 @@ class _Runtime:
             raw_broker=None if self.broker is None else self.broker.summary(),
             db_broker=None if self.db_broker is None else self.db_broker.summary(),
             jio=None if self.jio is None else self.jio.snapshot(),
+            http=None if self.http is None else self.http.snapshot(),http_error=self.http_error,
+            http_exited=self.http is None or not self.http.is_alive,
+            runtime_status=None if self.latest_runtime_status is None else self.latest_runtime_status.fields,
+            runtime_status_error=self.runtime_status_error,
+            runtime_publication_error=self.runtime_publication_error,
             workers={role: dict(pid=host.pid, worker_instance=host.peer.worker_instance,
                 channel_epoch=host.peer.channel_epoch, reaped=host.reaped, exitcode=host.exitcode,
                 stopped=None if host.stopped is None else host.stopped.payload,
@@ -1094,14 +1336,14 @@ class _Runtime:
 
 
 def run_runtime(profile, state_directory, storage_profile, output, *, duration_s=None, service_scope=None, output_root=False,
-                perception_profile_bytes=None,jio_profile=None,mapper_profile_bytes=None):
+                perception_profile_bytes=None,jio_profile=None,mapper_profile_bytes=None,http_address=None):
     """명시 profile/state/DB의 상주 실행. duration=None은 operator stop까지 유지한다."""
     if type(storage_profile) is not StorageProfile:
         raise ValueError('runtime requires an explicit storage profile')
     if duration_s is not None and (type(duration_s) not in (int, float) or not 0.1 <= duration_s <= 300):
         raise ValueError('optional runtime duration must be in 0.1..300 seconds')
     runtime = _Runtime(profile, state_directory, storage_profile, output, duration_s, service_scope, output_root,
-                       perception_profile_bytes,jio_profile,mapper_profile_bytes)
+                       perception_profile_bytes,jio_profile,mapper_profile_bytes,http_address)
     thread_environment = ('OPENBLAS_NUM_THREADS', 'OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'NUMEXPR_NUM_THREADS')
     old_environment = {name: os.environ.get(name) for name in thread_environment}
     for name in thread_environment:
