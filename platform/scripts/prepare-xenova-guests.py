@@ -26,6 +26,7 @@ sys.path.insert(0, str(ROOT / 'platform/yocto/meta-xenova/recipes-core/xenova-pl
 from xenova_runtime import operation_lock
 from prepare_rootfs import prepare_template, inside
 import template_recipe
+import guest_display_template
 import guest_agent_template
 from prepare_instance import Workspace, make_instance as shared_make_instance
 
@@ -181,6 +182,9 @@ def make_template(args, source):
         command(['cp', '-a', str(original) + '/.', root])
         template_recipe.apply(root, recipe, args.source)
         prepare_template(root)
+        display_guest = None
+        if 'guest_display' in preparation['recipe']:
+            display_guest = guest_display_template.prepare(root, preparation['recipe']['guest_display'])
         # chroot 내 /dev, /proc, /sys는 작업 루트에만 마운트한다.
         for fs, relative in [('proc', 'proc'), ('sysfs', 'sys'), ('devtmpfs', 'dev')]:
             target = inside(root, relative)
@@ -198,7 +202,7 @@ def make_template(args, source):
                     'size_gib': args.size_gib, 'root_sha256': digest(raw),
                     'schema_version': '1.0', 'template_id': {'ubuntu-24.04-20260926':'ubuntu-24.04-arm64','debian-13-20261015':'debian-13-arm64'}[args.source],
                     'version': preparation['recipe']['version'], 'platform': 'xenova',
-                    'preparation': preparation, 'guest_agent': agent,
+                    'preparation': preparation, 'guest_agent': agent, 'guest_display': display_guest,
                     'files': {name: {'sha256': digest(stage / name), 'bytes': (stage / name).stat().st_size}
                               for name in ('root.raw', 'Image', 'initrd', 'kernel.config', 'boot.json')}}
         from xenova_guest_profile import from_manifest
