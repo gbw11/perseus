@@ -32,6 +32,23 @@ class SyntheticCaptureTests(unittest.TestCase):
             y=self.snapshot.pose[1] + camera.translation[1], w=.06, h=.20)]
         return replace(self.snapshot, scene=Scene(canonical(fields)))
 
+    def test_divider_splits_source_segment_at_exact_arc_on_off_boundary(self):
+        from xenova_vehicle.simulation.capture import _ground_raster
+        fields = self.scene.fields
+        fields['track']['centerline'] = [[0., 0.], [.242308, 0.], [.290769, 0.],
+            [.484615, 0.], [.533077, 0.], [1., 0.], [1., 1.], [0., 1.]]
+        layout = fields['track']['layout']
+        layout.update(bounds=[-.5, -.5, 1.5, 1.5], paved_areas=[], paint_lines=[], obstacle_seeds=[])
+        raster, x0, y0, resolution = _ground_raster(Scene(canonical(fields)))
+        def pixel(x):
+            return tuple(int(v) for v in raster[round((0.-y0)/resolution), round((x-x0)/resolution)])
+        # 원 whole-segment 방식은 .25→.290769를 칠하고 .5→.533077를 비웠다.
+        self.assertEqual(pixel(.22), (245, 245, 245))
+        self.assertEqual(pixel(.28), (35, 35, 35))
+        self.assertEqual(pixel(.48), (35, 35, 35))
+        self.assertEqual(pixel(.52), (245, 245, 245))
+        self.assertEqual(resolution, .01)
+
     def test_axial_z_first_surface_and_near_hit_never_returns_background(self):
         observation = SyntheticCamera(self.calibration).capture(self.snapshot)
         camera = self.calibration.right

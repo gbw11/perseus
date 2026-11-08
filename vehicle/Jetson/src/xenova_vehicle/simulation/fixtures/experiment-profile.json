@@ -1,0 +1,76 @@
+{
+  "profile": "course-development-profile-1",
+  "identity": {
+    "vehicle": "rc-sim-01",
+    "configuration": "course-sim-1",
+    "calibration": "course-sim-encoder-1"
+  },
+  "source": {
+    "commit": "0b56c764eab16a62870eb1ec3c4be97bbc39d6ad",
+    "files": [
+      {
+        "path": "platform/apps/simulator/xenova_simulator/config.py",
+        "size_bytes": 7593,
+        "sha256": "3b97f162f4e09a611cf22338d4badb3affcef29b8abe49605b0289d836b5e5dd"
+      },
+      {
+        "path": "platform/apps/simulator/xenova_simulator/model.py",
+        "size_bytes": 6158,
+        "sha256": "5d967907d4a1d6cde080eb3acc156638a10df0198e5f1a40f15e795ebd1d429b"
+      },
+      {
+        "path": "platform/apps/simulator/xenova_simulator/placement.py",
+        "size_bytes": 16570,
+        "sha256": "d090704577ace3620a60b7360616b5eea8fa855073a04a45a9c834cd8c9525e9"
+      }
+    ],
+    "scene": {
+      "file": "jetson-demo.json",
+      "size_bytes": 5137,
+      "sha256": "06076e845f281b298ea4697f7e35f4fd947e9a4fe4daddb82fc2a53de68003e3",
+      "base_sha256": "06076e845f281b298ea4697f7e35f4fd947e9a4fe4daddb82fc2a53de68003e3",
+      "derived_from_profile_sha256": null,
+      "source_path": "frontend/packages/ui/src/sim/jetson-tracks.json",
+      "source_sha256": "8439f216058a4f749d02a75290641efd0ab673ad98dca81ad1ac3b792fefbe8c",
+      "track_id": "jetson-demo"
+    }
+  },
+  "vehicle": {
+    "pose_origin": "REAR_AXLE_FLU",
+    "length_m": 0.3,
+    "width_m": 0.22,
+    "wheelbase_m": 0.2,
+    "min_turn_radius_m": 0.55,
+    "front_m": 0.25,
+    "rear_m": 0.05,
+    "track_width_m": 0.18,
+    "track_width_source": "new_unmeasured_experiment_value",
+    "wheel_radius_m": 0.033,
+    "encoder_cpr": 1320,
+    "motor_tau_s": 0.12,
+    "max_wheel_rpm": 450.0,
+    "max_accel_mps2": 2.0,
+    "max_decel_mps2": 4.0,
+    "max_steer_rad": 0.348771003583907,
+    "max_steer_rate_rps": 5.0,
+    "estimated_steering_error_rad": 0.001,
+    "steering_error_source": "new_unmeasured_quantization_assumption"
+  },
+  "camera": {
+    "rgb_size": [640, 360],
+    "right_size": [640, 480],
+    "ahead_m": 0.2,
+    "height_m": 0.12,
+    "pitch_rad": 0.2617993877991494,
+    "hfov_rad": 1.2042771838760873,
+    "baseline_m": 0.075,
+    "baseline_source": "synthetic_calibration_default_not_measured",
+    "fps": 15.0
+  },
+  "rates": {"physics_hz": 100.0},
+  "surface": {
+    "assumption": "ASSUMED_FLAT_SUPPORTED_APRON",
+    "support_polygon": [[-2.0, -3.0], [6.0, -3.0], [6.0, 3.0], [-2.0, 3.0]]
+  },
+  "qualification": {"measured": false, "physical_admission": false}
+}
