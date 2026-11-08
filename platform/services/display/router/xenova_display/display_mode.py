@@ -128,7 +128,9 @@ class Selector:
                     or not 0 <= now - value["updated_monotonic"] <= 3):
                 return False
             outputs = value["outputs"]
-            return set(outputs) == {"monitor-1", "monitor-2"} and all(
+            # 412: one HDMI (monitor-1) is the target; the legacy two-output layout
+            # still needs both. The renderer writes exactly the configured outputs.
+            return set(outputs) in ({"monitor-1"}, {"monitor-1", "monitor-2"}) and all(
                 o.get("status") == "mapped" and o.get("renderer_alive") is True
                 and o.get("physical_verified") is True
                 and 0 <= now - o["renderer_verified_monotonic"] <= 3

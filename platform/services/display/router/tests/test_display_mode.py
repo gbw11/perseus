@@ -53,11 +53,24 @@ def selector(tmp_path, monkeypatch):
     return value
 
 
-def ready(selector, **changes):
+def ready(selector, ids=("monitor-1", "monitor-2"), **changes):
     output = dict(status="mapped", renderer_alive=True, physical_verified=True, renderer_verified_monotonic=selector.clock())
     output.update(changes)
     selector.render_status.write_text(json.dumps(dict(schema_version=1, backend="x11",
-        updated_monotonic=selector.clock(), outputs={"monitor-1": output, "monitor-2": output})))
+        updated_monotonic=selector.clock(), outputs={i: output for i in ids})))
+
+
+def test_single_hdmi_output_is_ready_on_its_own(selector):
+    # 412: one HDMI (monitor-1) is the target layout.
+    selector.switch("mobile")
+    ready(selector, ids=("monitor-1",))
+    assert selector.switch("hdmi")["hdmi_renderer_ready"]
+
+
+@pytest.mark.parametrize("ids", [(), ("monitor-2",), ("monitor-1", "monitor-3")])
+def test_unknown_or_partial_output_sets_are_not_ready(selector, ids):
+    ready(selector, ids=ids)
+    assert not selector.hdmi_ready()
 
 
 def test_mobile_then_hdmi_then_mobile_preserves_feed_and_selects_each_path(selector):
