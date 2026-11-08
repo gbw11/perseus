@@ -557,11 +557,18 @@
     "specific_consecutive_round_link_confirmed": true,
     "continuous_freshness_resolved": false,
     "previous_4734ms_episode_not_fully_explained_by_this_shorter_trial": true,
-    "trace_label_publish_observation_includes_inputs_and_publish_not_six_writes": true,
     "team_modules_modified": false,
     "ttl_or_cpu_changed": false,
     "ssh_closed": true,
-    "jira_status_changed": false
+    "jira_status_changed": false,
+    "trace_label_publish_observation_instruments_inputs_not_actual_publication": true
   },
-  "artifacts": "outputs/display-374-postspace-timing-20261108/"
+  "artifacts": "outputs/display-374-postspace-timing-20261108/",
+  "trace_attribution_correction": {
+    "date": "2026-11-08",
+    "method": "AST + two local fixture calls",
+    "label_function": "observation_inputs",
+    "actual_publish_has_trace_decorator": false,
+    "evidence": "display-374-query-optimization-analysis-20261108.json"
+  }
 }
