@@ -151,3 +151,24 @@ def test_tcp_server_receives_gateway_bytes():
         assert server.connections == 1
     finally:
         server.stop()
+
+
+def test_tcp_server_drops_silent_connection_and_accepts_next():
+    """FIN 없이 조용해진 연결에 묶이지 않고 다음 게이트웨이 연결을 받는다."""
+    r = FrameReceiver()
+    server = FrameServer(r, "127.0.0.1", 0, idle_s=0.3)
+    server.start()
+    try:
+        enc = FrameEncoder()
+        silent = socket.create_connection(server.address, timeout=2)
+        try:
+            with socket.create_connection(server.address, timeout=2) as conn:
+                conn.sendall(encode(enc.drive(3, 0.2, 0.0)))
+                deadline = time.monotonic() + 3
+                while r.accepted < 1 and time.monotonic() < deadline:
+                    time.sleep(0.01)
+            assert r.accepted == 1 and server.connections == 2
+        finally:
+            silent.close()
+    finally:
+        server.stop()

@@ -24,13 +24,18 @@ static const struct xm_policy POLICIES[] = {
 	{"app.heartbeat", 0, false, false},
 	{"app.readiness", 0, false, true},
 	{"app.lifecycle", 0, false, true},
- {"app.state.snapshot",1,false,false},
- {"app.state.applied",1,false,false},
+	{"app.state.snapshot", 1, false, false},
+	{"app.state.applied", 1, false, false},
 	/* 7장 수동 입력 */
 	{"drive.input", 0, false, false},
 	/* 8장 지연 측정 */
 	{"probe.ping", 1, false, false},
 	{"probe.pong", 1, false, false},
+	/* 12장 시뮬레이터 전용 (실차에는 없음) */
+	{"sim.pose", 0, false, true},
+	{"sim.world", 1, true, false},
+	{"sim.command", 1, false, false},
+	{"sim.command.result", 1, false, false},
 };
 
 /* 계약 표에 없는 type. 유실보다 중복이 낫다고 보고 QoS 1 */
@@ -48,6 +53,10 @@ const struct xm_policy *xm_policy_for(const char *type)
 
 size_t xm_policy_max_bytes(const struct xm_policy *p)
 {
- if(p->type&&(!strcmp(p->type,"app.state.snapshot")||!strcmp(p->type,"app.state.applied")))return 8192;
+	/* 7.3 drive-state-1: 전체 envelope 8192 bytes (Python policy limit=8192 와 같다) */
+	if (p->type != NULL &&
+	    (strcmp(p->type, "app.state.snapshot") == 0 || strcmp(p->type, "app.state.applied") == 0)) {
+		return 8192;
+	}
 	return p->driving ? XM_MAX_DRIVING_BYTES : XM_MAX_BYTES;
 }

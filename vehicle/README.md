@@ -1,7 +1,8 @@
-# vehicle — 젯슨(차량 쪽) 작업
+# vehicle — 차량 탑재 소프트웨어
 
-RC카에 실린 **Jetson Nano(ADAS ECU)** 에서 도는 코드를 둔다. RPi4(dom0·domU) 위에서 도는 것은 `platform/` 에 둔다.
+RC카에 탑재하는 Jetson과 ESP32의 코드를 장치별로 관리한다.
 
-- 역할: D435f 카메라로 장애물·차선·경로를 계산해 RPi4 로 보낸다. 주행 명령은 내지 않는다 ([architecture](../docs/architecture.md)).
-- 메시지: 인지 결과 `perception.result` 등은 [MQTT 메시지 계약 v1](../docs/contracts/mqtt-contract-v1.md) 을 따른다.
-- 브랜치: part `app` → 기능별 develop 브랜치 `vehicle` ([CONTRIBUTING](../CONTRIBUTING.md) §1·§3).
+- [Jetson](Jetson/README.md): Jetson Nano B01과 OAK-D-Lite의 관측 수집, 인지, 지도, 주차 후보 생성 및 RPi 통신.
+- `ESP32/`: 모터·서보·encoder 등 차량 장치 펌웨어.
+
+RPi4의 Xen dom0·Zephyr domU 애플리케이션과 Gateway는 `platform/`에 둔다. 주행 목표 선택·경로 계획·추종은 Zephyr 자율주행 앱이 담당하며, Jetson은 모터 명령을 직접 생성하지 않는다.

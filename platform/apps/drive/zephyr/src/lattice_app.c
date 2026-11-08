@@ -177,7 +177,12 @@ static const char *manual_qualified(const void *unused,struct xm_span input,int6
  struct xm_manual_sample sample;uint32_t keys;
  if(xm_drive_input_parse(input,&keys))return "INPUT_INVALID";
  int rc=xm_manual_sample_parse(input,&sample);
- if(rc!=-ENOMSG&&(rc||!sample.valid||(uint64_t)age+sample.age_ms>(uint64_t)manual_config.input_timeout_ms))return "INPUT_INVALID";
+ /* adapter.c manual_qualify 와 같은 사유: 형식 오류 INVALID, 세션 무효 UNAVAILABLE, 원 나이 초과 STALE (계약 6.2) */
+ if(rc!=-ENOMSG){
+  if(rc)return "INPUT_INVALID";
+  if(!sample.valid)return "INPUT_UNAVAILABLE";
+  if((uint64_t)age+sample.age_ms>(uint64_t)manual_config.input_timeout_ms)return "INPUT_STALE";
+ }
  return current_vehicle(&clock,&now,&vehicle)?"POSE_UNAVAILABLE":NULL;
 }
 /* tracker owner만 실제 원 STOP witness를 현재 immutable path에 한 번 소비한다. */

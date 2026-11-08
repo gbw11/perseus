@@ -550,7 +550,10 @@ static int link_received(void *unused,const uint8_t *bytes,size_t count,int64_t 
  if(incoming.which_payload==xenova_drive_DriveLink_clock_tag){
   const xenova_drive_ClockReply *reply=&incoming.payload.clock;const xenova_drive_ClockProbe *probe=&reply->probe;
   unsigned role=!strcmp(probe->app_instance,boot.auto_instance_id)?0:!strcmp(probe->app_instance,boot.manual_instance_id)?1:2;
-  if(role>1||clock_rc||!received_us||received_us>INT64_MAX){rejected_links++;CLOCK_DIAG(clock_rc?6:1,-EPROTO,reply,received_us,clock_rc);return -EPROTO;}
+  if(role>1||clock_rc||!received_us||received_us>INT64_MAX){
+   if(clock_rc)atomic_set(&reason,DW_TIME);
+   rejected_links++;CLOCK_DIAG(clock_rc?6:1,-EPROTO,reply,received_us,clock_rc);return -EPROTO;
+  }
   struct guest_clock_slot *slot=&guest_clocks[role];uint64_t sent=slot->sent,now=received_us;
   if(!sent||probe->sequence!=slot->sequence||probe->guest_send_us!=sent||now<sent||
    strcmp(probe->vm,boot.identity.vm_id)||strcmp(probe->execution,boot.identity.execution_id)||

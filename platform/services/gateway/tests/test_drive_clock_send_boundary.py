@@ -91,7 +91,7 @@ def test_explicit_invalid_stamp_is_not_a_default(stamp):
 def test_time_order_type_topic_and_snapshot_ownership_guards():
     value=reply(receive=10,sent=10);prepared=PreparedClock(value)
     with pytest.raises(ValueError,match='send before receive'):prepared.stamp(9)
-    with pytest.raises(ValueError,match='Pi clock order'):PreparedClock(reply(receive=10,sent=9))
+    with pytest.raises(ValueError,match='Pi clock order|clock send before receive'):PreparedClock(reply(receive=10,sent=9))
     for bad in (b'bytes',schema.DriveLink(major=2),schema.DriveLink(major=2,probe=value.clock.probe)):
         with pytest.raises(ValueError,match='clock reply required'):PreparedClock(bad)
     for name in ('vm','_layout'):

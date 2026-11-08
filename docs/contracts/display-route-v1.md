@@ -8,12 +8,14 @@ dom0 `xenova_display`의 수집기·254번 정책·키오스크가 로컬 화면
 
 | 논리 출력 | 기본 화면 | 경로 |
 | --- | --- | --- |
-| monitor-1 | 등록 VM 3개 전체 상태 | `/display/monitor-1` |
-| monitor-2 | 선택 UUID의 상세 상태 | `/display/monitor-2` |
+| monitor-1 | 드라이버 계기판 (`screen: instrument`, `view: overview`, 항상 pinned·`vm_id: null`) | `/display/monitor-1` |
+| monitor-2 | 인포테인먼트·게스트 데이터 (`screen: infotainment`, `view: detail`, 아래 selection 의 VM) | `/display/monitor-2` |
+
+`view=overview|detail` 은 API 호환 필드로 남은 값이며 화면 내용은 `screen` 이 정한다. 초기의 전체 상태/선택 VM 상세 배치는 변경 전 이력이다([HDMI 표시 계획](../design/hdmi-display-plan.md)).
 
 표시기는 same-origin `GET /api/v1/display/presentation`을 읽는다. 서비스 토큰으로 `POST /api/v1/display/session`을 호출한 신뢰된 실행기가 화면용 HttpOnly 쿠키를 발급받는다. 브라우저 번들·URL에는 서비스 토큰을 넣지 않는다. 키오스크의 base는 `/`로 빌드한다.
 
-`POST /api/v1/display/selection`은 서비스 Bearer 인증이 필요하다. 요청은 `policy_epoch`, `revision`, `selection=pinned|follow_active`, pinned일 때 등록된 `vm_id`다. 이전 정책은 409, 잘못된 대상은 400이다. 기본은 VM1 pinned. follow_active는 신선한 권위 보고의 주 구동/백업 UUID만 따라가며 모드나 앱 이름으로 승계를 추정하지 않는다.
+`POST /api/v1/display/selection`은 서비스 Bearer 인증이 필요하다. 요청은 `policy_epoch`, `revision`, `selection=pinned|follow_active`, pinned일 때 등록된 `vm_id`다. 이전 정책(`policy_epoch`·`revision` 불일치)은 409, 잘못된 대상(등록되지 않은 `vm_id`, follow_active 에 `vm_id`)은 400이다. 본문 형식 오류(필드 누락·추가 필드·`selection` 값·UUID 형식)는 FastAPI 기본 검증의 422다. 기본은 VM1 pinned. follow_active는 신선한 권위 보고의 주 구동/백업 UUID만 따라가며 모드나 앱 이름으로 승계를 추정하지 않는다.
 
 `outputs[].reason`은 선택 이유, `revision`은 선택 설정 버전, `render_revision`은 전체 표시 내용 해시다. 출력별 `POST /api/v1/display/outputs/{output_id}/ack`의 `dom_rendered`는 DOM 반영 확인이며 물리 HDMI 검증이 아니다. X11 매핑·창·출력 상태와 물리 장비 검증은 별도다.
 

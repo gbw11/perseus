@@ -94,7 +94,8 @@ paths:
           description: Successful Response
           content:
             application/json:
-              schema: {}
+              schema:
+                $ref: '#/components/schemas/RuntimeLogPage'
         '400':
           content:
             application/json:
@@ -124,7 +125,8 @@ paths:
           description: Successful Response
           content:
             application/json:
-              schema: {}
+              schema:
+                $ref: '#/components/schemas/RuntimeLogSources'
         '400':
           description: Bad Request
           content:
@@ -158,7 +160,8 @@ paths:
           description: Successful Response
           content:
             application/json:
-              schema: {}
+              schema:
+                $ref: '#/components/schemas/RuntimeLogIngestResult'
         '400':
           content:
             application/json:
@@ -863,6 +866,60 @@ components:
         type: string
         format: uuid
   schemas:
+    RuntimeLogRecord:
+      type: object
+      description: dom0 runtime_logs.LogStore 의 logs 행 그대로. Spring /api/v1/logs 도 이 본문을 그대로 전달한다 (runtime-logs-v1.md)
+      required: [id, event_id, source_id, vm_id, component, boot_id, observed_at, received_at, level, message]
+      properties:
+        id: {type: integer, description: 수신 순서 커서}
+        event_id: {type: string}
+        source_id: {type: string}
+        vm_id: {type: ['string', 'null']}
+        component: {type: string}
+        boot_id: {type: string}
+        observed_at: {type: string, description: 소스가 보고한 발생 시각 (ISO-8601)}
+        received_at: {type: number, description: 수신 시각 (epoch 초)}
+        level: {type: string, enum: [DEBUG, INFO, WARN, ERROR, FATAL]}
+        message: {type: string, maxLength: 8192}
+    RuntimeLogPage:
+      type: object
+      required: [epoch, items, next_cursor, has_more, history_truncated, oldest_cursor, latest_cursor]
+      properties:
+        epoch: {type: string, description: 로그 DB 식별자. 바뀌면 이전 커서를 버린다}
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/RuntimeLogRecord'}
+        next_cursor: {type: integer}
+        has_more: {type: boolean, description: after 를 준 조회에서만 계산하고 after 가 없으면 항상 false}
+        history_truncated: {type: boolean}
+        oldest_cursor: {type: ['integer', 'null']}
+        latest_cursor: {type: integer}
+    RuntimeLogSource:
+      type: object
+      required: [source_id, vm_id, components, state, updated_at, last_record_at]
+      properties:
+        source_id: {type: string}
+        vm_id: {type: ['string', 'null']}
+        components:
+          type: array
+          items: {type: string}
+        state: {type: string, enum: [connected, disconnected, unavailable], description: 10초 넘게 갱신이 없으면 disconnected. 설정에만 있고 한 번도 보내지 않은 소스는 unavailable}
+        updated_at: {type: ['number', 'null'], description: epoch 초}
+        last_record_at: {type: ['number', 'null'], description: epoch 초}
+    RuntimeLogSources:
+      type: object
+      required: [epoch, items]
+      properties:
+        epoch: {type: string}
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/RuntimeLogSource'}
+    RuntimeLogIngestResult:
+      type: object
+      required: [accepted, duplicates]
+      properties:
+        accepted: {type: integer}
+        duplicates: {type: integer}
     Registration:
       properties:
         vm_id:

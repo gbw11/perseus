@@ -162,13 +162,13 @@ def run(seconds: float, *, obstacle_ahead_m: float | None = None, settings: SimS
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="카메라 → 인지 → 자율 계산 → 시리얼 프레임 → 바퀴 폐루프 리허설")
-    parser.add_argument("--seconds", type=float, default=60.0)
+    parser.add_argument("--seconds", type=float, help="주행 시간 상한 (기본 60 s, --laps 를 주면 3600 s)")
     parser.add_argument("--obstacle", type=float, help="출발선에서 이만큼 앞(m)에 장애물")
     parser.add_argument("--track", default=SimSettings.track_id, choices=track_ids())
     parser.add_argument("--all-tracks", action="store_true", help="10개 트랙 모두")
     parser.add_argument("--laps", type=float, help="이만큼 돌면 멈춘다 (--seconds 는 상한)")
     a = parser.parse_args(argv)
-    seconds = a.seconds if a.laps is None else max(a.seconds, 3600.0)
+    seconds = a.seconds if a.seconds is not None else (60.0 if a.laps is None else 3600.0)
     failed = 0
     for track_id in (track_ids() if a.all_tracks else [a.track]):
         r = run(seconds, obstacle_ahead_m=a.obstacle, laps_target=a.laps,

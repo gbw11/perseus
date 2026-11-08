@@ -1,6 +1,8 @@
 # 주행 입력과 실제 path 인계 — drive-world-1
 
 이 디렉터리의 `world.proto`가 Python/Gateway와 C/Zephyr의 공통 원본이다.
+Pi가 수락한 mapper 시계 구간의 반환과 S/M identity 제안은
+[mapper clock·source 계약](mapper-clock-and-source.md)을 따른다.
 운영 차량 값은 이 schema에 넣지 않는다. `lattice-lab-1`은 합성 Ackermann 차량과
 시험 지도를 위한 프로필이며 실제 차량의 보정·성능·안전 수락을 대신하지 않는다.
 현재 후보의 시험 수준은 [후속 보고](../../verification/recovery-scenario-closure-20261030.md#history-driving-app)에 구분한다.
@@ -34,6 +36,13 @@ Pi 제어·차량 상태 연결까지 막는 전역 readiness gate가 아니다.
 - 좌표는 metre/radian, rear axle 기준 SE(2) pose다. grid cell은 origin pose에서
   `resolution_m` 간격의 사각형이며 원점 회전도 적용한다. reference·좌/우 boundary는
   같은 frame의 순서 있는 점이다. 뒤집힌 경계·중복 segment·자기 교차를 정상 도로로 채택하지 않는다.
+- features11/15의 `reference`는 방향과 원점이 고정된 열린 도로 station basis다.
+  `left_boundary + reverse(right_boundary)`는 주차 apron을 포함할 수 있는 별도 global hard
+  domain의 단순 폐곡선이다. 같은 점 개수는 wire 배열의 제약이며 각 boundary 점이 같은
+  reference station의 차선 좌우점이라는 뜻은 아니다. 차로 중심·divider·crossing은
+  LaneModel을 사용하며, global outer의 평균으로 생성하지 않는다. basis의 원 prefix는
+  유지하고 실제 끝 연장만 reference revision을 올린다. 차로 선택·관측/ROI 변화로 원점과
+  prefix를 바꾸지 않는다. legacy0/1의 reference별 좌우 방향 검사는 유지한다.
 - 최대 grid는 64×64, road 배열은 각각 2~64점이다. occupancy는 0~100 또는 255(unknown),
   flag bit는 valid=1/static-retained=2/expired=4, age는 cell별 little-endian uint32 ms다.
   unknown/만료/무효 셀은 통행 가능으로 바꾸지 않는다. 보관 셀의 오래된 원 age와 새 관측의
@@ -167,7 +176,11 @@ Gateway binary relay가 보존하고, target은 경로 채택 후에만 근거�
 다른 도로 revision에서 경로 자체가 검증돼도 과거 revision의 통과 근거는 가져오지 않는다.
 
 새 feature11/15 profile의 `WorldSnapshot`은 major1/minor2이며,
-`DriveState`·`DriveLink`는 major2/state_features7이다.
+`DriveState`·`DriveLink`는 major2다. State의 기본 feature는7이며, tag33의 원 차로 의도·basis를 포함하면15다.
+legacy0/1의 NONE 전진 경로는 기존 전진 추종·종단 오차 합산과 정지 경로 검사를 유지한다.
+명시 signed 검색으로 만든 경로와 새 lane profile은 segment별 progress·전후진·방향 gate를
+사용한다. 이 호환 경로는 legacy AUTO에서 후진 State를 승인하거나 새 방향 권한을 만들지 않는다.
+
 nested `VehicleSample`·`MissionGrant`는 major1을 유지한다. A/B의 `lattice`·`engine`·`lattice_app`과 C/Python 생성물·공용 codec,
 이를 실제로 로드한 Gateway binary 수신 프로세스를 같은 지원 후보로 맞춘다. 옛 Gateway는
 모르는 선택 필드를 버리므로 새 통과 근거를 보존하는 혼합 실행은 지원하지 않는다.
@@ -224,6 +237,44 @@ python3 platform/apps/drive/tools/generate_world.py --tools <frozen-tools>
 python3 platform/apps/drive/tools/generate_primitives.py --help
 pytest platform/apps/drive/tests/test_world.py platform/apps/drive/tests/test_lattice.py platform/apps/drive/tests/test_engine.py
 ```
+
+공용 Python codec은 `platform/apps/drive/world/pyproject.toml`의 독립 내부 패키지
+`xenova-drive-world`로도 설치할 수 있다. 기존 source-tree의 `world_codec` shim은 유지한다.
+생성기의 protobuf3.20.3과 대상 런타임의 승인된 protobuf6.33.6은 별개다. 이 패키지는
+런타임 의존성을 자동 설치하지 않으므로 기존 Python 환경에 승인된 protobuf와 setuptools가
+준비돼 있어야 한다. 아래 명령은 패키지만 설치하며 다운로드나 장치 연결을 하지 않는다.
+
+```sh
+python -m pip install --no-deps --no-build-isolation ./platform/apps/drive/world
+```
+
+Jetson의 `xenova_vehicle.transport.world_adapter`는 이 공용 codec을 호출하는 순수 builder다.
+원 시각·시계·보정·frame 문맥과 완전한 `schema.WorldSnapshot` template은 호출자가 제공한다.
+별도 broker 발행이나 안정 ID/scene/임무 권한 발급을 하지 않으며 반환 후보의 원 input kind와
+`world_valid=false`, `metric_ready=false`, `live_authority=false`를 유지한다. 불완전한 새 feature
+payload는 빈 lane/slot이나 임의 시각으로 채우지 않고 `WorldBuildError`로 거절한다.
+
+```python
+from xenova_vehicle.transport.world_adapter import WorldSource, build_world, lane_model_from_road
+
+# 아래 값은 모두 원 기록/외부 문맥에서 제공한다. builder가 발급하거나 승인하지 않는다.
+lane_model = lane_model_from_road(road_result, lane_ids=stable_lane_ids,
+    model_revision=model_revision, lane_revisions=lane_revisions, crossing=crossing_policy)
+template.lane_model.CopyFrom(lane_model)
+source = WorldSource(snapshot['kind'], snapshot['frame_id'], template.frame_epoch,
+    snapshot['clock_id'], snapshot['calibration_id'], original_capture_interval, original_snapshot_us,
+    wire_clock_epoch=template.clock_epoch)
+candidate = build_world(snapshot, template, source=source, preferred_road=preferred_road_mask)
+wire_bytes = candidate.payload
+```
+
+내부 UNKNOWN0/FREE1/OCCUPIED2는 wire255/0/100으로 명시 변환한다. age는 원 uint32 ms를
+little-endian row-major로 보존한다. whole-cell permission bit와 선호 도로 중심 bit는 독립이다.
+frame-local 이름과 원 clock label을 wire epoch에 명시 결박하는 책임은 caller에 남는다.
+`simulation:<UUID>` 같은 원 label을 잘라 쓰거나 J 시각으로 재발급하지 않는다. legacy0/1은
+비영점 capture 구간을 표현하지 못하므로 거절하며,11/15는 localization의 timestamp 반폭을 검사한다.
+float32 grid 양자화는 선언된 localization geometry bound 안에 있어야 하며 그 bound가 없는
+legacy profile은 float32에 정확히 표현되는 grid만 이 builder에서 지원한다.
 
 `tests/run_lattice_pair.py --help`는 별도 network namespace·실제 두 broker·동일 firmware 두 개·
 제품 Gateway·PTY feedback의 통합 시험이다. 지도와 encoder/물리 모델, root/Store는 시험 대체 경계다.

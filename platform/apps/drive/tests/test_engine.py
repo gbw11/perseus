@@ -291,6 +291,7 @@ def test_merge_passage_survives_handoff_and_clipped_reference(library):
         assert library.engine_plan(source,1300000,4096)==0
         assert library.engine_track(source,1300000,out)==0 and out[0]>0
         state=exported_state(library,source)
+        assert state.vehicle_sequence==3
         assert state.merge_passed_reference_revision==1 and state.direction==original.direction
         assert state.merge_goal==original.merge_goal and state.maneuver_revision==original.maneuver_revision
         # Exercise the common binary envelope used by the real Gateway relay.

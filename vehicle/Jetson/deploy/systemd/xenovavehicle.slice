@@ -1,0 +1,6 @@
+[Unit]
+Description=Xenova vehicle dedicated persistent execution slice
+StopWhenUnneeded=no
+
+[Install]
+WantedBy=multi-user.target
