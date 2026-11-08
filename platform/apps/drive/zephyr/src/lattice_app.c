@@ -11,6 +11,8 @@
 #include <math.h>
 #include <string.h>
 #include <stdio.h>
+#include <pb_encode.h>
+#include <xenova/sha256.h>
 
 extern const struct lp_config lp_selected_config;
 extern const struct lp_assets lp_selected_assets;
@@ -42,6 +44,20 @@ struct direction_phase {
  unsigned attempt_count;struct xm_drive_command2 attempts[8];
 };
 static struct direction_phase direction_phase;
+/* Planner-owned staging, separate from the state I/O owner's encode arena. */
+static dw_state registration_state;
+static xenova_drive_EpisodeRequest registration_request;
+static xenova_drive_EpisodeReceipt registration_receipt;
+/* State I/O owner retries the first phase snapshot byte-for-byte until the
+ * registry acknowledges that exact identity. A failed publish is not adoption. */
+static dw_state phase_snapshot;
+static bool phase_snapshot_valid;
+static xenova_drive_MissionBudgetRequest budget_request;
+static xenova_drive_MissionBudgetReply budget_reply;
+static uint8_t budget_request_wire[512];
+static uint8_t behavior_boot_nonce[16];
+static xenova_drive_DriveControlFacts planner_facts;
+static xenova_drive_EpisodeStatus planner_status,snapshot_status;
 static const char nil_uuid[]="00000000-0000-0000-0000-000000000000";
 static void uuid_text(char out[37],const uint8_t bytes[16]){
  static const char hex[]="0123456789abcdef";unsigned at=0;
@@ -148,7 +164,7 @@ static const char *qualified(const void *unused,struct xm_span input,int64_t age
           (scene_generation&&engine.paths[ph.slot].scene_generation!=scene_generation))reason="SCENE_UNAVAILABLE";
   else if(dw_current_pose(&map->world,&engine.odometry,now,lp_selected_config.pose_age_us,&pose,NULL))reason="POSE_UNAVAILABLE";
   else if(strcmp(path->frame,map->world.frame_epoch)||strcmp(path->odom,map->world.odom_epoch)||strcmp(path->configuration,map->world.configuration)||strcmp(path->reference,map->world.reference_id))reason="CONTEXT_CHANGED";
-  else if(required&&(dl_mission_get(&mission,now)||!mission.admitted||mission.kind!=1))reason="MISSION_UNAVAILABLE";
+  else if(required&&(dl_mission_get(&mission,now)||!mission.admitted||(mission.kind!=1&&mission.kind!=2)))reason="MISSION_UNAVAILABLE";
   else if(required&&!lp_mission_matches(path,&mission))reason="MISSION_CONTEXT_CHANGED";
   else if(transition)reason="DIRECTION_STOP_REQUIRED";
   else if(!local&&path->execution.segments_count>1&&path->execution.mission.active_segment+1<path->execution.segments_count&&
@@ -208,7 +224,8 @@ static float advance_direction(const struct dl_clock *clock,uint64_t now,const d
  struct de_reference h;const struct lp_path *path;if(de_path_acquire(&engine,&h,&path))return NAN;
  float steer=vehicle->has_measured_steering_rad?vehicle->measured_steering_rad:vehicle->has_estimated_steering_rad?vehicle->estimated_steering_rad:NAN;
  bool settled=false;float target=NAN;
- if(segment+1<path->execution.segments_count){unsigned index=path->execution.segments[segment+1].first_index;
+ bool boundary=de_parking_boundary(&engine);
+ if(boundary||segment+1<path->execution.segments_count){unsigned index=boundary?path->execution.segments[0].first_index:path->execution.segments[segment+1].first_index;
   target=path->points[index].steering_rad;
   settled=isfinite(steer)&&fabsf(steer-target)+vehicle->steering_error_rad<=lp_selected_config.max_steering_error;
  }
@@ -216,7 +233,9 @@ static float advance_direction(const struct dl_clock *clock,uint64_t now,const d
   .calculation_sequence=gate.calculation_sequence,.serial_stop_sequence=gate.gate.stop_command_sequence,.gate_revision=gate.gate.gate_revision,
   .expires_pi_us=gate.valid_until_pi_us<end?gate.valid_until_pi_us:end,.next_segment=segment+1,
   .direction=next_direction,.current=true,.stationary=true,.steering_settled=settled&&gate.gate.state==4};
- bool advanced=h.generation==engine.tracker.path_token&&lp_tracker_next_segment(&engine.tracker,path,now,stop.calculation_sequence,&fact);
+ bool advanced=boundary?(settled&&gate.gate.state==4&&now<fact.expires_pi_us):
+  h.generation==engine.tracker.path_token&&lp_tracker_next_segment(&engine.tracker,path,now,stop.calculation_sequence,&fact);
+ if(advanced&&boundary)de_parking_boundary_ready(&engine);
  (void)de_path_release(&engine,h);
  if(advanced&&!k_mutex_lock(&app_metadata,K_NO_WAIT)){direction_phase.active=false;direction_phase.has_stop=false;k_mutex_unlock(&app_metadata);}
  return !advanced&&isfinite(target)?target:NAN;
@@ -371,14 +390,16 @@ static int prepare_current(const dw_state *copy){
  xenova_drive_AppliedState result={0};
  strcpy(result.vm,boot.identity.vm_id);strcpy(result.execution,boot.identity.execution_id);strcpy(result.app_instance,boot.auto_instance_id);
  strcpy(result.host_boot,boot.identity.host_boot_id);strcpy(result.gateway_instance,mapping.gateway);
- result.has_copy_message_id=copy!=NULL;if(copy)strcpy(result.copy_message_id,copy->message_id);
- result.state_revision=copy?copy->state_revision:path->revision;
+ result.has_copy_message_id=copy!=NULL||path->origin.retained;
+ if(copy)strcpy(result.copy_message_id,copy->message_id);
+ else if(path->origin.retained)strcpy(result.copy_message_id,path->origin.message_id);
+ result.state_revision=copy?copy->state_revision:path->origin.retained?path->origin.state_revision:path->revision;
  strcpy(result.frame_epoch,path->frame);strcpy(result.odom_epoch,path->odom);strcpy(result.configuration,path->configuration);
  strcpy(result.calibration,lp_selected_config.calibration);strcpy(result.primitive,lp_selected_assets.sha256);strcpy(result.reference_id,path->reference);
  result.reference_revision=witness.reference_revision;result.path_revision=path->revision;result.vehicle_sequence=vehicle.sequence;
  result.has_vehicle_sequence=true;
  result.maneuver_revision=path->maneuver_revision;
- result.rebuilt=copy==NULL;result.applied=ph.generation==proof.generation;
+ result.rebuilt=!result.has_copy_message_id;result.applied=ph.generation==proof.generation;
 #if defined(CONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS)
  int metadata_rc=k_mutex_lock(&app_metadata,K_NO_WAIT),expiry_rc=0;bool expired=false;
  if(!metadata_rc){
@@ -442,19 +463,69 @@ static void reject_state(const dw_state *copy,enum de_result reason){
  if(result.application_sequence)(void)dl_applied(&result);
 }
 static bool rejected(enum de_result rc){return rc==DE_STATE||rc==DE_FRAME||rc==DE_CONFIGURATION||rc==DE_REFERENCE;}
-static void planner(void *a,void *b,void *c){
- ARG_UNUSED(a);ARG_UNUSED(b);ARG_UNUSED(c);
- const dw_state *copy=NULL;int slot=-1;bool applying=false;
- while(!cancelled(NULL)){
+/* Requests are bounded by the original completed Guest -> Pi lower endpoint.
+ * The upper endpoint is only the current-time rejection bound, never extra TTL. */
+static uint64_t request_deadline(const struct dl_clock *clock,uint64_t completed,uint64_t now,uint64_t parent_end){
+ if(!clock->acknowledged||!completed||completed>INT64_MAX)return 0;
+ uint64_t lower;
+ if(clock->lower>=0){if(completed>(uint64_t)INT64_MAX-(uint64_t)clock->lower)return 0;lower=completed+(uint64_t)clock->lower;}
+ else{uint64_t magnitude=(uint64_t)(-(clock->lower+1))+1;if(completed<magnitude)return 0;lower=completed-magnitude;}
+ if(lower>INT64_MAX-250000)return 0;
+ uint64_t end=lower+250000;
+ if(end>clock->expires_pi)end=clock->expires_pi;
+ if(end>parent_end)end=parent_end;
+ return end>now?end:0;
+}
+static void behavior_io(const struct dl_clock *clock,uint64_t now,uint64_t guest){
+ bool have_facts=!dl_control_facts(&planner_facts,now),have_status=!dl_episode_status(&planner_status,now);
+ /* Presence comes from the current trusted Gateway's installed profile.
+  * Capability advertisement alone never disables the legacy warm path. */
+ if(!engine.behavior_enabled&&have_facts&&have_status)de_behavior_enable(&engine,behavior_boot_nonce);
+ if(engine.behavior_enabled)atomic_store(&engine.facts_current,have_facts&&de_control_facts(&engine,&planner_facts,now)==DE_OK);
+ if(have_status)(void)de_episode_status(&engine,&planner_status,now);
+ if(!dl_episode_take(&registration_request,&registration_receipt)){
+  if(de_episode_receipt(&engine,&registration_receipt)==DE_OK)dl_snapshot_request();
+ }
+ if(!dl_budget_take(&budget_request,&budget_reply)){
+  xenova_drive_MissionGrant grant;
+  if(!dl_mission_get(&grant,now))(void)de_mission(&engine,&grant,now);
+  if(de_budget_reply(&engine,&budget_reply,now)==DE_OK)dl_snapshot_request();
+ }
+ if(de_budget_request(&engine,&budget_request)&&de_registration_state(&engine,&registration_state)){
+  budget_request.completed_guest_us=guest;
+  uint64_t mission_end=engine.grant.execution_deadline_pi_us?engine.grant.execution_deadline_pi_us:engine.grant.search_deadline_pi_us;
+  budget_request.valid_until_pi_us=request_deadline(clock,guest,now,mission_end);
+  pb_ostream_t wire=pb_ostream_from_buffer(budget_request_wire,sizeof(budget_request_wire));uint8_t hash[32];
+  if(budget_request.valid_until_pi_us>now&&dw_plan_hash(&registration_state,budget_request.plan_sha256.bytes)&&
+     dw_selected_goal_hash(&registration_state.mission,budget_request.selected_goal_sha256.bytes)&&
+     pb_encode(&wire,xenova_drive_MissionBudgetRequest_fields,&budget_request)&&xdr_sha256(budget_request_wire,wire.bytes_written,hash)&&
+     !dl_budget_submit(&budget_request,hash))de_budget_submitted(&engine,&budget_request,hash);
+ }
+ if(!de_episode_request(&engine,&registration_request)||!de_registration_state(&engine,&registration_state))return;
+ struct xt_bootstrap boot;if(xd_context_get(&boot)||!clock->acknowledged||!engine.last_actual_calculation)return;
+ strcpy(registration_request.vm,boot.identity.vm_id);strcpy(registration_request.execution,boot.identity.execution_id);
+ strcpy(registration_request.app_instance,boot.auto_instance_id);registration_request.completed_guest_us=guest;
+ registration_request.clock_probe_sequence=clock->probe_sequence;memcpy(registration_request.clock_reply_sha256.bytes,clock->reply_sha256,32);
+ registration_request.valid_until_pi_us=request_deadline(clock,guest,now,registration_request.candidate.phase_deadline_pi_us);
+ if(registration_request.valid_until_pi_us<=now||!dw_plan_hash(&registration_state,registration_request.plan_sha256.bytes))return;
+ uint8_t hash[32];if(!dw_episode_request_hash(&registration_request,hash))return;
+ if(!dl_episode_submit(&registration_request,hash))de_episode_submitted(&engine,&registration_request);
+}
+struct planner_turn {const dw_state *copy;int slot;};
+static struct planner_turn planner_turn={.slot=-1};
+/* One real owner turn, also used by the native app/actor integration fixture. */
+static int planner_step(void){
+ const dw_state *copy=planner_turn.copy;int slot=planner_turn.slot;bool applying=false;
   struct dl_clock mapping;uint64_t now,guest;PREP_LOCAL;
 #if defined(CONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS)
   int mapping_rc=dl_clock_get(&mapping,&now),guest_rc=0;
   if(!mapping_rc){PREP_VALUE(1,pi,now);guest_rc=clock_us(NULL,&guest);}
-  if(mapping_rc||guest_rc){PREP_DIAG(1,mapping_rc?mapping_rc:guest_rc,0,0);k_sleep(K_MSEC(2));continue;}
+  if(mapping_rc||guest_rc){PREP_DIAG(1,mapping_rc?mapping_rc:guest_rc,0,0);return 2;}
 #else
-  if(dl_clock_get(&mapping,&now)||clock_us(NULL,&guest)){k_sleep(K_MSEC(2));continue;}
+  if(dl_clock_get(&mapping,&now)||clock_us(NULL,&guest))return 2;
 #endif
   PREP_VALUE(2,guest,guest);PREP_DIAG(16,0,0,0);
+  behavior_io(&mapping,now,guest);
   xenova_drive_MissionGrant mission;bool required;
   if(mission_profile(&required)||!required||dl_mission_get(&mission,now))(void)de_mission(&engine,NULL,now);
   else (void)de_mission(&engine,&mission,now);
@@ -466,7 +537,7 @@ static void planner(void *a,void *b,void *c){
    if(!engine.planning&&rc==DE_OK)(void)prepare_current(NULL);
   }else if(engine.apply_pending){
    enum de_result rc=de_apply_finish(&engine,now);
-    if(rc!=DE_BUSY){if(rc==DE_OK)(void)prepare_current(copy);else if(rejected(rc))reject_state(copy,rc);dl_state_release(slot);slot=-1;copy=NULL;applying=false;}
+    if(rc!=DE_BUSY){if(rc==DE_OK)(void)prepare_current(copy);else if(copy&&rejected(rc))reject_state(copy,rc);dl_state_release(slot);slot=-1;copy=NULL;applying=false;}
   }else{
    if(slot<0)slot=dl_state_take(&copy);
    if(slot>=0){
@@ -475,7 +546,7 @@ static void planner(void *a,void *b,void *c){
      skip=atomic_load(&prepared_valid)&&(locally_active||!strcmp(copy_message,copy->message_id));
      k_mutex_unlock(&app_metadata);
     }
-    if(skip){dl_state_release(slot);slot=-1;copy=NULL;k_sleep(K_MSEC(1));continue;}
+    if(skip){dl_state_release(slot);planner_turn.slot=-1;planner_turn.copy=NULL;return 1;}
     struct lp_budget budget={guest+lp_selected_config.planner_budget_us,clock_us,cancelled,NULL,NULL};
     enum de_result rc=de_apply(&engine,copy,now,budget);applying=engine.apply_pending;
     if(!applying){if(rc==DE_OK)(void)prepare_current(copy);else if(rejected(rc))reject_state(copy,rc);dl_state_release(slot);slot=-1;copy=NULL;}
@@ -491,12 +562,17 @@ static void planner(void *a,void *b,void *c){
   }
   /* Preserve the original search deadline. Active bounded slices need not
    * add a whole kernel tick; higher-priority MANUAL/I/O owners can preempt. */
-  if(engine.planning)k_yield();else k_sleep(K_MSEC(1));
- }
+  behavior_io(&mapping,now,guest);
+  planner_turn.copy=copy;planner_turn.slot=slot;return engine.planning?0:1;
+}
+static void planner(void *a,void *b,void *c){
+ ARG_UNUSED(a);ARG_UNUSED(b);ARG_UNUSED(c);
+ while(!cancelled(NULL)){int delay=planner_step();if(delay)k_sleep(K_MSEC(delay));else k_yield();}
  de_stop(&engine);
  while(engine.planning)(void)de_plan_slice(&engine,1,0);
  while(engine.apply_pending)(void)de_apply_finish(&engine,0);
- if(slot>=0)dl_state_release(slot);
+ if(planner_turn.slot>=0)dl_state_release(planner_turn.slot);
+ planner_turn.slot=-1;planner_turn.copy=NULL;
 }
 static int planner_start(void){
  planner_joined=false;atomic_set(&planner_stop,0);
@@ -512,9 +588,11 @@ void drive_lattice_context(const struct xd_inputs *inputs){
   else if(strcmp(app_instance,inputs->app_instances[0])){prepared_valid=false;de_stop(&engine);atomic_set(&planner_stop,1);}
  }
  struct xm_vehicle_control control;locally_active=false;
+ engine.local_owner=false;
  if(!inputs->control.error&&!xm_vehicle_control_parse((struct xm_span){inputs->control.payload,inputs->control.length},&control)){
   locally_active=!strcmp(control.active_vm_id,inputs->vm_id)&&!strcmp(control.active_app,"autonomous")&&!strcmp(control.mode,"AUTO");
   current_generation=control.generation;
+  engine.local_owner=locally_active;
  }
  k_mutex_unlock(&app_metadata);
 }
@@ -526,6 +604,10 @@ void drive_lattice_completed(const struct drive_completion *work){
   completion=(struct completion){.sequence=work->sequence,.vehicle_sequence=(uint64_t)work->sample.input_sequence,
   .tracker_index=work->sample.tracker_index,.segment_index=work->sample.segment_index,.path_generation=work->sample.path_generation,.finished_us=work->end_us,.maneuver_phase=work->sample.maneuver_phase};
   strcpy(completion.instance,app_instance);strcpy(completion.world.map_epoch,work->sample.map_epoch);
+  engine.last_actual_calculation=work->sequence;
+  if(engine.phase_state_message_id[0]||atomic_load(&engine.snapshot_requested_generation)==work->sample.path_generation){
+   atomic_store(&engine.snapshot_requested_generation,0);dl_snapshot_request();
+  }
   completion.world.reference_revision=work->sample.reference_revision;completion.world.observation_sequence=work->sample.observation_sequence;
   prepared.generation=work->sample.path_generation;prepared_valid=true;prepared_expiry=(uint64_t)work->sample.valid_until_ms*1000;
  }
@@ -563,6 +645,7 @@ void drive_lattice_command_attempt(const struct drive_completion *work,const str
 int drive_lattice_start(struct drive_controller *controller){
  if(initialized)return -EALREADY;
  initialized=true;de_init(&engine,&lp_selected_config,&lp_selected_assets);
+ sys_rand_get(behavior_boot_nonce,sizeof(behavior_boot_nonce));
  int memory_rc=drive_lattice_memory_register(&engine);if(memory_rc)return memory_rc;
  manual_cfg_default(&manual_config);manual_config.max_speed_mps=lp_selected_config.max_velocity;
  manual_config.max_reverse_mps=lp_selected_config.max_reverse_velocity;manual_config.max_steer_rad=lp_selected_config.max_steer;
@@ -578,6 +661,7 @@ int drive_lattice_reset_poll(int64_t deadline){
  if(k_mutex_lock(&app_metadata,K_NO_WAIT)){de_stop(&engine);planner_joined=false;return -EAGAIN;}
  strcpy(app_instance,boot.auto_instance_id);prepared_valid=false;memset(&completion,0,sizeof(completion));memset(&direction_phase,0,sizeof(direction_phase));
  preparation_sequence=snapshot_revision=exported_completion=0;copy_message[0]=0;copy_revision=prepared_expiry=0;prepared_gateway[0]=0;k_mutex_unlock(&app_metadata);
+ phase_snapshot_valid=false;
  return planner_start();
 }
 int drive_lattice_join(int64_t deadline){
@@ -596,6 +680,10 @@ void drive_lattice_report(void){
  printf("XD_LATTICE_RESOURCES {\"engine_bytes\":%u,\"map_pool_bytes\":%u,\"search_bytes\":%u,\"path_pool_bytes\":%u,\"odom_bytes\":%u,\"path_leases\":%u,\"path_writers\":%u,\"map_readers\":%u,\"map_writers\":%u}\n",
   (unsigned)sizeof(engine),(unsigned)sizeof(engine.maps),(unsigned)sizeof(engine.search),(unsigned)sizeof(engine.paths),
   (unsigned)sizeof(engine.odometry),path_leases,path_writers,map_readers,map_writers);
+ printf("XD_BEHAVIOR_RESOURCES {\"parking_fixed_bytes\":%u,\"registration_state_bytes\":%u,\"phase_snapshot_bytes\":%u,\"planner_io_bytes\":%u,\"snapshot_status_bytes\":%u,\"planner_stack_reserved\":%u}\n",
+  (unsigned)sizeof(engine.parking),(unsigned)sizeof(registration_state),(unsigned)sizeof(phase_snapshot),
+  (unsigned)(sizeof(planner_facts)+sizeof(planner_status)+sizeof(registration_request)+sizeof(registration_receipt)+
+   sizeof(budget_request)+sizeof(budget_reply)+sizeof(budget_request_wire)),(unsigned)sizeof(snapshot_status),(unsigned)K_THREAD_STACK_SIZEOF(planner_stack));
  printf("XD_LATTICE_SEARCH {\"expanded\":%llu,\"primitives\":%llu,\"footprints\":%llu,\"cells\":%llu,\"cancel_checks\":%llu,\"nodes_high_water\":%u,\"open_high_water\":%u,\"index_probe_high_water\":%u}\n",
   (unsigned long long)engine.planned.expanded,(unsigned long long)engine.planned.primitives,
   (unsigned long long)engine.planned.footprints,(unsigned long long)engine.planned.cells,
@@ -610,6 +698,22 @@ void drive_lattice_report(void){
   lp_reason(atomic_load(&engine.search_reason)),engine.current,(unsigned long long)engine.maps.high_water);
 }
 int drive_lattice_snapshot(dw_state *out){
+ if(phase_snapshot_valid){
+  struct xt_bootstrap current;
+  if(!xd_context_get(&current)&&(strcmp(phase_snapshot.source_execution,current.identity.execution_id)||
+     strcmp(phase_snapshot.source_app_instance,current.auto_instance_id)||phase_snapshot.source_generation!=current_generation))phase_snapshot_valid=false;
+  if(engine.has_grant&&(phase_snapshot.mission.mission_revision!=engine.grant.mission_revision||
+     memcmp(phase_snapshot.mission.mission_id.bytes,engine.grant.mission_id.bytes,16)))phase_snapshot_valid=false;
+  struct dl_clock clock;uint64_t now;char accepted[37];
+  if(!dl_clock_get(&clock,&now)&&!dl_episode_status(&snapshot_status,now)&&snapshot_status.commit_state==2){
+   uuid_text(accepted,snapshot_status.state_message_id.bytes);
+   if(!strcmp(accepted,phase_snapshot.message_id)){
+    phase_snapshot_valid=false;
+    if(!k_mutex_lock(&app_metadata,K_NO_WAIT)){engine.phase_state_message_id[0]=0;k_mutex_unlock(&app_metadata);}
+   }
+  }
+  if(phase_snapshot_valid){*out=phase_snapshot;return 0;}
+ }
  if(engine.stopping)return -EAGAIN;
  struct xt_bootstrap boot;if(xd_context_get(&boot))return -EAGAIN;
  struct completion work;uint32_t generation;uint64_t revision;
@@ -642,10 +746,15 @@ int drive_lattice_snapshot(dw_state *out){
   out->calculation_sequence=work.sequence;out->tracker_index=work.tracker_index;out->complete=true;
   if(out->has_mission)out->mission.active_segment=work.segment_index;
   out->path_count=path->count;memcpy(out->path,path->points,path->count*sizeof(*path->points));
-  uint8_t random[16];sys_rand_get(random,sizeof(random));xm_uuid4_format(out->message_id,random);
+  if(engine.phase_state_message_id[0])strcpy(out->message_id,engine.phase_state_message_id);
+  else{uint8_t random[16];sys_rand_get(random,sizeof(random));xm_uuid4_format(out->message_id,random);}
   strcpy(out->map_epoch,work.world.map_epoch);out->observation_seq=work.world.observation_sequence;rc=0;
  }
  (void)de_path_release(&engine,h);
- if(!rc&&!k_mutex_lock(&app_metadata,K_NO_WAIT)){snapshot_revision=revision;exported_completion=work.sequence;k_mutex_unlock(&app_metadata);}
+ if(!rc&&!k_mutex_lock(&app_metadata,K_NO_WAIT)){
+  snapshot_revision=revision;exported_completion=work.sequence;
+  if(engine.phase_state_message_id[0]){phase_snapshot=*out;phase_snapshot_valid=true;}
+  k_mutex_unlock(&app_metadata);
+ }
  return rc;
 }

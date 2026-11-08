@@ -12,8 +12,13 @@ from xenova_gateway.scene_authority import COMMAND3,FEEDBACK3
 
 
 class VirtualFeedback3:
-    def __init__(self,fd,configuration,firmware,*,metres_per_tick=.000001,drop_first_feedback=False):
+    def __init__(self,fd,configuration,firmware,*,metres_per_tick=.000001,drop_first_feedback=False,steering_error_mrad=0):
+        # Explicit software sensor quantization/error, never physical calibration.
+        # Keep zero as the legacy default, including its invalid quality/error pair.
+        if type(steering_error_mrad) is not int or not 0<=steering_error_mrad<=65535:
+            raise ValueError('explicit software steering error in unsigned milliradians')
         self.fd=fd;self.configuration=configuration;self.firmware=firmware;self.scale=metres_per_tick
+        self.steering_error_mrad=steering_error_mrad
         self.device=uuid4().bytes;self.pi=None;self.install=None;self.current=None;self.sequence=0;self.report=0
         self.ticks=0.;self.velocity=0;self.steering=0;self.previous=time.monotonic();self.last_sensor=0
         self.drop_first_feedback=drop_first_feedback;self.dropped=False;self.commands=[]
@@ -48,7 +53,7 @@ class VirtualFeedback3:
             if (pi,device)!=(self.pi,self.device):raise ValueError('fake clock source')
             sample,stamp,left,right=self.latch(now)
             self.send(CLOCK_REPLY,CLOCK3.pack(pi,device,seq,p1,stamp,stamp,int(time.monotonic()*1e6),
-                sample,left,right,3,self.steering,0));return
+                sample,left,right,3,self.steering,self.steering_error_mrad));return
         if kind==CLOCK_INSTALL:
             row=INSTALL3.unpack(raw)
             if row[:2]!=(self.pi,self.device):raise ValueError('fake install source')
@@ -76,7 +81,7 @@ class VirtualFeedback3:
                 if self.pi is not None and self.install is not None and now-self.last_sensor>=.02:
                     self.last_sensor=now;sample,stamp,left,right=self.latch(now);lease=self.install
                     if stamp<lease[9]:
-                        self.send(SENSOR,SENSOR3.pack(self.pi,self.device,sample,stamp,left,right,3,self.steering,0,lease[2],lease[3]))
+                        self.send(SENSOR,SENSOR3.pack(self.pi,self.device,sample,stamp,left,right,3,self.steering,self.steering_error_mrad,lease[2],lease[3]))
                         self.feedback(sample,stamp)
         except BaseException as error:self.failure=error
 

@@ -84,7 +84,7 @@ class MissionLinkPort:
         return schema.MissionBudgetReply(major=1,request_nonce=envelope.request_nonce,
             request_sha256=envelope.request_sha256,result=result,reason=reason)
 
-    def offer_budget(self,vm,execution,app_instance,authenticated_generation,request,received_pi_us):
+    def offer_budget(self,vm,execution,app_instance,authenticated_generation,request,received_pi_us,*,raw=None):
         """원 envelope 또는 즉시 typed BUSY/REJECTED를 반환한다.
 
         미지원은 REJECTED/CONTEXT, slot 포화는 BUSY/CONTEXT, 원 nonce의 본문 충돌은
@@ -93,6 +93,11 @@ class MissionLinkPort:
         완료 후의 재요청은 S18 원장 조회를 위한 새 전송 사본이며 여기서 성공을 replay하지 않는다.
         """
         body,wire=_canonical(request,schema.MissionBudgetRequest,_REQUEST_CAP)
+        if raw is not None:
+            if type(raw) is not bytes or not 0<len(raw)<=_REQUEST_CAP:raise ValueError('bounded original budget bytes')
+            original=decode(raw,schema.MissionBudgetRequest);original.DiscardUnknownFields()
+            if encode(original)!=wire:raise ValueError('budget original body mismatch')
+            wire=raw
         if (not _label(vm) or not _label(execution) or not _label(app_instance)
                 or type(authenticated_generation) is not int or not 0<=authenticated_generation<=0xffffffff
                 or type(received_pi_us) is not int or not 0<=received_pi_us<=_MAX_U63):

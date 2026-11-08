@@ -70,13 +70,23 @@ class Feedback3SerialSink(FeedbackSerialSink):
         value.update(profile='feedback-3',clock_epoch=self.clock_epoch,clock_lease_revision=self.clock_sequence,
             clock_ready=self.ready and self._sensor_available() and self._lease(int(self.clock()*1e6)) is not None if hasattr(self,'clock') else False)
         if hasattr(self,'odometry'):
+            value['absolute_meter']=self.odometry.absolute.snapshot
             self._matched_stop_snapshot=self._make_matched_stop()
             pin=self.stop_pin
+            if pin is not None and pin.get('first_applied_feedback') is not None and pin.get('first_applied_pi_lower_us') is None:
+                report=FEEDBACK3.unpack(pin['first_applied_feedback'])
+                measured=next((row for row in self.odometry.samples if row['source_sample']==report[8] and row['source_us']==report[9]),None)
+                if measured is not None:
+                    pin['first_applied_pi_lower_us']=measured['pi_sample_us']-measured['clock_error_us']
+                    pin['first_applied_pi_upper_us']=measured['pi_sample_us']+measured['clock_error_us']
             self._direction_snapshot=None if pin is None else dict(pin=pin.copy(),
                 rows=tuple(dict(row) for row in self.odometry.samples),clock_ready=value['clock_ready'],
                 sample=value.get('vehicle_sample'),hold=None if self.hold_row is None else self.hold_row.copy(),
                 hold_start=self.hold_start,gate_revision=self.gate_revision,matched=self._matched_stop_snapshot,
                 moving=bool(self.last_motion),clock_end=0 if self._lease(int(self.clock()*1e6)) is None else self._lease(int(self.clock()*1e6))['expires'])
+            value['stop_facts_source']=self._direction_snapshot
+            lease=self._lease(int(self.clock()*1e6))
+            value['clock_valid_until_pi_us']=0 if lease is None else lease['expires']
         return value
 
     def _lease(self,now):
@@ -190,6 +200,14 @@ class Feedback3SerialSink(FeedbackSerialSink):
             observed_monotonic=now,command_generation=generation,command_counter=counter,command_sequence=seq,
             command_kind='STOP' if row['kind']==2 else 'HOLD_STEER' if row['kind']==3 else 'DRIVE',sample_seq=sample,
             observation_source='device_report',pi_session=self.pi_session,device_session=self.device_session,status=STATUS[status])
+        measured=next((value for value in reversed(self.odometry.samples)
+            if value['source_sample']==sample and value['source_us']==stamp),None)
+        evidence['applied_pi_lower_us']=None if measured is None else measured['pi_sample_us']-measured['clock_error_us']
+        evidence['applied_pi_upper_us']=None if measured is None else measured['pi_sample_us']+measured['clock_error_us']
+        if status==2 and 'first_applied_feedback' not in row:
+            row['first_applied_feedback']=payload
+            row['first_applied_pi_lower_us']=evidence['applied_pi_lower_us']
+            row['first_applied_pi_upper_us']=evidence['applied_pi_upper_us']
         if seq==self.latest_command:self.last_report=evidence
         if status==2:
             try:self.events.put_nowait(evidence)
@@ -301,6 +319,11 @@ class Feedback3SerialSink(FeedbackSerialSink):
         result=SubmissionReceipt(len(legacy_encode(frame)),frame)
         result.metadata=dict(serial_profile='feedback-3',wire_bytes=wire_bytes,command_sequence=row['sequence'],
             pi_session=self.pi_session,device_session=self.device_session)
+        if row['kind']!=2:
+            lease=self.leases.get(row['clock'])
+            if lease is not None:
+                lower,_=self._bounds(lease,row['expires'])
+                result.metadata['device_deadline_pi_us']=COMMAND3.unpack(row['command'])[7]+lower
         return result
 
     @staticmethod

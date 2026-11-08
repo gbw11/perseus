@@ -37,6 +37,47 @@ native POSIX serial의 owner 경로는 기존 readiness 뒤 한 번 읽어 pyser
 줄인다. idle/HUP·부분 frame·첫 실패·read 완료 시각·STOP/종료 우선순위는 유지한다.
 직접 `poll()`의 공개 취소와 socket URL/custom backend는 기존 pyserial 경로를 사용한다.
 
+### 회피 Episode·주차 원 예산 선택
+
+새 회피/주차 연결은 [Episode·ControlFacts 계약](../../../docs/contracts/drive-world/episode-registry-and-control-facts.md)을 따른다.
+private operator 정책의 선택값 `episode_support: true`는 검증한 planner manifest를 사용하는
+설치의 명시 승인이다. 인증된 현재 앱의 ClockProbe feature16 선언과 함께 있어야
+EpisodeStatus·ControlFacts를 전달한다. feature 선언 자체는 설치 승인이나 주행 권한이 아니다.
+이 선택값이 없는 기존 설치와 미지원 peer에는 초기 NONE을 만들어 보내지 않는다.
+현재 AUTO에서 새 profile이 선택된 뒤에는 같은 서비스 안의 A/B·앱 교체·연결 상실·
+feature 선언 누락으로 legacy grace에 돌아가지 않는다. 현재 지원 증거가 없으면 새 준비와
+DRIVE를 거절하며, 서비스/profile을 명시 변경하는 경계 외에는 이 선택을 초기화하지 않는다.
+
+odometry 정책에는 선택값 `metres_per_tick_upper`를 공급할 수 있다. 이는 nominal
+`metres_per_tick` 이상인 보수적인 실제 이동 상한이며, nominal 값을 자동 승격하지 않는다.
+미지정이면 기존 odom/MANUAL/legacy 처리는 유지하되 새 회피·주차 거리 예산의 meter는
+무효다. scale/calibration·session·연속 표본이 바뀌면 새 meter epoch를 발급하고 이전
+원 anchor를 0거리로 복원하지 않는다. 시험의 `0.000001` 상한은 software bench 값이며
+실물 encoder 보정값으로 사용할 수 없다.
+
+serial owner는 각 수락 encoder 표본에서 wrap을 고려한 `max(|ΔL|, |ΔR|)`를 정수 tick으로
+누적한다. actor는 불변 current/history만 읽는다. 회피 등록은 원 clock·birth 표본·Scene·
+mission/grant/cancel·source 기하에 결박하며 RAM registry1/최근 exact reply1/terminal1을
+보관한다. BEGIN/ADVANCE/FINISH ACK 뒤에도 그 phase의 완전한 State가 수락되기 전에는
+DRIVE를 보내지 않는다. C 계산과 입력 수신은 계속해서 그 State를 만들 수 있다.
+Gateway 재기동은 UNKNOWN/disarm이며, 실제 새 mission만 초기 NONE을 열 수 있다.
+같은 phase 재계획·A/B·clock 재결합은 원40초/6m·phase10초 예산이나 실제 진전 시각을
+재시작하지 않는다. 현재 S19 주행 phase에는 일반 STOP 대기 phase가 없다.
+
+주차 예약은 실제 수락 State의 slot/goal/plan 해시와 원 request bytes에 결박한다.
+원120초 mission·90초 SEARCH, 최초 lock의30초 EXEC·SEARCH10m/EXEC5m를 별도로 유지한다.
+EXEC lock 뒤에는 이미 끝난 SEARCH 기한을 EXEC 출력에 다시 적용하지 않는다.
+최초 예약과 최대2회 보정의 원 reply bytes를 기존 mission4KiB 안에 보관하며, 한도가
+부족하면 HISTORY_FULL로 거절한다. 과거 원 reply 조회는 현재 owner의 새 grant ACK가 아니다.
+빈칸 선택·경로·차체 containment는 C 책임이며, Gateway의 PARKED 종결에는 현재
+source/grant/plan/phase에 결박된 실제 STOP/APPLIED와 현재 stationary window가 필요하다.
+
+ordinary StopFacts는 cusp READY나 출력 허가와 다르다. 원 최초 장치 APPLIED 시각을
+보존하면서 새 encoder window만 별도로 갱신한다. warm 연속성 증거는 실제 last-A와
+first-B APPLIED, 원 frame/device E, 중간 STOP을 함께 사용한다. 기존 grace나 수신 시각만으로
+연속 주행을 선언하지 않으며 증거 부족은 `stop_then_resume`로 남긴다. mutable progress·
+travel은 원 full State/HWM에 보관하고 immutable phase/goal 준비 stamp를 매 pose마다 바꾸지 않는다.
+
 이력은 `--history-policy <private-file>`의 `retry_ms`와 `retention_ms`를 명시 공급할 때
 정당하게 종결하고 보존 약속·참조를 해소한 기록만 새 내구 수락에서 정리한다.
 `GatewayClient.history()`는 읽기 전용이다. `new_request_id(host_boot_id)`는 최초 송신 전에

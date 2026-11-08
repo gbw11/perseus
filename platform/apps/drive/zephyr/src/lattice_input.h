@@ -5,7 +5,7 @@
 #include "engine.h"
 #include <xenova/drive_runtime.h>
 #include <xenova/drive_context.h>
-struct dl_clock {bool acknowledged;int64_t lower,upper;uint64_t expires_guest,expires_pi,probe_sequence;
+struct dl_clock {bool acknowledged;int64_t lower,upper;uint64_t expires_guest,expires_pi,probe_sequence;uint8_t reply_sha256[32];
  char gateway[37],vm[37],execution[37],app_instance[37],host_boot[37];struct dw_trust trust;};
 int dl_start(struct drive_engine *);
 void dl_context(const struct xd_inputs *);
@@ -18,6 +18,13 @@ int dl_mission_get(xenova_drive_MissionGrant *,uint64_t now_pi_us);
 int dl_mission_for_local(xenova_drive_MissionGrant *,uint64_t now_pi_us);
 int dl_budget_submit(const xenova_drive_MissionBudgetRequest *,const uint8_t canonical_request_sha256[32]);
 int dl_budget_take(xenova_drive_MissionBudgetRequest *,xenova_drive_MissionBudgetReply *);
+/* One immutable original request/result. These ports never grant phase output. */
+int dl_episode_submit(const xenova_drive_EpisodeRequest *,const uint8_t request_sha256[32]);
+int dl_episode_take(xenova_drive_EpisodeRequest *,xenova_drive_EpisodeReceipt *);
+int dl_episode_status(xenova_drive_EpisodeStatus *,uint64_t now_pi_us);
+int dl_control_facts(xenova_drive_DriveControlFacts *,uint64_t now_pi_us);
+/* Hint to the existing bounded owner, not a new worker or fake completion. */
+void dl_snapshot_request(void);
 /* Atomic ownership transfer of a complete accepted copy to the planner owner. */
 int dl_state_take(const dw_state **);
 void dl_state_release(int slot);

@@ -12,7 +12,9 @@ extern const struct lp_config lp_selected_config;
 extern const struct lp_assets lp_selected_assets;
 struct probe {struct dw_snapshot snapshot;struct lp_search search;struct lp_path path;
  struct lp_tracker tracker;struct lp_config config;struct lp_metrics tracked;
- struct lp_collision_index collision_index;struct tr_basis basis;uint64_t cancel_after;bool cancelled;enum dw_result decoded;};
+ struct lp_collision_index collision_index;struct tr_basis basis;uint64_t cancel_after;bool cancelled;enum dw_result decoded;
+ double parking_trace[24];};
+struct behavior_probe {struct db_episode episode;struct db_facts facts;struct db_limits limits;struct dp_round round;};
 static const struct dw_trust trust={.vehicle="rc-test-1",.mapper_boot="11111111-1111-4111-8111-111111111111",
  .mapper_instance="22222222-2222-4222-8222-222222222222",.map_epoch="33333333-3333-4333-8333-333333333333",
  .frame_epoch="44444444-4444-4444-8444-444444444444",.odom_epoch="55555555-5555-4555-8555-555555555555",
@@ -33,6 +35,78 @@ void *probe_new(const uint8_t *bytes,size_t length) {
  return p;
 }
 void probe_free(void *pointer) { free(pointer); }
+static struct dp_limits parking_limits(const struct lp_config *c){
+ return (struct dp_limits){c->parking_goal_distance,c->parking_goal_heading,c->parking_seed_inward_m,c->parking_yaw_seed_rad,
+  c->min_control_speed,c->parking_clearance_sufficient,c->parking_clearance_band,c->parking_stationary_speed,c->parking_yaw_rate,c->parking_final_window_us};
+}
+int probe_parking_goal_set(void *pointer,uint32_t slot,unsigned strategy,float *out){
+ struct probe *p=pointer;const xenova_drive_ParkingSlot *s=dp_slot(&p->snapshot.world,slot);
+ struct lp_goal_set goals;struct lp_space space;struct dp_limits limits=parking_limits(&p->config);
+ if(!dp_slot_eligible(&p->snapshot.world,s,strategy)||!dp_goal_seeds(s,strategy,&p->config,&limits,.01f,&goals,&space))return 0;
+ for(unsigned k=0;k<goals.count;k++){out[3*k]=goals.poses[k].x;out[3*k+1]=goals.poses[k].y;out[3*k+2]=goals.poses[k].yaw;}
+ return (int)goals.count;
+}
+int probe_parking_terminal(void *pointer,uint32_t slot,float x,float y,float yaw,float error){
+ struct probe *p=pointer;const xenova_drive_ParkingSlot *s=dp_slot(&p->snapshot.world,slot);
+ struct lp_goal_set goals;struct lp_space space;struct dp_limits limits=parking_limits(&p->config);
+ if(!dp_slot_eligible(&p->snapshot.world,s,1)||!dp_goal_seeds(s,1,&p->config,&limits,.01f,&goals,&space))return 0;
+ float radius=hypotf(fmaxf(p->config.front,p->config.rear)+p->config.margin,p->config.half_width+p->config.margin);
+ return dp_terminal_accept(&space,(dw_pose){x,y,yaw},error+radius*.003f,goals.poses[0],.003f,&p->config);
+}
+int probe_parking_search(void *pointer,uint32_t slot,float x,float y,float yaw){
+ struct probe *p=pointer;const dw_world *w=&p->snapshot.world;const xenova_drive_ParkingSlot *s=dp_slot(w,slot);
+ struct lp_goal_set goals;struct lp_space space;struct dp_limits limits=parking_limits(&p->config);
+ if(!dp_slot_eligible(w,s,1)||!dp_goal_seeds(s,1,&p->config,&limits,.01f,&goals,&space)||!tr_basis_accept(&p->basis,w))return LP_INPUT;
+ struct tr_intent task={true,false,s->approach_lane_id,s->approach_lane_id,s->approach_lane_id,.01f};
+ struct tr_view view;dw_pose root={x,y,yaw};memset(p->parking_trace,0,sizeof(p->parking_trace));
+ bool opened=tr_open(w,&task,&view);
+ p->parking_trace[0]=opened&&tr_parking_contains(&view,space.polygon,space.uncertainty,root,p->config.tracking_guard+task.vehicle_pad,&p->config);
+ p->parking_trace[3]=goals.count;p->parking_trace[11]=opened?2*view.selected->centerline[0].y-w->lane_model.divider[0].y:NAN;
+ p->parking_trace[12]=space.polygon[2].y;p->parking_trace[13]=space.uncertainty;
+ p->parking_trace[14]=x;p->parking_trace[15]=y;p->parking_trace[16]=yaw;
+ p->parking_trace[17]=goals.poses[0].x;p->parking_trace[18]=goals.poses[0].y;p->parking_trace[19]=goals.poses[0].yaw;
+ uint64_t now;clock_us(NULL,&now);struct lp_budget b={now+1000000,clock_us,cancelled,p,&p->collision_index};
+ enum lp_result rc=lp_start_parking(&p->search,w,(dw_pose){x,y,yaw},0,&goals,-1,2,&space,&task,&p->basis,&p->config,&lp_selected_assets,b);
+ p->parking_trace[1]=rc;
+ while(rc==LP_SEARCHING)rc=lp_advance(&p->search,8,&p->path);
+ p->parking_trace[2]=rc;p->parking_trace[4]=p->search.selected_goal;p->parking_trace[5]=p->path.count;
+ p->parking_trace[6]=(double)p->search.metrics.expanded;p->parking_trace[7]=(double)p->search.metrics.primitives;
+ p->parking_trace[8]=(double)p->search.metrics.footprints;p->parking_trace[9]=(double)p->search.metrics.cells;
+ p->parking_trace[10]=(double)p->search.metrics.road_checks;
+ if(rc==LP_PATH_FOUND&&p->path.count){dw_pose last=p->path.points[p->path.count-1].pose;
+  p->parking_trace[20]=last.x;p->parking_trace[21]=last.y;p->parking_trace[22]=last.yaw;
+  p->parking_trace[23]=dp_goal_contains(&space,last,p->config.tracking_guard+task.vehicle_pad,&p->config);}
+ return rc;
+}
+void probe_parking_trace(void *pointer,double out[24]){memcpy(out,((struct probe *)pointer)->parking_trace,24*sizeof(*out));}
+void *probe_behavior_new(void *pointer){
+ struct probe *p=pointer;struct behavior_probe *b=calloc(1,sizeof(*b));if(!b)return NULL;
+ const struct lp_config *c=&p->config;
+ b->limits=(struct db_limits){c->avoid_episode_us,c->avoid_phase_us,c->avoid_progress_us,c->avoid_settle_us,
+  c->avoid_travel_m,c->avoid_progress_m,c->avoid_pass_margin_m,c->avoid_heading_rad,c->avoid_steering_rad,c->avoid_policy};
+ b->facts=(struct db_facts){.valid=true,.meter_valid=true,.expires_pi_us=100000000,.vehicle_sequence=1,.meter_ticks=1000,.metres_per_tick=.01,.sampled_pi_us=1000000};
+ memset(b->facts.meter_epoch,0xa1,16);strcpy(b->facts.pi_session,"Pi");strcpy(b->facts.device_session,"Device");strcpy(b->facts.odom_epoch,p->snapshot.world.odom_epoch);
+ struct tr_basis basis={0};struct db_blocker blocker={.present=true,.lower={2,1},.upper={2.2f,1.4f},.station_lower=2,.station_upper=2.2f,.observation_sequence=1};
+ strcpy(blocker.map,p->snapshot.world.map_epoch);uint8_t id[16];memset(id,0x21,16);
+ if(!tr_basis_accept(&basis,&p->snapshot.world)||!db_episode_begin(&b->episode,id,1,2,&basis,&blocker,(dw_pose){4,2,0},1000000,&b->facts,&b->limits)){
+  free(b);return NULL;}
+ (void)db_episode_phase(&b->episode,DB_CHANGE_OUT,(dw_pose){4,2,0},1000000,&b->limits);return b;
+}
+int probe_behavior_step(void *pointer,void *behavior,uint64_t now,uint64_t ticks,uint64_t sequence,float x,float y,int wait){
+ struct probe *p=pointer;struct behavior_probe *b=behavior;b->facts.meter_ticks=ticks;b->facts.vehicle_sequence=sequence;b->facts.sampled_pi_us=now;
+ dw_vehicle v={.sequence=sequence,.quality=3,.position_error_m=.001f,.heading_error_rad=.001f};strcpy(v.odom_epoch,p->snapshot.world.odom_epoch);
+ return db_episode_step(&b->episode,&p->snapshot.world,(dw_pose){x,y,0},&v,now,&b->facts,&b->limits,&p->config,wait!=0);
+}
+uint64_t probe_behavior_deadline(void *behavior,int episode){struct behavior_probe *b=behavior;return episode?b->episode.deadline_pi_us:b->episode.phase_deadline_pi_us;}
+int probe_behavior_reenter(void *behavior,uint64_t now){struct behavior_probe *b=behavior;return db_episode_phase(&b->episode,DB_CHANGE_OUT,b->episode.phase_goal,now,&b->limits);}
+void probe_behavior_free(void *behavior){free(behavior);}
+uint32_t probe_round(void *pointer,void *behavior,int action,uint32_t id){
+ struct probe *p=pointer;struct behavior_probe *b=behavior;
+ if(action==0){xenova_drive_MissionGrant grant={.kind=2,.admitted=true,.mission_revision=1};memset(grant.mission_id.bytes,1,16);
+  if(!dp_round_begin(&b->round,&p->snapshot.world,&grant,(dw_pose){.3f,1.2f,0}))return 0;}
+ if(action==1)(void)dp_round_visit(&b->round,id);
+ return dp_round_next(&b->round);
+}
 int probe_decoded(void *pointer) { return ((struct probe *)pointer)->decoded; }
 int probe_plan(void *pointer,float x,float y,float yaw,float steer,float gx,float gy,float gyaw,
  unsigned nodes,unsigned collisions,uint64_t cancel_after,unsigned budget_ms,float width) {

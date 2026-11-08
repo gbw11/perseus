@@ -13,8 +13,12 @@ from pathlib import Path
 FLOATS=('resolution wheelbase front rear half_width margin max_steer steer_rate max_velocity '
         'max_accel max_brake max_lateral_accel lookahead_min lookahead_max lookahead_time reaction_s '
         'goal_distance goal_heading tracking_error max_position_error max_heading_error max_steering_error primitive_speed '
-        'primitive_duration pose_age_us live_age_us cell_age_ms deviation_cost curvature_cost switch_cost plan_horizon heuristic_weight heading_weight tracking_guard goal_straight_m max_reverse_velocity').split()
-INTS=('node_limit','expansion_limit','collision_limit','steering_levels','clock_error_us','clock_lease_us','planner_budget_us','state_period_us','direction_phase_us','guest_timestamp_error_us','guest_drift_ppm')
+        'primitive_duration pose_age_us live_age_us cell_age_ms deviation_cost curvature_cost switch_cost plan_horizon heuristic_weight heading_weight tracking_guard goal_straight_m max_reverse_velocity '
+        'avoid_travel_m avoid_progress_m avoid_pass_margin_m avoid_heading_rad avoid_steering_rad '
+        'parking_goal_distance parking_goal_heading parking_seed_inward_m parking_yaw_seed_rad min_control_speed '
+        'parking_clearance_sufficient parking_clearance_band parking_stationary_speed parking_yaw_rate').split()
+INTS=('node_limit','expansion_limit','collision_limit','steering_levels','clock_error_us','clock_lease_us','planner_budget_us','state_period_us','direction_phase_us','guest_timestamp_error_us','guest_drift_ppm',
+      'avoid_episode_us','avoid_phase_us','avoid_progress_us','avoid_settle_us','avoid_policy','parking_final_window_us')
 
 def generate(profile,output):
     cfg=json.loads(profile.read_text(encoding='utf-8'))
@@ -29,6 +33,12 @@ def generate(profile,output):
         if type(cfg[key]) is not int or not 0<cfg[key]<=2**31-1:raise ValueError('positive bounded '+key)
     if cfg['guest_drift_ppm']>=1000000 or cfg['guest_timestamp_error_us']>=1000000:raise ValueError('explicit paired guest clock bounds')
     if cfg['direction_phase_us']>10000000:raise ValueError('provisional direction phase cap')
+    if (cfg['avoid_episode_us']>40000000 or cfg['avoid_phase_us']>10000000 or cfg['avoid_progress_us']>2000000 or
+            cfg['avoid_settle_us']>cfg['avoid_phase_us'] or cfg['avoid_travel_m']>6 or cfg['avoid_policy'] not in (1,2)):
+        raise ValueError('original avoidance hard caps')
+    if cfg['parking_goal_distance']>cfg['goal_distance'] or cfg['parking_goal_heading']>cfg['goal_heading']:
+        raise ValueError('parking does not widen road terminal bounds')
+    if cfg['min_control_speed']>cfg['max_accel']*.02:raise ValueError('minimum control speed exceeds the explicit 20ms startup ramp')
     if cfg['node_limit']>8192 or cfg['expansion_limit']>100000 or cfg['collision_limit']>100000000:raise ValueError('compiled resource caps')
     if cfg['max_steer']>=math.pi/2 or 2*cfg['max_steer']/cfg['primitive_duration']>cfg['steer_rate']:raise ValueError('steering continuity/rate')
     if cfg['lookahead_max']<cfg['lookahead_min'] or cfg['primitive_speed']>cfg['max_velocity']:raise ValueError('profile speed/lookahead')

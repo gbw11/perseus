@@ -26,6 +26,8 @@ class OperatorService:
         self.command_hwm={}
         from .keyboard_actor import KeyboardActor
         self.keyboard=KeyboardActor(self)
+        from .episode import EpisodeOwner
+        self.episodes=EpisodeOwner(self)
         if runner.drive_link is not None:runner.drive_link.missions.enable_budget_input()
 
     @property
@@ -365,6 +367,7 @@ class OperatorService:
         self.missions.observe_vehicle(self.runner.device_view().get('vehicle_sample'),
             getattr(config,'metres_per_tick',None),self.now)
         self._mission_tick()
+        self.episodes.tick()
         for lane in (0,2,1):
             try:call,result=self.queues[lane].get_nowait()
             except queue.Empty:continue
@@ -421,12 +424,17 @@ class OperatorService:
                                 request_sha256=envelope.request_sha256,result=5,reason=9)
                         else:
                             result=reply
-                            if self.now>=envelope.valid_until_pi_us or not self.stationary():
-                                result=schema.MissionBudgetReply(major=1,request_nonce=envelope.request_nonce,
-                                    request_sha256=envelope.request_sha256,result=3,reason=2)
-                            self.missions.distance=max(0.,self.missions.distance-checkpoint);self.missions.publish()
+                            # Durable reservation is an original result even if delivery is late.
+                            # Current grant/input/clock checks still prohibit acting on an old ACK.
+                            if 'search_meter' not in mission:self.missions.distance=max(0.,self.missions.distance-checkpoint)
+                            self.missions.publish()
                         self.runner.drive_link.complete_budget_request(envelope,result);self.budget_pending=None
-                    self._proposal(envelope.request_nonce.hex(),{'current_mission':mission},'budget',envelope.valid_until_pi_us,reserved)
+                    try:self._proposal(envelope.request_nonce.hex(),{'current_mission':mission},'budget',envelope.valid_until_pi_us,reserved)
+                    except OperatorError as error:
+                        if error.code!='HISTORY_FULL':raise
+                        result=schema.MissionBudgetReply(major=1,request_nonce=envelope.request_nonce,
+                            request_sha256=envelope.request_sha256,result=5,reason=10)
+                        self.runner.drive_link.complete_budget_request(envelope,result);self.budget_pending=None
 
     def admit_command(self,vm,app,payload,reference):
         from .command_contract import parse
@@ -455,11 +463,13 @@ class OperatorService:
                     getattr(sample,k)==current.get(k) for k in ('host_boot','device_session','odom_epoch','pi_session','calibration'))
                 if registered and interval is not None and now<min(int(command['valid_until_pi_us']),interval[0]+100000,interval[2]):
                     source['direction_intent_admitted']=True
-                    mission=self.missions.current();caps=[v for v in (mission['deadline'],mission['execution_deadline']) if v]
+                    caps=[value for value in (self.missions.output_deadline(),self.episodes.output_deadline()) if value]
                     if caps:source['phase_expires_pi_us']=min(caps)
             return source
         if command['profile']!='drive-command-3' or not self.command_allowed(command):return None
         peer=(vm,reference['execution_id'],reference['agent_instance_id'])
+        if app=='autonomous' and (not self.episodes.command_allowed(peer,command)
+                or not self.missions.motion_allowed(command)):return None
         interval=self.clocks.interval(peer,int(command['clock_probe_sequence']),int(command['completed_guest_us']),now,m.generation)
         if interval is None:return None
         lower,upper,clock_end=interval
@@ -491,14 +501,18 @@ class OperatorService:
         else:
             mission=self.missions.current()
             if mission is None:return None
-            for field in ('deadline','execution_deadline','search_deadline'):
-                if mission[field]:end=min(end,mission[field])
+            mission_end=self.missions.output_deadline()
+            if mission_end is not None:end=min(end,mission_end)
+            episode_end=self.episodes.output_deadline()
+            if episode_end is not None:end=min(end,episode_end)
         if now>=end:return None
         self.command_hwm={k:v for k,v in self.command_hwm.items() if k[:2]!=(vm,app)}
         self.command_hwm[key]=sequence
         source.update(issued_pi_us=lower,valid_until_pi_us=end)
         if app=='autonomous':
-            phase=[v for v in (mission['deadline'],mission['execution_deadline']) if v]
+            phase=[value for value in (self.missions.output_deadline(),) if value]
+            episode_end=self.episodes.output_deadline()
+            if episode_end is not None:phase.append(episode_end)
             if phase:source['phase_expires_pi_us']=min(phase)
         return source
 
@@ -514,9 +528,25 @@ class OperatorService:
         runtime=self.runner.scene_runtime
         return current['scene_id'] is None or runtime is not None and runtime.mission_allowed(self.missions.grant(),self.now)
 
+    def output_allowed(self,source):
+        """이미 수락한 mailbox도 최종 출력 직전에 현재 phase/지원/원 예산을 다시 검사한다."""
+        command=source.get('command',{})
+        if not self.command_allowed(command):return False
+        if command.get('producer_role')!='AUTO':return True
+        peer=(source.get('vm_id'),source.get('execution_id'),source.get('agent_instance_id'))
+        return self.episodes.command_allowed(peer,command) and self.missions.motion_allowed(command)
+
     def _mission_tick(self):
         current=self.missions.current();m=self.runner.machine
         if current is None:return
+        if self.missions.terminal_pending is not None:
+            if self.job is None and not self.worker.busy and self.unknown is None:
+                original=self.missions.terminal_pending
+                def completed(ok,unknown):
+                    if ok:self.missions.terminal_pending=None;self.missions.publish()
+                self._proposal('parking-terminal:'+original['id'],{'current_mission':original},'parking_terminal',
+                    self.now+10000000,completed)
+            return
         reason=self.missions.exhausted(self.now)
         if reason is not None and self.mission_fence is None:
             self._stop(reason);self.mission_fence=self.missions.fence('FAILED')

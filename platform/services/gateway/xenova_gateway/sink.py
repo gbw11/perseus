@@ -60,7 +60,24 @@ class SerialSink:
     serial_for_url 로 열어 같은 non-blocking 쓰기·SinkError 흐름을 탄다 (socket:// 은 baudrate 무시).
     """
 
-    def __init__(self, port: str, baudrate: int = 115200) -> None:
+    def __init__(self, port: str, baudrate: int = 115200, *, development_fd: int | None = None) -> None:
+        self._development_fd = development_fd is not None
+        if self._development_fd or port == 'development-fd':
+            if not self._development_fd or port != 'development-fd':
+                raise SinkError("개발 FD는 port='development-fd'와 development_fd를 함께 명시해야 한다")
+            from .development_fd_transport import DevelopmentFDTransport
+            try:
+                self._serial = DevelopmentFDTransport(development_fd)
+                self._write_fd = self._serial.fileno()
+            except Exception as exc:
+                opened = getattr(self, '_serial', None)
+                if opened is not None:
+                    try:opened.close()
+                    except Exception as cleanup:exc.add_note('development initialization cleanup: '+repr(cleanup))
+                raise SinkError('explicit development FD admission failed') from exc
+            self.failures = 0
+            self.first_failure = None
+            return
         try:
             import serial  # type: ignore[import-not-found]
         except ImportError as exc:
@@ -99,6 +116,10 @@ class SerialSink:
             raise SinkError('serial submission failed; device application unknown') from exc
 
     def _write_bytes(self,data):
+        if getattr(self,'_development_fd',False):
+            # The wrapper verifies ownership/nonblocking on each operation;
+            # never use a cached integer after close and FD-number reuse.
+            return self._serial.write(data)
         # A single POSIX write, including EAGAIN/partial outcomes. pyserial's
         # write_timeout=0 implementation retries EAGAIN, so it is not a bounded
         # one-shot submission. URL backends without an fd retain 5 ms timeout.

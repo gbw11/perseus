@@ -63,9 +63,17 @@ def stamp(*parts):
 def state_context(value):
     metadata=()
     if hasattr(value,'mission') and value.mission.kind:
-        metadata=(value.mission.SerializeToString(deterministic=True).hex(),
+        mission=schema.MissionExecution();mission.CopyFrom(value.mission)
+        mission.execution_travel_m=mission.search_travel_m=0
+        metadata=(mission.SerializeToString(deterministic=True).hex(),
             tuple(p.SerializeToString(deterministic=True).hex() for p in value.segments),
-            value.direction_gate.SerializeToString(deterministic=True).hex())
+            value.direction_gate.SerializeToString(deterministic=True).hex()
+                if value.HasField('direction_gate') else None)
+    if hasattr(value,'episode') and value.HasField('episode'):
+        ref=value.episode.acceptance
+        # 원 phase 등록은 warm 준비를 결박한다. 매 pose의 mutable progress는
+        # full copy 원문/HWM에 남기며 이 phase stamp를 바꾸지 않는다.
+        metadata+=('episode',ref.registry_epoch.hex(),ref.registry_revision,ref.accepted_core_sha256.hex())
     return dict(frame=stamp(value.frame_epoch),configuration=stamp(value.configuration,value.calibration,value.primitive),
         maneuver=stamp(value.reference_id,value.maneuver_revision,*metadata),odom_epoch=value.odom_epoch,
         road_revision=str(value.reference_revision),route_revision=str(value.path_revision))
@@ -79,6 +87,7 @@ class DriveLinkProvider:
         self.reasons={};self.last_vehicle=None
         self.application_rejections={}
         self.application_order={}
+        self.application_facts={}
         self.world_failure=None
         self.missions=MissionLinkPort(io.vms) if mission_port is None else mission_port
         self._scene=None
@@ -233,7 +242,7 @@ class DriveLinkProvider:
         if not m or vm not in m.vm_ids or not 0<=now-received<=.5:return self.reject('LINK_STALE')
         try:validate(link)
         except ValueError:return self.reject('LINK_WIRE_INVALID')
-        if kind not in ('probe','snapshot','applied','budget_request'):return self.reject('LINK_DIRECTION')
+        if kind not in ('probe','snapshot','applied','budget_request','episode_request'):return self.reject('LINK_DIRECTION')
         binding=m.bindings.current(vm,now)
         modern=getattr(self.runner,'operator',None)
         if not binding or (kind!='probe' or modern is None) and binding.get('app_state_models',{}).get('autonomous')!='stateful':
@@ -265,6 +274,7 @@ class DriveLinkProvider:
                         peers.extend((registered_vm,current_row['execution_id'],app_instance(current_row,a)) for a in ('autonomous','manual')
                             if app_instance(current_row,a) is not None)
                 modern.clocks.register_peers(peers)
+                modern.episodes.declare(peer,body.supported_state_features if body.HasField('supported_state_features') else 0)
                 try:receipt,replay=modern.clocks.accept_probe(body,peer,m.generation,int(now*1e6))
                 except ValueError:return self.reject('LINK_CLOCK_RECEIPT')
                 if receipt is not None:reply.clock.accepted_receipt.CopyFrom(receipt)
@@ -282,6 +292,11 @@ class DriveLinkProvider:
             if modern is not None:
                 witness=modern.direction_witness(vm,role)
                 if witness is not None:reply.clock.direction_gate.CopyFrom(witness)
+                facts=self.runner.control_facts() if modern.episodes.supported(peer) else None
+                if facts is not None:reply.clock.control_facts.CopyFrom(facts)
+                if role=='autonomous':
+                    status=modern.episodes.status(peer)
+                    if status is not None:reply.clock.episode_status.CopyFrom(status)
             # An unavailable/expired mapper clock blocks AUTO world adoption,
             # not the independent Pi vehicle clock or MANUAL input path.
             if modern is not None:
@@ -291,16 +306,13 @@ class DriveLinkProvider:
             if role=='autonomous':self._send_scene(vm);self._send_copy(vm)
         elif kind=='snapshot':
             if self.trust is None:return self.reject('WORLD_PROFILE_UNAVAILABLE')
-            if (m.active_vm!=vm or m.active_app!='autonomous' or not m.output_permitted or
+            peer=(vm,binding['execution_id'],app_instance(binding,'autonomous'))
+            preparing=bool(modern is not None and modern.episodes.supported(peer) and m.phase=='PENDING')
+            if (m.active_vm!=vm or m.active_app!='autonomous' or not (m.output_permitted or preparing) or
                     m.authority.protected(vm) or body.source_generation!=m.generation):return self.reject('STATE_SOURCE_AUTHORITY')
             if body.configuration!=self.trust.configuration or body.primitive!=self.trust.primitive or body.calibration!=self.trust.calibration:
                 return self.reject('STATE_CONFIGURATION')
-            # G2's existing maneuver model cannot represent parking execution.
-            # Full phase/episode admission uses a separate explicit later contract.
-            if body.mission.kind==2:
-                modern=getattr(self.runner,'operator',None)
-                if modern is None:return self.reject('STATE_PARKING_ADMISSION_UNAVAILABLE')
-                return modern.missions.observe_execution(body,now)
+            if body.mission.kind==2 and modern is None:return self.reject('STATE_PARKING_ADMISSION_UNAVAILABLE')
             if body.mission.kind:
                 mission=self._current_mission(vm)
                 if mission is None or not self._state_mission_matches(body,mission):
@@ -309,6 +321,12 @@ class DriveLinkProvider:
                 if (mission.scene_admission_id!=bytes(16) and
                         (runtime is None or not runtime.mission_allowed(mission,int(now*1e6)))):
                     return self.reject('STATE_SCENE_AUTHORITY')
+            episode_prepared=True if modern is None else modern.episodes.prepare_state(body,peer,encode(body))
+            if episode_prepared is None:return self.reject('STATE_EPISODE_CONTEXT')
+            parking_prepared=None
+            if modern is not None and body.mission.kind==2:
+                parking_prepared=modern.missions.prepare_execution(body,now)
+                if parking_prepared is None:return self.reject('STATE_PARKING_CONTEXT')
             try:identity=str(UUID(body.message_id))
             except ValueError:return self.reject('STATE_MESSAGE_ID')
             old=self.copies.get(identity)
@@ -325,8 +343,12 @@ class DriveLinkProvider:
                 source_generation=body.source_generation,state_revision=str(body.state_revision),context=state_context(body),
                 maneuver=dict(kind='AVOID' if body.direction else 'FOLLOW',side={-1:'RIGHT',0:'NONE',1:'LEFT'}[body.direction],
                     phase=('FOLLOW','PASS','REJOIN')[body.maneuver_phase] if body.direction else 'FOLLOW',merge_segment=body.reference_id))
-            if not m.states.receive(self._message(vm,binding,'app.state.snapshot',payload,identity)):return self.reject('STATE_SOURCE_REJECTED')
-            self.copies[identity]=(accepted_wire,(body.path_revision,body.primitive,body.calibration,body.configuration,body.maneuver_revision),state_context(body))
+            if not m.states.receive(self._message(vm,binding,'app.state.snapshot',payload,identity),
+                    preparing=preparing):return self.reject('STATE_SOURCE_REJECTED')
+            self.copies[identity]=(accepted_wire,(body.path_revision,body.primitive,body.calibration,body.configuration,body.maneuver_revision),
+                state_context(body),dict(reference_id=body.reference_id))
+            if parking_prepared is not None:modern.missions.commit_execution(parking_prepared)
+            if modern is not None:modern.episodes.commit_state(episode_prepared)
             if removable is not None:del self.copies[removable];self.evicted+=1
             for target in m.vm_ids:
                 if target!=vm:self._send_copy(target)
@@ -341,16 +363,34 @@ class DriveLinkProvider:
             if body.HasField('copy_message_id'):
                 saved=self.copies.get(body.copy_message_id)
                 if not saved or saved[1]!=(body.path_revision,body.primitive,body.calibration,body.configuration,body.maneuver_revision):return self.reject('STATE_PATH_CONTEXT')
+                original_reference=(saved[3]['reference_id'] if len(saved)>3 else
+                    decode(saved[0],schema.DriveLink).accepted.state.reference_id)
+                if body.reference_id!=original_reference:return self.reject('STATE_PATH_CONTEXT')
                 candidate=state_context(body)
-                if any(candidate[k]!=saved[2][k] for k in ('frame','configuration','odom_epoch','road_revision','route_revision')):
+                if any(candidate[k]!=saved[2][k] for k in ('frame','configuration','odom_epoch','route_revision')):
                     return self.reject('STATE_PATH_CONTEXT')
+                if candidate['road_revision']!=saved[2]['road_revision']:
+                    peer=(vm,binding['execution_id'],app_instance(binding,'autonomous'))
+                    sample=self.vehicle_history.get(body.vehicle_sequence) if body.HasField('vehicle_sequence') else None
+                    sample=None if sample is None else decode(sample,schema.VehicleSample)
+                    current=self.runner.device_view().get('vehicle_sample')
+                    if (modern is None or not modern.episodes.supported(peer) or not body.HasField('calculation_sequence')
+                            or not body.calculation_sequence or not body.vehicle_sequence or sample is None or current is None
+                            or int(candidate['road_revision'])<int(saved[2]['road_revision']) or self.trust is None
+                            or body.frame_epoch!=self.trust.frame_epoch or body.odom_epoch!=current['odom_epoch']
+                            or body.configuration!=self.trust.configuration or body.calibration!=self.trust.calibration
+                            or body.primitive!=self.trust.primitive
+                            or any(getattr(sample,key)!=current.get(key) for key in
+                                ('host_boot','device_session','odom_epoch','pi_session','calibration'))
+                            or not 0<=int(now*1000000)-sample.pi_sample_us+sample.clock_error_us<=200000):
+                        return self.reject('STATE_CURRENT_APPLY_WITNESS')
                 applied_context=saved[2]
             else:applied_context=state_context(body)
             payload=dict(profile='drive-state-1',execution_id=binding['execution_id'],intent_revision=binding['intent_revision'],
                 lifecycle_generation=binding['lifecycle_generation'],copy_message_id=body.copy_message_id if body.HasField('copy_message_id') else None,
                 state_revision=str(body.state_revision),context=applied_context,
                 origin='rebuilt' if body.rebuilt else 'handoff',phase='APPLIED' if body.applied else 'REJECTED')
-            received=m.states.receive(self._message(vm,binding,'app.state.applied',payload))
+            application_received=m.states.receive(self._message(vm,binding,'app.state.applied',payload))
             held=self.inflight.get(vm)
             if held is not None and held['identity']==body.copy_message_id:
                 self.inflight.pop(vm);self._prune()
@@ -359,11 +399,21 @@ class DriveLinkProvider:
                     copy_message_id=body.copy_message_id if body.HasField('copy_message_id') else None,
                     execution_id=binding['execution_id'],app_instance_id=app_instance(binding,'autonomous'))
             else:self.application_rejections.pop(vm,None)
-            if received or not body.applied:self.application_order[vm]=(target,body.application_sequence,signature)
-            if not received:return self.reject('STATE_APPLICATION_REJECTED')
+            if application_received or not body.applied:self.application_order[vm]=(target,body.application_sequence,signature)
+            if not application_received:return self.reject('STATE_APPLICATION_REJECTED')
+            self.application_facts[vm]=dict(target=target,reference_revision=body.reference_revision,
+                vehicle_sequence=body.vehicle_sequence if body.HasField('vehicle_sequence') else None,
+                preparation_sequence=body.calculation_sequence if body.HasField('calculation_sequence') else None,
+                received_monotonic=received)
+            if modern is not None and body.applied and body.HasField('copy_message_id'):
+                modern.episodes.applied((vm,binding['execution_id'],app_instance(binding,'autonomous')),body.copy_message_id)
+        elif kind=='episode_request':
+            if modern is None or accepted_wire is None:return self.reject('EPISODE_UNSUPPORTED')
+            peer=(vm,binding['execution_id'],app_instance(binding,'autonomous'))
+            modern.episodes.receive(body,accepted_wire,peer,int(received*1e6))
         elif kind=='budget_request':
             result=self.missions.offer_budget(vm,binding['execution_id'],app_instance(binding,'autonomous'),
-                m.generation,body,int(received*1e6))
+                m.generation,body,int(received*1e6),raw=accepted_wire)
             if isinstance(result,schema.MissionBudgetReply):self._send_budget_reply(vm,encode(result))
             elif not isinstance(result,BudgetEnvelope):raise RuntimeError('invalid bounded mission port result')
         self.accepted+=1;return True
@@ -521,8 +571,12 @@ class DriveLinkIO:
             try:
                 vm=next(vm for vm in self.vms if msg.topic==outbound(vm))
                 value=decode(bytes(msg.payload),schema.DriveLink)
-                if value.WhichOneof('payload') not in ('probe','snapshot','applied','budget_request'):self._drop('DIRECTION');return
-                prepared=self.prepare_snapshot(value) if value.WhichOneof('payload')=='snapshot' else None
+                kind=value.WhichOneof('payload')
+                if kind not in ('probe','snapshot','applied','budget_request','episode_request'):self._drop('DIRECTION');return
+                prepared=self.prepare_snapshot(value) if kind=='snapshot' else None
+                if kind in ('episode_request','budget_request'):
+                    from xenova_drive_world import episode_request_body,budget_request_body
+                    prepared=(episode_request_body if kind=='episode_request' else budget_request_body)(bytes(msg.payload))
                 self.incoming.put_nowait((vm,value,received,prepared));self.received+=1
             except StopIteration:self._drop('UNBOUND_TOPIC')
             except queue.Full:self._drop('INBOX_FULL')

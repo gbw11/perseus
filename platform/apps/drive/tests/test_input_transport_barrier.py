@@ -250,7 +250,7 @@ def owner(tmp_path_factory):
     source=directory/'owners.c';source.write_text(HARNESS);binary=directory/'owners'
     world=HOME/'world';mqtt=HOME.parent/'common/xenova-mqtt-c';planner=HOME/'planner'
     sources=[source,world/'world.c',world/'generated/world.pb.c',*(world/'nanopb'/n for n in ('pb_common.c','pb_decode.c','pb_encode.c')),
-             planner/'task_reference.c',planner/'engine.c',planner/'lattice.c',planner/'generated/primitives.c',*sorted((mqtt/'src').glob('*.c'))]
+             planner/'task_reference.c',planner/'behavior.c',planner/'parking.c',planner/'engine.c',planner/'lattice.c',planner/'generated/primitives.c',*sorted((mqtt/'src').glob('*.c'))]
     command=['cc','-std=gnu11','-O1','-g','-Wall','-Wextra','-Werror','-ffunction-sections','-fdata-sections','-Wl,--gc-sections',
              '-fsanitize=address,undefined','-DCONFIG_XENOVA_MQTT_BOUNDED_IO=1','-DCONFIG_XENOVA_MQTT_IO_MS=50',
              '-DCONFIG_XENOVA_MQTT_RX_BUF=2048','-DCONFIG_XENOVA_MQTT_TX_BUF=2048','-DCONFIG_XENOVA_MQTT_MAX_SUBS=4',

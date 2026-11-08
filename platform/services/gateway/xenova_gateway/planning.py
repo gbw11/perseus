@@ -69,6 +69,9 @@ class PlannedTransition:
                         handoff.compatible(latest['payload']['context'],proof['context'],latest['payload']['maneuver'])):
                     proof=None
             state_ok=proof is not None
+            episode_gate=getattr(m,'episode_prepare_allowed',None)
+            if app=='autonomous' and episode_gate is not None:
+                state_ok=state_ok and episode_gate(spec['target_vm'])
             saved=row.get('evidence')
             if saved and state_ok:
                 state_ok=all(saved.get(k)==proof.get(k) for k in ('origin','copy_message_id','state_revision','target'))
@@ -123,7 +126,14 @@ class PlannedTransition:
             row['spec']['mode']==m.mode.value and row['spec']['target_vm']!=m.active_vm and
             (row.get('evidence',{}).get('continuity')=='continuous' or row['spec'].get('manual_policy')=='CONTINUE_SESSION') and
             last is not None and m._command_fresh(m.clock()) and m._ready(m.active_vm,old_app,m.clock()))
+        witness=getattr(m,'actual_output_witness',None)
+        actual=(witness is not None and witness.get('original_expires_pi_us') is not None
+            and witness.get('source',{}).get('vm_id')==m.active_vm
+            and witness.get('source',{}).get('app_id')==old_app and witness.get('generation')==m.generation)
+        required=getattr(m,'episode_output_evidence_required',False)
+        continuous=continuous and (actual or not required)
         original_expiry=last+m.timing.command_timeout_s if continuous else 0.
+        if continuous and required:original_expiry=min(original_expiry,witness['original_expires_pi_us']/1000000)
         try:
             result=m.authority.commit_transition(request_id,int(m.clock()*1000),self.valid,arm=armed)
         except AuthorityError:

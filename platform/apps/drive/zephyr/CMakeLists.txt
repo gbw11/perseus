@@ -31,5 +31,6 @@ if(CONFIG_XENOVA_DRIVE_LATTICE)
   target_sources(app PRIVATE src/lattice_app.c src/lattice_input.c src/lattice_memory.c
     ${DRIVE_WORLD}/world.c ${DRIVE_WORLD}/generated/world.pb.c
     ${DRIVE_WORLD}/nanopb/pb_common.c ${DRIVE_WORLD}/nanopb/pb_decode.c ${DRIVE_WORLD}/nanopb/pb_encode.c
-    ${DRIVE_PLANNER}/task_reference.c ${DRIVE_PLANNER}/lattice.c ${DRIVE_PLANNER}/engine.c ${DRIVE_PLANNER}/generated/primitives.c)
+    ${DRIVE_PLANNER}/task_reference.c ${DRIVE_PLANNER}/behavior.c ${DRIVE_PLANNER}/parking.c
+    ${DRIVE_PLANNER}/lattice.c ${DRIVE_PLANNER}/engine.c ${DRIVE_PLANNER}/generated/primitives.c)
 endif()

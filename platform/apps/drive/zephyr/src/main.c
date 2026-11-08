@@ -7,6 +7,7 @@
 #include <string.h>
 #include <stdio.h>
 #include "controller.h"
+#include "lifecycle.h"
 #include "workers.h"
 #if defined(CONFIG_XENOVA_DRIVE_LATTICE)
 #include "lattice_app.h"
@@ -78,26 +79,13 @@ static void warm_report(enum drive_task task,const struct drive_result *selected
  const struct xd_received *in=task==DRIVE_TASK_AUTO?&inputs.perception:&inputs.input;
  struct drive_adapter *adapter=task==DRIVE_TASK_AUTO?&controller.automatic:&controller.manual;
  int64_t tick=k_uptime_get();
- const char *phase=chosen?"ACTIVATING":"WAITING",*state="NOT_READY",*reason="CONTROL_UNAPPLIED";
  const struct drive_completion *work=&completed[task];
- bool current=work->performed&&work->source.lifetime==status.lifetime&&work->context_revision==inputs.control_revision&&
-  work->source.connection_revision==inputs.connection_revision;
- if(selected->control_valid){
-  reason=drive_adapter_qualify(adapter,(struct xm_span){in->error?NULL:in->payload,in->error?0:in->length},
-    in->error?-1:tick-in->received_ms);
-  if(!chosen){
-   if(status.state==DRIVE_TASK_RUNNING||status.pending)reason="STATE_PREPARING";
-   if(!reason)state="QUALIFIED";
-  }else if(current){
-   phase="EXECUTING";reason=work->sample.reason;
-   uint64_t clock;int rc=xdiag_clock_us(&clock);
-   if(rc||tick-work->finished_ms>=300||(status.state==DRIVE_TASK_RUNNING&&clock>status.running_deadline_us))reason="CALCULATION_FAILED";
-   if(!reason)state="READY";
-  }else if(!reason)reason="STATE_PREPARING";
- }
- if(status.revoked){phase=status.state==DRIVE_TASK_RESIDUAL?"RESIDUAL":"STOPPING";state="NOT_READY";
-  reason=status.state==DRIVE_TASK_RESIDUAL?"RESOURCE_RETAINED":"APP_STOPPING";}
- uint32_t generation=selected->control_valid?selected->generation:0;
+ uint64_t clock=0;bool clock_valid=true;
+ if(chosen&&drive_warm_current(&status,work,inputs.control_revision,inputs.connection_revision))clock_valid=xdiag_clock_us(&clock)==0;
+ struct drive_warm_view view=drive_warm_classify(adapter,selected,&status,work,chosen,
+  (struct xm_span){in->error?NULL:in->payload,in->error?0:in->length},in->error?-1:tick-in->received_ms,
+  inputs.control_revision,inputs.connection_revision,tick,clock,clock_valid);
+ const char *phase=view.phase,*state=view.state,*reason=view.reason;uint32_t generation=view.generation;
  bool changed=generation!=a->generation||strcmp(a->last_phase,phase)||strcmp(a->last_state,state)||strcmp(a->last_reason,reason?reason:"");
  if(!changed&&tick<a->due)return;
  if(a->check==UINT64_MAX){a->failed=true;(void)xdiag_error("app-supervision",-EOVERFLOW);return;}

@@ -34,7 +34,7 @@ class StateCopies:
                 if identity is not None:result.add(identity)
         return result
 
-    def receive(self,message):
+    def receive(self,message,*,preparing=False):
         m=self.m;envelope=message.envelope;vm=envelope.get('vm_id');app=envelope.get('app_id');now=m.clock()
         binding=m.bindings.current(vm,now)
         if (message.retained or vm not in m.vm_ids or app not in ('autonomous','manual') or not binding or
@@ -44,7 +44,7 @@ class StateCopies:
         try:
             if message.type=='app.state.snapshot':
                 body=handoff.snapshot(message.payload)
-                if (vm!=m.active_vm or app!=m.active_app or not m.output_permitted or m.authority.protected(vm) or
+                if (vm!=m.active_vm or app!=m.active_app or not (m.output_permitted or preparing and m.phase=='PENDING') or m.authority.protected(vm) or
                         body['source_generation']!=m.generation or body['execution_id']!=binding['execution_id'] or
                         any(body[k]!=binding[k] for k in ('intent_revision','lifecycle_generation'))):
                     raise ValueError('snapshot producer no longer has output authority')
@@ -52,12 +52,13 @@ class StateCopies:
                 previous=[r for r in self.copies.values() if r['vm']==vm and r['app']==app and r['source']==context(binding,app)]
                 if previous and handoff.counter(body['state_revision'])<=handoff.counter(previous[-1]['payload']['state_revision']):
                     raise ValueError('state revision not increasing')
-                self.copies[identity]=dict(vm=vm,app=app,source=context(binding,app),payload=body)
-                if len(self.copies)>8:
+                removable=None
+                if identity not in self.copies and len(self.copies)>=8:
                     pinned=self.referenced()
                     removable=next((key for key in self.copies if key not in pinned),None)
                     if removable is None:raise ValueError('state copies referenced full')
-                    del self.copies[removable];self.evicted+=1
+                self.copies[identity]=dict(vm=vm,app=app,source=context(binding,app),payload=body)
+                if removable is not None:del self.copies[removable];self.evicted+=1
             elif message.type=='app.state.applied':
                 body=handoff.applied(message.payload)
                 if (body['execution_id']!=binding['execution_id'] or

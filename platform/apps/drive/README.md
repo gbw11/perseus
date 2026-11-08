@@ -526,7 +526,8 @@ node key에 gear/cusp가 포함되고 경로는 최대3 segment와 명시적 zer
 추적기는 현재 segment의 단조 progress·원 표본 시각·이동 가능 창을 사용한다. body-frame 후진
 곡률에 별도 servo 부호 반전을 더하지 않으며 종점 저장 속도0을 carrot의 전체 속도로 사용하지
 않는다. 종점은 현재·제동 예상 위치와 yaw를 함께 확인한다. 이 검색 API의 free-space algorithm
-profile과 실제 parking Mission/slot 선택은 구분한다. kind2 parking phase owner는 후속 연결이다.
+profile과 실제 parking Mission/slot 선택은 구분한다. 아래의 명시적 Episode profile에서
+kind2 phase owner와 Pi 원 예산 예약을 연결한다.
 
 현대 command3은 원 실제 completion의 calculation sequence/end timestamp, 확인된 원 numeric
 clock probe sequence와 원 E를 보존한다. 실제 MQTT DriveLink 전체 raw bytes의 SHA256/P4를
@@ -546,3 +547,50 @@ CUSP 예외로 일괄 낮추지 않는다.
 pin해야 한다. 원 ReplyE−PiReceive span과 guest RTT의 보수 오차 확장을 적용하고 원 Pi E는
 ACK/clock renewal/송신 때 다시 발급하지 않는다. 물리 mount·steering·제동·clock 오차 수락은
 해당 실측 profile의 책임이다.
+
+### 등록된 회피·주차와 사본 복구
+
+`planner/behavior.c`는 원 home/target/policy·관측 blocker·station basis를 유지하며
+CHANGE_OUT → PASS → REJOIN을 진행한다. 실제 차체와 오차가 목표 차로에 들어오고
+방향·조향이 안정돼야 차로 변경을 끝내며, 차체 뒤끝까지 blocker를 지나야 복귀한다.
+원40초·절대 이동6m·phase10초·진전2초는 새 path/revision/ACK로 갱신하지 않는다.
+Pi의 모든 accepted encoder를 누적한 meter와 그 뒤 미관측 시간의 속도 상한을 사용한다.
+UNKNOWN은 실제 occupied blocker와 구분하며, 경로와 제동 sweep에서는 통행 불가로 유지한다.
+
+이 기능은 Gateway의 설치된 지원 profile과 현재 확인된 Status/Facts로 활성화된다.
+Probe capability만으로 활성화하지 않으며, 미지원 profile의 일반 FOLLOW/warm 경로는 유지한다.
+초기 NONE은 실제 현재 차로의 짧은 안전 경로·완료 계산·full State로 준비한다.
+새 phase는 원 요청·receipt → 새 phase 계산 → 고정 ID의 full State 수락 → 후속 fresh 계산
+순서를 따른다. 수신이나 State 발행만으로 출력권을 만들지 않는다.
+
+`planner/parking.c`는 최대8개의 안정된 slot ID를 한 평가 라운드로 고정하고 방문 순서를 보존한다.
+EVAL_STOP에서 원 AUTO STOP의 실제 APPLIED·stationary 표본을 확인한 뒤 평가하며,
+선택 slot별 최대27개 goal seed를 하나의 탐색 풀과 작업량으로 처리한다.
+도로의 접근 경로와 선택 slot 안의 signed 경로를 모두 확인한 후 원 goal/plan hash로 예약한다.
+현재 grant의 TARGET_LOCKED/APPROACH State가 수락된 뒤 접근하고, 방향 변경은 기존
+STOP/Gate 원 증거를 거친다. 일반 STOP 사실은 CUSP READY나 권한을 대신하지 않는다.
+
+마지막 주차 구간의 goal pose는 탐색 선호다. 실제 차체에 위치·방향·slot 불확실성과
+충돌 여유를 포함한 외곽이 선택 칸 안에 있고 의도 방향을 만족하면 STOP 후보가 된다.
+같은 실제 progress 이동 창에서 관측돼야 하며 앞선 cusp나 순간 위치 점프는 완료가 아니다.
+FINAL_VERIFY는 현재 임무·grant·plan/phase·source의 실제 정지 구간까지 확인한다.
+이 수락 영역에 들어온 차량은 선호 중심점 잔여 오차만으로 추가 보정하지 않는다.
+영역 밖 보정도 원 goal·실행 예산을 유지하고 Pi 예약 최대2회 안에서만 진행한다.
+후방 UNKNOWN이나 빈 ToF 목록을 FREE로 해석하는 경로는 없다.
+
+warm 사본은 원 copy identity·mission·Episode core/ref를 보존한 geometry 후보다.
+현재 grant와 frame/basis·현재 map·차체 오차·전체 경로·실제 tracker를 다시 확인하고
+발행 직전 target key를 다시 비교한다. B의 새 실제 계산에서 새 명령을 만들며 A의 명령/E를
+재포장하지 않는다. FINISHED core는 과거 기록으로 운반하며 오래된 meter/phase E를
+현재 FOLLOW의 출력 기한으로 쓰지 않는다. 처음 들어오는 사본의 원 수락 검사는 유지한다.
+
+큰 State·등록·Clock/Facts는 owner별 고정 저장소를 사용한다. `XD_BEHAVIOR_RESOURCES`는
+주차 고정 작업공간과 State/입력 staging의 실제 `sizeof`, planner stack 예약을 별도 출력한다.
+기존 path pool 통계는 lease를 갖는 세 path slot의 통계이며 이 추가 고정 작업공간과 구분한다.
+wire 최대 크기나 예약 stack 크기는 실제 stack 최고 사용량을 의미하지 않는다.
+
+`tests/behavior_app_bridge.c`와 `world/tests/input_bridge.c`는 실제 app/planner/input owner의
+한 회차, adapter/completion, 원 binary/command serializer, 운영 main과 공유하는 lifecycle
+판정을 이어준다. RTOS 스케줄링·전송·bootstrap·차량 plant는 명시적 시험 leaf다.
+원 Clock/P4와 State/요청/receipt가 실제 codec을 왕복하며 confirmed/offset/E나 READY를
+시험에서 직접 설정하지 않는다. 이 native 통합과 실보드·실제 장치 적용 검증은 구분한다.

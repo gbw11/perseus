@@ -32,7 +32,9 @@ def source(kind='STOP',calc=1,next_direction=1):
 @pytest.fixture
 def link():
     master,slave=os.openpty()
-    odom=VehicleOdometry(replace(config(),metres_per_tick=.000001,heading_error_rad=.000001),HOST)
+    # Explicit software bench upper; this is not a measured physical encoder scale.
+    odom=VehicleOdometry(replace(config(),metres_per_tick=.000001,metres_per_tick_upper=.000001,
+        heading_error_rad=.000001),HOST)
     policy=StationaryPolicy(30000,100000,200000,.000001,.05,.1,0.,0.)
     profile=Feedback3Profile('a'*64,'b'*64,100,100,100000,1000000,200000,100,100,policy,10000000,.02,20000)
     spec=importlib.util.spec_from_file_location('virtual_feedback3',Path(__file__).parents[1]/'examples/virtual_feedback3.py')

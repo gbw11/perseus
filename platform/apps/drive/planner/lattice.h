@@ -11,6 +11,9 @@
 #define LP_PATH 512
 #define LP_STEERS 9
 #define LP_PRIMITIVE_SAMPLES 17
+#define LP_GOALS 27
+struct lp_space {bool parking;uint32_t slot_id;uint64_t slot_revision;dw_point polygon[4];float uncertainty;};
+struct lp_goal_set {unsigned count;dw_pose poses[LP_GOALS];float distance,heading;int final_gear;};
 enum lp_result { LP_SEARCHING,LP_PATH_FOUND,LP_STOP,LP_NOT_FOUND,LP_NODE_BUDGET,
  LP_WORK_BUDGET,LP_DEADLINE,LP_CANCELLED,LP_INPUT,LP_NUMERIC,LP_COLLISION,LP_PATH_LIMIT,LP_CLOCK };
 struct lp_config {
@@ -21,7 +24,11 @@ struct lp_config {
  primitive_speed,primitive_duration,pose_age_us,live_age_us,cell_age_ms,
  deviation_cost,curvature_cost,switch_cost,plan_horizon,heuristic_weight,heading_weight,tracking_guard,goal_straight_m;
  float max_reverse_velocity;
+ float avoid_travel_m,avoid_progress_m,avoid_pass_margin_m,avoid_heading_rad,avoid_steering_rad;
+ float parking_goal_distance,parking_goal_heading,parking_seed_inward_m,parking_yaw_seed_rad,min_control_speed;
+ float parking_clearance_sufficient,parking_clearance_band,parking_stationary_speed,parking_yaw_rate;
  unsigned node_limit,expansion_limit,collision_limit,steering_levels,clock_error_us,clock_lease_us,planner_budget_us,state_period_us,direction_phase_us,guest_timestamp_error_us,guest_drift_ppm;
+ unsigned avoid_episode_us,avoid_phase_us,avoid_progress_us,avoid_settle_us,avoid_policy,parking_final_window_us;
 };
 struct lp_primitive_point { float x,y,yaw,steer; };
 struct lp_assets { const char *id,*sha256; float resolution,wheelbase,max_steer,steer_rate,speed,duration;
@@ -37,10 +44,15 @@ struct lp_node { dw_pose pose;float steer,g,f,road_cost;int16_t qx,qy;uint8_t he
 struct lp_execution {bool present;uint32_t features;xenova_drive_MissionExecution mission;
  pb_size_t segments_count;xenova_drive_GearSegment segments[3];
  bool has_direction_gate;xenova_drive_DirectionGateRef direction_gate;};
+struct lp_origin {bool retained;char message_id[37],vm[37],execution[37],app_instance[37];
+ uint32_t generation;uint64_t state_revision;xenova_drive_MissionExecution mission;};
 /* goal ends this executable path; merge_goal belongs to the persistent intent. */
 struct lp_path { xenova_drive_PathPoint points[LP_PATH];size_t count;dw_pose goal,merge_goal;
  uint64_t revision,maneuver_revision,merge_passed_reference_revision;uint32_t world_features;int direction;unsigned phase;char frame[37],odom[37],configuration[65],reference[65];
  struct lp_execution execution;struct tr_intent task;struct tr_basis basis;
+ struct lp_space space;
+ bool has_episode;xenova_drive_EpisodeSnapshot episode;
+ struct lp_origin origin;
  size_t initial_tracker_index;uint64_t initial_pi_us;};
 struct lp_search {
  struct lp_node nodes[LP_NODES];int heap[LP_NODES],index[LP_INDEX];unsigned used,open;
@@ -51,6 +63,7 @@ struct lp_search {
  enum lp_result result;int preferred_direction;bool reference_obstructed,building_heuristic;
  struct tr_intent task;struct tr_basis basis;
  bool signed_search;int initial_gear,goal_gear;unsigned max_cusps;
+ struct lp_goal_set goals;struct lp_space space;unsigned selected_goal;
 };
 struct lp_road_state {dw_pose pose;float arc,offset,curvature,length;};
 struct lp_tracker { size_t index;float last_velocity,last_steer;uint64_t completed;
@@ -72,10 +85,16 @@ enum lp_result lp_start_local(struct lp_search *,const dw_world *,dw_pose,float,
  const struct lp_config *,const struct lp_assets *,struct lp_budget,int preferred_direction);
 enum lp_result lp_start_task(struct lp_search *,const dw_world *,dw_pose,float,dw_pose,
  const struct lp_config *,const struct lp_assets *,struct lp_budget,const struct tr_intent *,const struct tr_basis *,const struct lp_metrics *);
+enum lp_result lp_start_task_goal(struct lp_search *,const dw_world *,dw_pose,float,dw_pose,
+ const struct lp_config *,const struct lp_assets *,struct lp_budget,const struct tr_intent *,const struct tr_basis *);
 /* 정확한 point goal의 양기어 검색. 도로 local-terminal로 목표를 바꾸지 않는다.
  * initial/final gear는 ±1, 내부 cusp는 0..2이며 모든 family가 같은 budget을 쓴다. */
 enum lp_result lp_start_signed(struct lp_search *,const dw_world *,dw_pose,float,dw_pose,
  int initial_gear,int final_gear,unsigned max_cusps,const struct lp_config *,const struct lp_assets *,struct lp_budget);
+/* Modern selected-slot task; all seeds share one pool, deadline and work cap. */
+enum lp_result lp_start_parking(struct lp_search *,const dw_world *,dw_pose,float,
+ const struct lp_goal_set *,int initial_gear,unsigned max_cusps,const struct lp_space *,
+ const struct tr_intent *,const struct tr_basis *,const struct lp_config *,const struct lp_assets *,struct lp_budget);
 enum lp_result lp_task_obstructed(const dw_world *,const struct tr_intent *,dw_pose,dw_pose,
  const struct lp_config *,struct lp_budget,struct lp_metrics *,bool *);
 /* Build once per immutable map/configuration; 64 rows, no global cache. */
@@ -85,6 +104,8 @@ void lp_index_build(struct lp_collision_index *,const dw_world *,const struct lp
 enum lp_result lp_advance(struct lp_search *,unsigned,struct lp_path *);
 enum lp_result lp_footprint(const dw_world *,dw_pose,float,const struct lp_config *,struct lp_metrics *,const struct lp_budget *);
 enum lp_result lp_validate_path(const struct lp_path *,const dw_world *,const struct lp_config *,struct lp_metrics *,const struct lp_budget *);
+enum lp_result lp_clearance_lower(const struct lp_path *,const dw_world *,const struct lp_config *,float,
+ struct lp_metrics *,const struct lp_budget *,float *);
 enum lp_result lp_track(struct lp_tracker *,const struct lp_path *,const dw_world *,dw_pose,const dw_vehicle *,
  const struct lp_config *,float dt,struct lp_command *,struct lp_metrics *,const struct lp_budget *);
 /* tracker 단일 owner. 새 immutable path token만 progress를 초기화한다. */
@@ -102,5 +123,8 @@ float lp_path_remaining(const struct lp_path *,dw_pose,size_t *nearest);
 void lp_state_import(struct lp_path *,const dw_state *);
 bool lp_state_export(const struct lp_path *,dw_state *);
 bool lp_mission_matches(const struct lp_path *,const xenova_drive_MissionGrant *);
+/* Accepted geometry adoption only. Current output continues to use exact match. */
+bool lp_grant_revalidates(const struct lp_path *,const xenova_drive_MissionGrant *);
+void lp_bind_current_grant(struct lp_path *,const xenova_drive_MissionGrant *);
 const char *lp_reason(enum lp_result);
 #endif

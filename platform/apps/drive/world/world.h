@@ -18,6 +18,8 @@
 #define DW_WORLD_FEATURES 15u
 #define DW_STATE_FEATURES 7u
 #define DW_TASK_REFERENCE 8u
+#define DW_EPISODE 16u
+#define DW_STATE_KNOWN_FEATURES (DW_STATE_FEATURES|DW_TASK_REFERENCE|DW_EPISODE)
 #define DW_CELL_ROAD 8u
 typedef xenova_drive_Pose dw_pose;
 typedef xenova_drive_Point dw_point;
@@ -58,6 +60,21 @@ enum dw_result dw_state_validate(const dw_state *);
 enum dw_result dw_mission_grant_validate(const xenova_drive_MissionGrant *);
 enum dw_result dw_budget_request_validate(const xenova_drive_MissionBudgetRequest *);
 enum dw_result dw_budget_reply_validate(const xenova_drive_MissionBudgetReply *);
+/* Structure/fingerprint only. Current registry/source/permission remains the caller's check. */
+enum dw_result dw_episode_core_validate(const xenova_drive_EpisodeCore *);
+enum dw_result dw_episode_source_validate(const xenova_drive_EpisodeSourceContext *);
+enum dw_result dw_episode_snapshot_validate(const xenova_drive_EpisodeSnapshot *);
+enum dw_result dw_episode_request_validate(const xenova_drive_EpisodeRequest *);
+enum dw_result dw_episode_receipt_validate(const xenova_drive_EpisodeReceipt *);
+enum dw_result dw_episode_status_validate(const xenova_drive_EpisodeStatus *);
+enum dw_result dw_control_facts_validate(const xenova_drive_DriveControlFacts *,const dw_vehicle *);
+enum dw_result dw_episode_initial_none(xenova_drive_EpisodeSnapshot *,const xenova_drive_EpisodeStatus *);
+bool dw_episode_core_hash(const xenova_drive_EpisodeCore *,uint8_t out[32]);
+bool dw_episode_source_hash(const xenova_drive_EpisodeSourceContext *,uint8_t out[32]);
+bool dw_episode_request_hash(const xenova_drive_EpisodeRequest *,uint8_t out[32]);
+bool dw_basis_prefix_hash(const dw_point *,size_t count,uint8_t out[32]);
+bool dw_plan_hash(const dw_state *,uint8_t out[32]);
+bool dw_selected_goal_hash(const xenova_drive_MissionExecution *,uint8_t out[32]);
 enum dw_result dw_world_validate(const dw_world *,const struct dw_trust *,uint64_t,uint64_t *);
 /* Current Pi upper time versus the original observation lower time. Tightening
  * a guest/Pi clock interval never renews age or requires an estimated receive

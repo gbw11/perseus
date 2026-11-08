@@ -11,13 +11,16 @@
 |---|---|---|
 | broker J `xenova/v1/world/snapshot.pb` | mapper → 각 VM의 전용 world 수신자 | `WorldSnapshot`, QoS0·non-retained·단일 PUBLISH·비압축·32KiB 이하 |
 | broker P `xenova/v1/vehicle/state.pb` | Gateway의 단일 serial/odom 소유자 → 각 VM의 기존 작은 제어 수신자 | `VehicleSample`, 2KiB 이하 |
-| broker P `xenova/v1/vms/<UUID>/drive/link/out` | 그 VM의 state 소유자 → Gateway binary 수신자 | `DriveLink`의 probe/snapshot/applied/budget_request |
+| broker P `xenova/v1/vms/<UUID>/drive/link/out` | 그 VM의 state 소유자 → Gateway binary 수신자 | `DriveLink`의 probe/snapshot/applied/budget_request/episode_request |
 | broker P `xenova/v1/vms/<UUID>/drive/link/in` | Gateway → 그 VM의 state 소유자 | `DriveLink`의 clock/accepted/mission_grant/budget_reply/scene_grant |
 
 Pi 원 SceneGrant의 VM 전달 tag10·원 기한·retained 소비와 legacy live-only 호환은
 [지도 사용권 소비 계약](scene-grant-consumption.md)을 따른다.
 State33·Pi↔VM clock receipt/명시 ACK·실제 방향 증거와 command3의 원 clock 참조는
 [경로·시각·방향 증거 계약](state-clock-and-direction-witness.md)을 함께 배포한다.
+선택한 B08 profile의 State34/feature16·Episode 등록과 원 일반 STOP/Pi meter는
+[Episode·물리 facts 계약](episode-registry-and-control-facts.md)을 따른다. capability와 실제 State
+presence mask는 다르며, legacy warm에 새 NONE을 소급 요구하지 않는다.
 
 지도와 전체 path는 G1 UDS·작은 JSON latest 슬롯에 넣지 않는다. Gateway actor는
 권위와 G2 출처·적용 metadata를 소유한다. 큰 사본의 decode/encode는 binary I/O 소유자가
