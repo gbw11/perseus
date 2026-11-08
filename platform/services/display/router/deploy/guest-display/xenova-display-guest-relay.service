@@ -1,0 +1,32 @@
+[Unit]
+Description=Xenova Plan B guest display relay (display domU frames -> dom0 HDMI)
+Wants=xenova-display-feed.service
+After=network.target xenova-display-feed.service
+ConditionPathExists=/etc/xenova/guest-display.json
+ConditionPathExists=/etc/xenova/display.env
+StartLimitIntervalSec=120
+StartLimitBurst=3
+
+[Service]
+Type=simple
+# XENOVA_DISPLAY_TOKEN: existing loopback feed token. It never leaves dom0.
+EnvironmentFile=/etc/xenova/display.env
+ExecStart=/usr/bin/python3 -m xenova_display.guest_frames --config /etc/xenova/guest-display.json
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=10
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_INET AF_UNIX
+CapabilityBoundingSet=
+StandardOutput=journal
+StandardError=journal
+
+# Example only: not installed or enabled by this change.

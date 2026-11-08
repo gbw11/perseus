@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from .outputs import RuntimeConfig
 from .capture_limits import MAX_JPEG
+from .mjpeg import JpegParser  # moved to a stdlib-only module; re-exported here
 from .runtime_status import RuntimeStatus
 
 
@@ -39,26 +40,6 @@ class FrameSignal:
     def _publish(self):
         previous, self.event = self.event, asyncio.Event()
         previous.set()
-
-
-class JpegParser:
-    def __init__(self): self.buffer = bytearray()
-    def push(self, data):
-        self.buffer.extend(data)
-        frames = []
-        while True:
-            start = self.buffer.find(b"\xff\xd8")
-            if start == -1:
-                self.buffer = self.buffer[-1:]
-                break
-            if start: del self.buffer[:start]
-            end = self.buffer.find(b"\xff\xd9", 2)
-            if end == -1:
-                if len(self.buffer) > MAX_JPEG: self.buffer.clear()
-                break
-            if end+2 <= MAX_JPEG: frames.append(bytes(self.buffer[:end+2]))
-            del self.buffer[:end+2]
-        return frames
 
 
 def capture_command(config, output):

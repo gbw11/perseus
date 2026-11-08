@@ -1,0 +1,24 @@
+[Unit]
+Description=Xenova display domU screen app (vm-screens files + one read-only data path to dom0)
+After=network-online.target
+Wants=network-online.target
+PartOf=xenova-guest-display.target
+ConditionPathExists=/etc/xenova/guest-display-domu.json
+
+[Service]
+Type=simple
+User=xenova-display
+Group=xenova-display
+ExecStart=/usr/bin/python3 -m xenova_display.guest_app --config /etc/xenova/guest-display-domu.json
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+RestrictAddressFamilies=AF_INET AF_UNIX
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=xenova-guest-display.target

@@ -1,0 +1,23 @@
+[Unit]
+Description=Xenova display domU frame sender (this screen -> dom0, authenticated MJPEG)
+Requires=xenova-guest-display-session.service
+After=xenova-guest-display-session.service
+PartOf=xenova-guest-display.target
+
+[Service]
+Type=simple
+User=xenova-display
+Group=xenova-display
+# Bind only this domU's Xen-bridge address (VM3 reserved 192.168.77.20); dom0 pulls from here.
+ExecStart=/usr/bin/python3 -m xenova_display.guest_sender --bind 192.168.77.20 --port 8090 --token-file /etc/xenova/guest-display/guest-stream.token --source x11 --display :0 --width 1280 --height 720 --fps 5
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_INET AF_UNIX
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=xenova-guest-display.target

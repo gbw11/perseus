@@ -1,10 +1,17 @@
-"""Local renderer supervisor. Remote streaming is an independent process."""
+"""Local renderer supervisor. Remote streaming is an independent process.
+
+Renderer "chromium" (default) runs the vehicle UI in dom0 Chromium. Renderer
+"guest_frames" (411, Plan B) runs `frame_presenter` per output instead: dom0
+only shows frames that the display domU already rendered.
+"""
 import argparse
 import asyncio
+from contextlib import suppress
 import json
 import os
 import signal
 from pathlib import Path
+import sys
 import tempfile
 import time
 from uuid import uuid4
@@ -39,12 +46,67 @@ class Kiosk:
         self.mapping = {}
         self.mapping_at = 0
         self.launch_lock = asyncio.Lock()
+        self.frame_procs, self.frame_readers, self.frame_reports = {}, {}, {}
+
+    def frame_command(self, output):
+        c = self.config
+        command = [sys.executable, "-m", "xenova_display.frame_presenter", "--display", c.display,
+                   "--x", str(output.x), "--y", str(output.y), "--width", str(output.width),
+                   "--height", str(output.height), "--relay-port", str(c.guest_relay_port),
+                   "--relay-token-file", c.guest_relay_token_file, "--decoder", c.frame_decoder,
+                   "--stale-ms", str(c.guest_stale_ms)]
+        if c.frame_decoder == "turbojpeg":
+            command += ["--library", c.native_jpeg_library]
+        return command
+
+    async def start_frame_output(self, output):
+        # The presenter reads its relay token from the configured file; no token in argv or env.
+        env = {k: v for k, v in os.environ.items() if not (k.startswith("XENOVA_") and ("TOKEN" in k or "PASSWORD" in k))}
+        env["DISPLAY"] = self.config.display
+        process = await asyncio.create_subprocess_exec(*self.frame_command(output), env=env,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+        identity = output.output_id
+        self.frame_procs[identity] = process
+        self.frame_reports.pop(identity, None)
+        self.frame_readers[identity] = asyncio.create_task(self._read_frame_reports(identity, process))
+
+    async def _read_frame_reports(self, identity, process):
+        try:
+            while True:
+                line = await process.stdout.readline()
+                if not line:
+                    return
+                if len(line) > 4096:
+                    continue
+                try:
+                    value = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(value, dict):
+                    self.frame_reports[identity] = value
+        except (ValueError, OSError):
+            return  # an oversized/broken report stream ends verification, not the kiosk
+
+    async def stop_frame_output(self, identity):
+        process = self.frame_procs.pop(identity, None)
+        reader = self.frame_readers.pop(identity, None)
+        self.frame_reports.pop(identity, None)
+        if process is not None and process.returncode is None:
+            with suppress(ProcessLookupError): process.terminate()
+            try:
+                await asyncio.wait_for(process.wait(), 5)
+            except asyncio.TimeoutError:
+                with suppress(ProcessLookupError): process.kill()
+                await process.wait()
+        if reader is not None:
+            reader.cancel()
+            with suppress(asyncio.CancelledError): await reader
 
     async def start_output(self, browser_type, output):
         args = ["--ozone-platform=x11", "--force-device-scale-factor=1", "--no-first-run",
                 f"--window-position={output.x},{output.y}", f"--window-size={output.width},{output.height}",
                 "--disable-translate", "--disable-features=Translate", "--lang=ko-KR",
-                f"--app={self.config.feed_origin}/display/{output.output_id}"]
+                f"--app={self.config.feed_origin}{output.page_path}"]
         if self.config.backend == "x11": args.append("--kiosk")
         if self.test_no_sandbox: args.append("--no-sandbox")
         # Chromium never receives the service token via argv, extra headers or page JS.
@@ -77,7 +139,7 @@ class Kiosk:
         self.pages[output.output_id] = page
         for other in list(context.pages):
             if other is not page: await other.close()
-        await page.goto(f"{self.config.feed_origin}/display/{output.output_id}", timeout=15000)
+        await page.goto(f"{self.config.feed_origin}{output.page_path}", timeout=15000)
         cdp = await context.new_cdp_session(page)
         window = await cdp.send("Browser.getWindowForTarget")
         await cdp.send("Browser.setWindowBounds", {"windowId": window["windowId"], "bounds": {"windowState":"normal"}})
@@ -94,6 +156,7 @@ class Kiosk:
         if response.status != 204: raise RuntimeError("display session bootstrap failed")
 
     async def close_output(self, output_id):
+        await self.stop_frame_output(output_id)
         context = self.contexts.pop(output_id, None)
         self.pages.pop(output_id, None)
         if context:
@@ -152,7 +215,46 @@ class Kiosk:
             await self._update_output(browser_type, output, mapping)
             await asyncio.sleep(interval)
 
+    async def _update_frame_output(self, output, mapping):
+        identity = output.output_id
+        state = {**mapping, "connector": output.connector,
+            "rectangle": [output.x, output.y, output.width, output.height], "renderer_alive": False,
+            "applied_revision": None, "renderer_kind": "guest_frames"}
+        try:
+            if state["status"] != "mapped":
+                self.states[identity] = state
+                await self.close_output(identity)
+                return
+            process = self.frame_procs.get(identity)
+            if process is None or process.returncode is not None:
+                state["status"] = "renderer_starting"
+                self.states[identity] = state
+                await self.close_output(identity)
+                async with self.launch_lock:
+                    await self.start_frame_output(output)
+                state["status"] = "mapped"
+            report = self.frame_reports.get(identity) or {}
+            presented = report.get("presented_monotonic")
+            # The presenter refreshes the window every second; a hung or failed
+            # presenter stops reporting and the output becomes renderer_stale.
+            alive = (self.frame_procs[identity].returncode is None and report.get("alive") is True
+                     and isinstance(presented, (int, float)) and 0 <= time.monotonic() - presented < 3)
+            state["renderer_alive"] = alive
+            if alive:
+                state["renderer_verified_monotonic"] = presented
+            if report:
+                state.update(content_status=report.get("content"), frame_age_ms=report.get("frame_age_ms"),
+                             content_error=report.get("error"))
+        except Exception as error:
+            state["status"] = "renderer_error"
+            state["error_type"] = type(error).__name__
+            state["renderer_alive"] = False
+            await self.close_output(identity)
+        self.states[identity] = state
+
     async def _update_output(self, browser_type, output, mapping):
+        if self.config.renderer == "guest_frames":
+            return await self._update_frame_output(output, mapping)
         identity = output.output_id
         state = {**mapping, "connector": output.connector,
             "rectangle": [output.x, output.y, output.width, output.height], "renderer_alive": False,
@@ -231,6 +333,14 @@ class Kiosk:
             await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _run(self):
+        if self.config.renderer == "guest_frames":
+            try:
+                await self._supervise(None)
+            finally:
+                for identity in list(self.frame_procs): await self.close_output(identity)
+                write_status(self.status_path, {"schema_version": 1, "layout_epoch": self.epoch,
+                    "backend": self.config.backend, "updated_monotonic": time.monotonic(), "outputs": {}})
+            return
         from playwright.async_api import async_playwright
         async with async_playwright() as playwright:
             try:
