@@ -82,6 +82,7 @@ class VehicleOdometry:
         self.travel=0.
 
     def probe(self,pi_session,now_us):
+        if getattr(self,'clock_profile3',False):return None
         if not self.device:return None
         if self.last_probe is not None and now_us-self.last_probe<self.config.sample_period_ms*1000:return None
         self.pending={k:v for k,v in self.pending.items() if now_us-k<=self.config.maximum_sample_age_us}
@@ -124,12 +125,20 @@ class VehicleOdometry:
         error=(now_us-submitted+1)//2
         if error>self.config.maximum_clock_error_us:
             return self.fail('ODOM_CLOCK_UNCERTAIN',invalidate_sample=False)
+        return self.observe_mapped(pi_session,self.device,source_us,sample,left,right,quality,steer_mrad,
+            steer_error_mrad,submitted,now_us)
+
+    def observe_mapped(self,pi_session,device,source_us,sample,left,right,quality,steer_mrad,steer_error_mrad,lower_pi_us,upper_pi_us):
+        """feedback3 원 clock interval의 센서 표본. 도착시각으로 관측 나이를 바꾸지 않는다."""
+        if device!=self.device or lower_pi_us<0 or upper_pi_us<lower_pi_us:return self.fail('ODOM_SESSION')
+        error=(upper_pi_us-lower_pi_us+1)//2
+        if error>self.config.maximum_clock_error_us:return self.fail('ODOM_CLOCK_UNCERTAIN',invalidate_sample=False)
         if not quality&1 or quality&~7 or quality&6==6 or not sample or not source_us:return self.fail('ODOM_SENSOR_QUALITY')
         if quality&6 and (not steer_error_mrad or abs(steer_mrad)>1400):return self.fail('ODOM_STEERING_QUALITY')
         if not quality&6 and (steer_mrad or steer_error_mrad):return self.fail('ODOM_STEERING_PRESENCE')
         if not -(2**(self.config.encoder_bits-1))<=left<2**(self.config.encoder_bits-1) or not -(2**(self.config.encoder_bits-1))<=right<2**(self.config.encoder_bits-1):
             return self.fail('ODOM_COUNTER_RANGE')
-        pi_us=(submitted+now_us)//2
+        pi_us=(lower_pi_us+upper_pi_us)//2
         current=(sample,source_us,left,right,pi_us)
         x,y,yaw=self.pose;velocity=0.;steering=None
         if self.previous is not None:

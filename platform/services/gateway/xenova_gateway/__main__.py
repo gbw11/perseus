@@ -27,14 +27,19 @@ def open_sink(settings: GatewaySettings) -> Sink:
     limits=VehicleLimits.load(Path(settings.vehicle_limits)) if settings.vehicle_limits else None
     if settings.sink=='serial' and limits is None:raise SinkError('serial output requires vehicle limits')
     if settings.sink == "serial":
-        if settings.serial_profile in ('feedback-1','feedback-2'):
+        if settings.serial_profile in ('feedback-1','feedback-2','feedback-3'):
             from .feedback import FeedbackSerialSink
             odometry=None
-            if settings.serial_profile=='feedback-2':
+            if settings.serial_profile in ('feedback-2','feedback-3'):
                 from .odometry import OdometryConfig,VehicleOdometry
                 odometry=VehicleOdometry(OdometryConfig.load(settings.odometry_config),
                     Path('/proc/sys/kernel/random/boot_id').read_text().strip())
-            sink=FeedbackSerialSink(settings.serial_port,settings.serial_baud,timeout_ms=settings.feedback_timeout_ms,odometry=odometry)
+            if settings.serial_profile=='feedback-3':
+                from .feedback3 import Feedback3SerialSink
+                from .operator_profile import load_feedback3
+                sink=Feedback3SerialSink(settings.serial_port,settings.serial_baud,timeout_ms=settings.feedback_timeout_ms,
+                    odometry=odometry,profile=load_feedback3(settings.feedback3_profile))
+            else:sink=FeedbackSerialSink(settings.serial_port,settings.serial_baud,timeout_ms=settings.feedback_timeout_ms,odometry=odometry)
         else:sink=SerialSink(settings.serial_port, settings.serial_baud)
     elif settings.frame_log == "-":sink=MockSink(sys.stdout)
     elif settings.frame_log:sink=MockSink(open(settings.frame_log, "a", encoding="utf-8"))
@@ -42,9 +47,9 @@ def open_sink(settings: GatewaySettings) -> Sink:
     return LimitedSink(sink,limits,__import__('time').monotonic()) if limits else sink
 
 
-def _release_lease(lease,sink,ipc,link=None,uplink=None,scene=None):
+def _release_lease(lease,sink,ipc,link=None,uplink=None,scene=None,operator=None,keyboard=None):
     """A live device/I/O owner retains the process lease until process exit."""
-    if any(getattr(owner,'thread',None) is not None and owner.thread.is_alive() for owner in (sink,ipc,link,scene)):
+    if any(getattr(owner,'thread',None) is not None and owner.thread.is_alive() for owner in (sink,ipc,link,scene,operator,keyboard)):
         raise AuthorityError('Gateway owner termination unconfirmed; lease retained')
     if uplink is not None and uplink.process is not None and uplink.process.is_alive():
         raise AuthorityError('Gateway J process termination unconfirmed; lease retained')
@@ -67,7 +72,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     for signum in (signal.SIGTERM, signal.SIGINT):
         signal.signal(signum, lambda *_: stop.set())
     diagnostics=GatewayDiagnostics(log)
-    lease=None;client=None;monitor=None;runner=None;sink=None;ipc=None;link=None;uplink=None;failure=None;world_failure=None;cleanup_errors=[];runner_started=False
+    lease=None;client=None;monitor=None;runner=None;sink=None;ipc=None;operator_ipc=None;keyboard_ipc=None;link=None;uplink=None;failure=None;world_failure=None;cleanup_errors=[];runner_started=False
     try:
         from xenova_mqtt import Identity,XenovaClient
         from xenova_mqtt.drive_binding import BindingFile
@@ -135,6 +140,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                         runner.drive_link.world_failure=error
                         runner.drive_link.trust=None
                         log.warning('Mapper uplink unavailable: %s; AUTO mapper clock disabled',type(error).__name__)
+            if settings.operator_profile:
+                from .operator_profile import OperatorProfile
+                from . import operator_contract
+                from .keyboard_server import KeyboardServer
+                profile=OperatorProfile.load(settings.operator_profile)
+                runner.manual_profile=profile.manual;runner.guest_clock_policy=profile.guest_clock
+                runner.keyboard_profile_directory=profile.keyboard_profile_directory
+                runner.configure_operator()
+                operator_ipc=GatewayServer(runner,lease,settings.operator_socket,contract=operator_contract,
+                    submit=runner.submit_operator,connection_limit=8).start()
+                keyboard_ipc=KeyboardServer(runner.operator.keyboard,lease,settings.keyboard_socket).start()
         log.info('Gateway profile=%s sink=%s',settings.profile,settings.sink)
         runner_started=True
         runner.run(stop)
@@ -144,13 +160,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         active_failure=sys.exc_info()[1]
         stop.set()
         # 한 보조 종료 실패가 나머지 소유 반환이나 최초 실행 오류를 덮지 않게 한다.
-        for finish in (ipc.close if ipc else None,link.close if link else None,client.stop if client else None,
+        for finish in (keyboard_ipc.close if keyboard_ipc else None,operator_ipc.close if operator_ipc else None,ipc.close if ipc else None,link.close if link else None,client.stop if client else None,
                        runner.shutdown if runner and not runner_started else None,
                        sink.close if sink and runner is None else None,
                        uplink.close if uplink else None,
                        (lambda:monitor.join(timeout=1)) if monitor else None,
                        (lambda:_release_lease(lease,sink,ipc,link,uplink,
-                           None if runner is None else getattr(runner,'scene_runtime',None))) if lease else None,diagnostics.close):
+                           None if runner is None else getattr(runner,'scene_runtime',None),operator_ipc,keyboard_ipc)) if lease else None,diagnostics.close):
             if finish is not None:
                 try:finish()
                 except Exception as error:cleanup_errors.append(error)
@@ -165,6 +181,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     for error in cleanup_errors:
         log.error('Gateway cleanup failed: %s',type(error).__name__,exc_info=(type(error),error,error.__traceback__))
     if failure is not None or cleanup_errors:return 2
+    if any(owner is not None and owner.thread is not None and owner.thread.is_alive() for owner in (operator_ipc,keyboard_ipc)):
+        log.error('operator/keyboard I/O termination unconfirmed');return 2
     if monitor and monitor.is_alive():log.error('trust reader did not finish');return 2
     return 0
 

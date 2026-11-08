@@ -142,35 +142,42 @@ class MatchedStop:
                 or not flags&1 and velocity or not flags&2 and steering
                 or (rclock,rclock_seq,rcutoff,rstop_seq)!=(clock,clock_seq,cutoff,stop_seq)):
             raise SceneAuthorityError('matched current STOP APPLIED and supported stationary required')
-        values=tuple(decode(raw,schema.VehicleSample) for raw in self.vehicle_window)
-        first,last=values[0],values[-1]
-        for index,value in enumerate(values):
-            if (value.vehicle!=source['vehicle'] or value.host_boot!=host or value.odom_epoch!=source['odom_epoch']
-                    or value.calibration!=source['calibration'] or value.quality!=3
-                    or not value.HasField('gateway_instance') or value.gateway_instance!=gateway
-                    or not value.HasField('pi_session') or value.pi_session!=pi_session or value.device_session!=device_session):
-                raise SceneAuthorityError('stationary source/session/clock/calibration mismatch')
-            if index:
-                old=values[index-1]
-                dt=value.pi_sample_us-old.pi_sample_us-value.clock_error_us-old.clock_error_us
-                if (value.sequence<=old.sequence or value.source_sample<=old.source_sample or value.source_us<=old.source_us
-                        or dt<=0 or value.pi_sample_us+value.clock_error_us-old.pi_sample_us+old.clock_error_us>policy.max_gap_us):
-                    raise SceneAuthorityError('stationary window order/gap')
-                seconds=dt/1_000_000
-                for name in ('left_ticks','right_ticks'):
-                    # 양 끝 tick 양자화의 한 tick 폭을 포함한다. 평균 차량 v=0은 사용하지 않는다.
-                    speed=(abs(getattr(value,name)-getattr(old,name))+1)*policy.metres_per_tick/seconds
-                    if speed+policy.unobserved_wheel_mps>policy.max_wheel_mps:
-                        raise SceneAuthorityError('each wheel stationary bound failed')
-                yaw=abs(math.remainder(value.odom_pose.yaw-old.odom_pose.yaw,2*math.pi))
-                if (yaw+value.heading_error_rad+old.heading_error_rad)/seconds+policy.unobserved_yaw_rps>policy.max_yaw_rps:
-                    raise SceneAuthorityError('stationary yaw bound failed')
-        if (last.source_sample!=sample or last.source_us!=at
-                or last.pi_sample_us+last.clock_error_us>now_us
-                or now_us-(last.pi_sample_us-last.clock_error_us)>policy.max_age_us
-                or last.pi_sample_us-last.clock_error_us-first.pi_sample_us-first.clock_error_us<policy.window_us):
-            raise SceneAuthorityError('fresh matched sensor window required')
-        return last
+        return check_stationary_window(self.vehicle_window,source,host,gateway,pi_session,device_session,policy,now_us,sample,at)
+
+
+def check_stationary_window(vehicle_window,source,host,gateway,pi_session,device_session,policy,now_us,sample,at):
+    """원 측정 window의 각 wheel/yaw를 검산한다. command ACK/STOP 증거를 발급하지 않는다."""
+    if not 2<=len(vehicle_window)<=256:raise SceneAuthorityError('bounded stationary measurement window')
+    values=tuple(decode(raw,schema.VehicleSample) for raw in vehicle_window)
+    first,last=values[0],values[-1]
+    for index,value in enumerate(values):
+        if (value.vehicle!=source['vehicle'] or value.host_boot!=host or value.odom_epoch!=source['odom_epoch']
+                or value.calibration!=source['calibration'] or value.quality!=3
+                or not value.HasField('gateway_instance') or value.gateway_instance!=gateway
+                or not value.HasField('pi_session') or value.pi_session!=pi_session or value.device_session!=device_session):
+            raise SceneAuthorityError('stationary source/session/clock/calibration mismatch')
+        if index:
+            old=values[index-1]
+            dt=value.pi_sample_us-old.pi_sample_us-value.clock_error_us-old.clock_error_us
+            if (value.sequence<=old.sequence or value.source_sample<=old.source_sample or value.source_us<=old.source_us
+                    or dt<=0 or value.pi_sample_us+value.clock_error_us-old.pi_sample_us+old.clock_error_us>policy.max_gap_us):
+                raise SceneAuthorityError('stationary window order/gap')
+            seconds=dt/1_000_000
+            for name in ('left_ticks','right_ticks'):
+                # 양 끝 tick 양자화의 한 tick 폭을 포함한다. 평균 차량 v=0은 사용하지 않는다.
+                speed=(abs(getattr(value,name)-getattr(old,name))+1)*policy.metres_per_tick/seconds
+                if speed+policy.unobserved_wheel_mps>policy.max_wheel_mps:
+                    raise SceneAuthorityError('each wheel stationary bound failed')
+            yaw=abs(math.remainder(value.odom_pose.yaw-old.odom_pose.yaw,2*math.pi))
+            if (yaw+value.heading_error_rad+old.heading_error_rad)/seconds+policy.unobserved_yaw_rps>policy.max_yaw_rps:
+                raise SceneAuthorityError('stationary yaw bound failed')
+    if (last.source_sample!=sample or last.source_us!=at
+            or last.pi_sample_us+last.clock_error_us>now_us
+            or now_us-(last.pi_sample_us-last.clock_error_us)>policy.max_age_us
+            or last.pi_sample_us-last.clock_error_us-first.pi_sample_us-first.clock_error_us<policy.window_us):
+        raise SceneAuthorityError('fresh matched sensor window required')
+    return last
+
 
 
 @dataclass(frozen=True)

@@ -59,7 +59,7 @@ class WarmDriveMachine(VerifiedDriveMachine):
         pending=self.authority.value.get('pending') or {}
         if vm==self.active_vm and app=='manual' and self.movement:
             sample=self.manual_input.current(now)
-            if sample is None or sample.session!=self.movement.session or sample.generation!=self.generation or self.movement.blocked:
+            if (sample is None or sample.session!=self.movement.session or not self._manual_context(sample) or self.movement.blocked) and not self._manual_zero_prepared():
                 return False
         if pending.get('target') and vm==self.active_vm and app==self.active_app:
             from .planning import context
@@ -73,9 +73,9 @@ class WarmDriveMachine(VerifiedDriveMachine):
         from .machine import Mode
         if not self._abandon('CONTROL_CONTEXT_CHANGED'):return [ForwardStop(self.generation)]
         manual=None
-        if self.authority.value.get('manual_input_profile')=='manual-session-1' and mode in (Mode.MANUAL,Mode.AUTO_READY):
+        if self.authority.value.get('manual_input_profile') in ('manual-session-1','manual-input-2','manual-input-3') and mode in (Mode.MANUAL,Mode.AUTO_READY):
             sample=self.manual_input.current(now)
-            if sample is None or sample.generation!=self.generation:
+            if sample is None or not self._manual_context(sample):
                 mode=Mode.SAFE_STOP;reason='driver_session_unavailable';arm=False;self._authorized=False
             else:manual=dict(manual_session=sample.session,manual_policy=(
                 'CONTINUE_SESSION' if self.active_app=='manual' else 'NEUTRAL_THEN_ACTION'))
@@ -90,23 +90,52 @@ class WarmDriveMachine(VerifiedDriveMachine):
         if 'manual_policy' in pending:
             from xenova_mqtt.manual_session import MovementGate
             self.movement=MovementGate(self.generation,pending['manual_session'],pending['manual_policy'])
+            registry=getattr(self,'manual_registry',None);sample=self.manual_input.current(self.clock())
+            if (registry is not None and sample is not None and pending['manual_policy']=='CONTINUE_SESSION'
+                    and sample.profile!='manual-session-1' and sample.session==registry.sid
+                    and sample.input_epoch==(registry.epoch if registry.kind=='HELD' else None)
+                    and sample.grant_revision==(registry.grant if registry.kind=='HELD' else 0)
+                    and sample.action==registry.action and sample.keys==frozenset(registry.keys)
+                    and not registry.blocked and registry.valid):
+                # Reuse the actual current immutable input, including its old E.
+                # This is not a new sample, user action or neutral/STOP proof.
+                self.movement.observe(sample)
         else:self.movement=None
         return actions
+
+    def _manual_context(self,sample):
+        if sample.generation==self.generation:return True
+        pending=self.authority.value.get('pending') or {}
+        return bool(sample.profile!='manual-session-1' and sample.generation<self.generation
+            and pending.get('manual_policy')=='CONTINUE_SESSION' and pending.get('manual_session')==sample.session
+            and self.active_app=='manual')
+
+    def _manual_zero_prepared(self):
+        registry=getattr(self,'manual_registry',None)
+        return bool(registry is not None and registry.zero_prepared(self.manual_input.value))
 
     def on_command(self,app,vm,payload,t,reference=None):
         if not 0<=self.clock()-t<=self.timing.command_timeout_s:return False
         if app=='manual' and vm==self.active_vm and self.movement:
             if not isinstance(payload,dict):return False
+            if self._manual_zero_prepared() and payload.get('v_mps')==0 and payload.get('steer_rad')==0:
+                return super().on_command(app,vm,payload,t,reference)
             sample=self.manual_input.current(self.clock())
             if (sample is None or sample.session!=self.movement.session or
-                sample.generation!=self.generation or self.movement.blocked):return False
+                not self._manual_context(sample) or self.movement.blocked):return False
             if not self.movement.allowed and (payload.get('v_mps')!=0 or payload.get('steer_rad')!=0):return False
         return super().on_command(app,vm,payload,t,reference)
 
     def _output(self,now):
+        if self.active_app=='manual' and self._manual_zero_prepared():
+            for tracks in self.nodes.values():
+                for item in tracks.values():item.pending=None
+            if self._last_stop_t is None or now-self._last_stop_t>=self.timing.stop_resend_s:
+                self._last_stop_t=now;return [ForwardStop(self.generation)]
+            return []
         if self.active_app=='manual' and self.movement and self.output_permitted:
             sample=self.manual_input.current(now)
-            if sample is None or sample.session!=self.movement.session or sample.generation!=self.generation or self.movement.blocked:
+            if sample is None or sample.session!=self.movement.session or not self._manual_context(sample) or self.movement.blocked:
                 self._fail('MANUAL_INPUT_UNAVAILABLE',now)
         return super()._output(now)
 
@@ -166,9 +195,9 @@ class WarmDriveMachine(VerifiedDriveMachine):
         binding=self.bindings.current(vm,self.clock())
         if (binding and binding.get('app_state_models',{}).get(app)=='stateful' and
                 self.states.evidence(vm,app) is None):return False
-        if app=='manual' and self.authority.value.get('manual_input_profile')=='manual-session-1':
+        if app=='manual' and self.authority.value.get('manual_input_profile') in ('manual-session-1','manual-input-2','manual-input-3'):
             sample=self.manual_input.current(now)
-            if sample is None or sample.generation!=self.generation:return False
+            if (sample is None or not self._manual_context(sample)) and not self._manual_zero_prepared():return False
         q=self.qualification.get((vm,app))
         return bool(q and self._bound(vm,now,app) and q[0]==self.generation and
             0<=now-q[1]<=self.readiness_lease_s and (not held or now-q[2]>=self.timing.ready_hold_s))
@@ -186,9 +215,9 @@ class WarmDriveMachine(VerifiedDriveMachine):
         # Input/session loss is an output protection event, not a VM failure.
         # Clear the selected control so a new driver session can prepare without
         # first satisfying the old session's movement gate. No automatic rearm.
-        if self.active_app=='manual' and self.movement and self.output_permitted:
+        if self.active_app=='manual' and self.movement and self.output_permitted and not self._manual_zero_prepared():
             sample=self.manual_input.current(now)
-            if sample is None or sample.session!=self.movement.session or sample.generation!=self.generation or self.movement.blocked:
+            if sample is None or sample.session!=self.movement.session or not self._manual_context(sample) or self.movement.blocked:
                 from .machine import Mode
                 self._authorized=False
                 return self._change(Mode.SAFE_STOP,self.active_vm,'driver_session_unavailable',now)+self._output(now)

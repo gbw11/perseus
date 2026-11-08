@@ -67,3 +67,11 @@ DEFAULT = Policy(qos=1)
 
 def for_type(message_type: str) -> Policy:
     return POLICIES.get(message_type, DEFAULT)
+
+
+def for_message(message_type: str,payload) -> Policy:
+    """명시 현대 profile만4KiB envelope를 허용한다. typed 의미 검산은 수신 owner 몫이다."""
+    if isinstance(payload,dict) and ((message_type=='drive.command' and payload.get('profile') in ('drive-command-2','drive-command-3'))
+            or (message_type=='drive.input' and payload.get('profile') in ('manual-input-2','manual-input-3'))):
+        return Policy(qos=0,limit=4096)
+    return for_type(message_type)

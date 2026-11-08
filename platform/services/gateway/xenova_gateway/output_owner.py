@@ -144,6 +144,8 @@ class OutputOwner:
             raise SinkError('device owner fault; new DRIVE prohibited') from self.first_failure
         if isinstance(frame, DriveFrame) and not 0 <= self.clock()-now < self.timeout:
             raise SinkError('expired actor submission')
+        if isinstance(frame,DriveFrame) and frame.expires_pi_us is not None and int(self.clock()*1e6)>=frame.expires_pi_us:
+            raise SinkError('original command expired')
         event = threading.Event()
         result = []
         cancelled=threading.Event()
@@ -231,7 +233,8 @@ class OutputOwner:
                     elif item is not None:
                         self.pending = None
                         frame, submitted, event, result, cancelled = item
-                        if isinstance(frame, DriveFrame) and (cancelled.is_set() or not 0 <= now-submitted < self.timeout):
+                        if isinstance(frame, DriveFrame) and (cancelled.is_set() or not 0 <= now-submitted < self.timeout or
+                                frame.expires_pi_us is not None and int(now*1e6)>=frame.expires_pi_us):
                             result.append(SinkError('queued command expired')); event.set(); continue
                     elif self.closing:
                         if isinstance(self.last, DriveFrame):
@@ -260,7 +263,7 @@ class OutputOwner:
                 try:
                     receipt = self._write(frame, now)
                     if isinstance(frame, DriveFrame):
-                        self.expiry = submitted+self.timeout
+                        self.expiry = min(submitted+self.timeout,frame.expires_pi_us/1e6) if frame.expires_pi_us is not None else submitted+self.timeout
                     else:
                         self.expiry = None
                     outcome = receipt

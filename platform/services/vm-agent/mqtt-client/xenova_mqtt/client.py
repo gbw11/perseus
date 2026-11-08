@@ -313,7 +313,7 @@ class XenovaClient:
         wait_s 를 주면 rc 실패를 PublishError 로 올리고, 0 보다 크면 그 시간까지 PUBACK(QoS 1)을 기다려 못 받아도 PublishError 다.
         전달이 중요한 발행(retained 삭제, 종료 전 상태)에 쓴다.
         """
-        rule = policy.for_type(message_type)
+        rule = policy.for_message(message_type,payload)
         app = app_id or topics.parse(topic).app_id
         with self._lock:
             seq = self._seq.get(topic, 0) + 1
@@ -357,7 +357,7 @@ class XenovaClient:
         method does not claim queued bytes were cancelled.
         """
         if not self.connected:raise PublishError('publisher disconnected before submission')
-        rule=policy.for_type(message_type)
+        rule=policy.for_message(message_type,payload)
         with self._lock:
             seq=self._seq.get(topic,0)+1;self._seq[topic]=seq
             generation,connections=self._generation,self._connections
@@ -450,7 +450,7 @@ class XenovaClient:
         except env.EnvelopeError as error:
             log.warning("버림 %s: %s", msg.topic, error)
             return
-        if len(msg.payload) > policy.for_type(envelope["type"]).max_bytes:
+        if len(msg.payload) > policy.for_message(envelope["type"],envelope.get('payload')).max_bytes:
             log.warning("버림 %s: PAYLOAD_TOO_LARGE %s %d bytes", msg.topic, envelope["type"], len(msg.payload))
             return
         guard=self._receive_guard
