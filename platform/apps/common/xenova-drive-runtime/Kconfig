@@ -62,43 +62,6 @@ config XENOVA_AUTO_DELAY_INJECTION
 	  does not declare a VM trust failure. This is a test fault
 	  injector, not an operating driving policy, and is excluded from normal builds.
 
-config XENOVA_RESOURCE_STRESS_INJECTION
-	bool "Test-only VM resource stress injection"
-	depends on XENOVA_AUTO_DELAY_INJECTION
-	default n
-	help
-	  Enables bounded Zephyr VM resource stress commands. CPU stress runs one
-	  low-priority duty-cycle worker because the VM has one vCPU. Memory stress
-	  allocates, touches and later releases 64KiB system-heap chunks. Test
-	  firmware must reserve enough system heap for the configured maximum.
-
-config XENOVA_RESOURCE_STRESS_CPU_PRIORITY
-	int "CPU stress worker preemptive priority"
-	depends on XENOVA_RESOURCE_STRESS_INJECTION
-	range 11 14
-	default 14
-	help
-	  Keep the synthetic CPU load below AUTO, MANUAL, MQTT and telemetry work so
-	  those tasks can preempt it. The worker uses a 10ms duty-cycle period.
-
-config XENOVA_RESOURCE_STRESS_MEMORY_THRESHOLD_PERCENT
-	int "Legacy heap pressure threshold compatibility value"
-	depends on XENOVA_RESOURCE_STRESS_INJECTION
-	range 50 99
-	default 85
-	help
-	  Retained so existing test configuration files still parse. Heap occupancy
-	  is reported by Diagnostics/Telemetry and does not declare VM distrust.
-
-config XENOVA_RESOURCE_STRESS_CONSECUTIVE_SAMPLES
-	int "Legacy heap pressure sample-count compatibility value"
-	depends on XENOVA_RESOURCE_STRESS_INJECTION
-	range 2 20
-	default 5
-	help
-	  Retained for existing test configuration compatibility. It does not
-	  count warning samples or authorize VM distrust or recovery.
-
 config XENOVA_DRIVE_WARM
 	bool "Explicit warm-drive-1 app lifecycle profile"
 	depends on XENOVA_DRIVE_WORKERS

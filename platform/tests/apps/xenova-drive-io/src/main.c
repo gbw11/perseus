@@ -9,9 +9,6 @@
 #include <stdatomic.h>
 #if defined(CONFIG_XENOVA_AUTO_DELAY_INJECTION)
 #include <xenova/auto_delay.h>
-#include <xenova/cpu_stress.h>
-#include <xenova/memory_stress.h>
-#include <xenova/diagnostics.h>
 #endif
 static const char *scenario;
 static struct xm_zclient client;
@@ -31,10 +28,9 @@ static bool is(const char *s){return scenario&&!strcmp(scenario,s);}
 /* Command/owner boundary only. Real calculation health and pool exhaustion
  * are exercised separately by workers and memory-native product tests. */
 K_MUTEX_DEFINE(fault_results_lock);
-static unsigned trust_events,fault_results,fault_starts,resource_reads;
+static unsigned trust_events,fault_results,fault_starts;
 static char fault_result[512],fault_status[12];
 static int64_t injected_until;
-static uint32_t injected_amount;
 int drive_auto_delay_start(uint32_t delay,uint32_t duration){
  assert(delay==2&&duration==1);fault_starts++;injected_until=k_uptime_get()+1000;return 0;
 }
@@ -42,29 +38,6 @@ void drive_auto_delay_stop(void){injected_until=0;}
 void drive_auto_delay_status_get(struct drive_auto_delay_status *out){
  *out=(struct drive_auto_delay_status){.active=k_uptime_get()<injected_until,
   .unhealthy=true,.consecutive_deadline_misses=5};
-}
-int drive_cpu_stress_start(uint32_t workers,uint32_t load,uint32_t duration){
- assert(workers==1&&load==50&&duration==1);fault_starts++;
- injected_amount=load;injected_until=k_uptime_get()+30;return 0;
-}
-void drive_cpu_stress_stop(void){injected_until=0;}
-void drive_cpu_stress_status_get(struct drive_cpu_stress_status *out){
- *out=(struct drive_cpu_stress_status){.state=k_uptime_get()<injected_until?DRIVE_CPU_STRESS_RUNNING:DRIVE_CPU_STRESS_SUCCEEDED,
-  .load_percent=injected_amount};
-}
-int drive_memory_stress_start(uint32_t amount,uint32_t duration){
- assert(amount==1&&duration==1);fault_starts++;
- injected_amount=amount;injected_until=k_uptime_get()+30;return 0;
-}
-void drive_memory_stress_stop(void){injected_until=0;}
-void drive_memory_stress_status_get(struct drive_memory_stress_status *out){
- bool running=k_uptime_get()<injected_until;
- *out=(struct drive_memory_stress_status){.state=running?DRIVE_MEMORY_STRESS_RUNNING:DRIVE_MEMORY_STRESS_FAILED,
-  .requested_mib=injected_amount,.error=running?0:-ENOMEM};
-}
-int __wrap_xdiag_resources_try_get(struct xdr_snapshot *out){
- *out=(struct xdr_snapshot){.sample=++resource_reads,.raw={.at_ms=k_uptime_get()},
-  .heap_allocated_bytes=900,.heap_free_bytes=100};return 0;
 }
 int __wrap_xm_zclient_publish(struct xm_zclient *c,const char *topic,const char *type,const char *json){
  ARG_UNUSED(c);ARG_UNUSED(topic);k_mutex_lock(&fault_results_lock,K_FOREVER);
@@ -192,22 +165,19 @@ int main(void) {
   atomic_set(&block_prepare,0);k_sem_give(&release);
  } else {
   read_ready();previous=snapshot;
-  if(is("fault-scope")||is("memory-injector-fail")) {
+  if(is("fault-scope")) {
 #if defined(CONFIG_XENOVA_AUTO_DELAY_INJECTION)
    freeze();struct xm_zlatest *s=&client.latest[3];assert(s->topic[0]);
-   const char *action=is("fault-scope")?"auto_delay":"memory_stress";
-   const char *params=is("fault-scope")?"\"delay_ms\":2":"\"memory_mib\":1";
-   snprintf(s->data,sizeof(s->data),"{\"command_id\":\"test-1\",\"operation_id\":\"op-1\",\"expected_boot_id\":\"22222222-2222-4222-8222-222222222222\",\"expires_at\":\"2026-11-07T00:00:00Z\",\"action\":\"%s\",\"parameters\":{%s,\"duration_s\":1}}",action,params);
+   snprintf(s->data,sizeof(s->data),"{\"command_id\":\"test-1\",\"operation_id\":\"op-1\",\"expected_boot_id\":\"22222222-2222-4222-8222-222222222222\",\"expires_at\":\"2026-11-07T00:00:00Z\",\"action\":\"auto_delay\",\"parameters\":{\"delay_ms\":2,\"duration_s\":1}}");
    s->len=strlen(s->data);s->rx_ms=k_uptime_get();unfreeze();
    int64_t until=k_uptime_get()+1500;
    for(;;){
     k_mutex_lock(&fault_results_lock,K_FOREVER);bool done=fault_results>=2;k_mutex_unlock(&fault_results_lock);
     if(done||k_uptime_get()>=until)break;k_sleep(K_MSEC(10));
    }
-   freeze();assert(fault_results==2&&fault_starts==1&&!trust_events&&!resource_reads);
+   freeze();assert(fault_results==2&&fault_starts==1&&!trust_events);
    assert(strstr(fault_result,"test-1")&&strstr(fault_result,"op-1"));
-   assert(!strcmp(fault_status,is("fault-scope")?"SUCCEEDED":"FAILED"));
-   if(is("memory-injector-fail"))assert(strstr(fault_result,"RESOURCE_UNAVAILABLE"));
+   assert(!strcmp(fault_status,"SUCCEEDED"));
    /* Same request replays the original failure, never a second injection. */
    s->rx_ms++;unfreeze();k_sleep(K_MSEC(30));freeze();
    assert(fault_results==3&&fault_starts==1&&!trust_events);

@@ -202,39 +202,6 @@ def test_legacy_auto_deadline_without_prepared_mirror_enters_safe_stop(tmp_path)
     assert not w.m.untrusted and not w.auth.value.get('distrusted')
     assert any(isinstance(action,ForwardStop) for action in actions)
 
-def test_legacy_heap_occupancy_is_warning_and_rejects_bad_evidence(tmp_path):
-    w=World(tmp_path/'authority');w.arm();old=w.m.generation
-    payload={'trust':'UNTRUSTED','reason':'MEMORY_PRESSURE','metric':'memory.kernel_heap.used_bytes',
-        'used_percent':89,'threshold_percent':85,'consecutive_samples':5,'command_id':'memory-1'}
-    actions=w.m.on_vm_untrusted(A,'autonomous',payload,w.t)
-    assert w.m.active_vm==A and w.m.generation==old and w.m.output_permitted
-    assert not w.m.untrusted and not w.auth.value.get('distrusted')
-    assert len(actions)==1 and actions[0].event=='resource_warning'
-    assert actions[0].fields['reason']=='MEMORY_PRESSURE'
-    invalid={**payload,'command_id':'memory-invalid','used_percent':80}
-    assert w.m.on_vm_untrusted(B,'autonomous',invalid,w.t)==[]
-
-def test_legacy_heap_warning_preserves_normal_manual_owner(tmp_path):
-    w=World(tmp_path/'authority',mode='MANUAL');w.perception=False;w.arm();old=w.m.generation
-    payload={'trust':'UNTRUSTED','reason':'MEMORY_PRESSURE','metric':'memory.kernel_heap.used_bytes',
-        'used_percent':90,'threshold_percent':85,'consecutive_samples':5,'command_id':'memory-manual'}
-    actions=w.m.on_vm_untrusted(A,'autonomous',payload,w.t)
-    assert w.m.active_vm==A and w.m.mode is Mode.MANUAL and w.m.generation==old
-    assert w.m.output_permitted and not w.m.untrusted and not w.auth.value.get('distrusted')
-    assert len(actions)==1 and actions[0].event=='resource_warning'
-
-
-def test_legacy_resource_diagnostic_copies_only_bounded_contract_fields(tmp_path):
-    w=World(tmp_path/'authority');w.arm()
-    payload={'trust':'UNTRUSTED','reason':'MEMORY_PRESSURE','metric':'memory.kernel_heap.used_bytes',
-        'used_percent':90,'threshold_percent':85,'consecutive_samples':5,'command_id':'memory-extra',
-        'raw_body':'fixture-do-not-copy','credential':'fixture-do-not-copy','vm_id':B}
-    actions=w.m.on_vm_untrusted(A,'autonomous',payload,w.t)
-    fields=actions[0].fields
-    assert fields['vm_id']==A and fields['execution_id']==w.execs[A]
-    assert fields['reason']=='MEMORY_PRESSURE' and fields['command_id']=='memory-extra'
-    assert 'raw_body' not in fields and 'credential' not in fields
-
 class Client:
     connected=True;connections=1
     def __init__(self):self.handlers={};self.published=[];self.status='acknowledged'

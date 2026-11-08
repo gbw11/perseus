@@ -4,8 +4,6 @@
 #include <xenova/drive_io.h>
 #include <xenova/diagnostics.h>
 #include <xenova/auto_delay.h>
-#include <xenova/memory_stress.h>
-#include <xenova/cpu_stress.h>
 #include <zephyr/sys/atomic.h>
 #include <errno.h>
 #include <stdio.h>
@@ -25,11 +23,6 @@ static bool fault_command_registered,fault_running;
 static int64_t fault_last_rx=-1,fault_started_ms,fault_deadline_ms;
 static struct xm_auto_delay_command fault_command;
 static char fault_last_status[12];
-static struct xm_resource_stress_command resource_command;
-static bool resource_running;
-static int64_t resource_started_ms;
-static uint64_t resource_duration_ms;
-static char resource_last_status[12];
 #endif
 static bool dual_mode, perception_registered;
 static struct xm_zbinary binary;
@@ -256,22 +249,10 @@ static void fault_result(const struct xm_auto_delay_command *command,const char 
  if(command==&fault_command)strcpy(fault_last_status,status);
  (void)xm_zclient_publish(client,fault_result_topic,"agent.command_result",json);
 }
-static void resource_stress_result(const struct xm_resource_stress_command *command,const char *status,const char *error,uint64_t duration)
-{
- char json[512];if(!command->command_id[0]||xm_resource_stress_result_json(json,sizeof(json),command,status,duration,error)<0)return;
- if(command==&resource_command)strcpy(resource_last_status,status);
- (void)xm_zclient_publish(client,fault_result_topic,"agent.command_result",json);
-}
 static bool same_fault_command(const struct xm_auto_delay_command *a,const struct xm_auto_delay_command *b)
 {
  return !strcmp(a->command_id,b->command_id)&&!strcmp(a->operation_id,b->operation_id)&&
   !strcmp(a->expected_boot_id,b->expected_boot_id)&&a->delay_ms==b->delay_ms&&a->duration_s==b->duration_s;
-}
-static bool same_resource_command(const struct xm_resource_stress_command *a,const struct xm_resource_stress_command *b)
-{
- return !strcmp(a->operation_id,b->operation_id)&&!strcmp(a->expected_boot_id,b->expected_boot_id)&&
-  a->action==b->action&&a->workers==b->workers&&a->load_percent==b->load_percent&&
-  a->memory_mib==b->memory_mib&&a->duration_s==b->duration_s;
 }
 static void receive_fault_command(void)
 {
@@ -280,24 +261,6 @@ static void receive_fault_command(void)
  int64_t rx=0;for(size_t i=0;i<ARRAY_SIZE(client->latest);i++)if(!strcmp(client->latest[i].topic,fault_command_topic)){rx=client->latest[i].rx_ms;break;}
  if(rx==fault_last_rx)return;fault_last_rx=rx;
  if(!xm_span_eq(env.type,"agent.command"))return;
- struct xm_resource_stress_command resource;int resource_rc=xm_resource_stress_command_parse(env.payload,&resource);
- if(resource_rc!=-ENOTSUP){
-  if(xm_zclient_latest_retained(client,fault_command_topic)){resource_stress_result(&resource,"REJECTED","INVALID_COMMAND",0);return;}
-  if(resource_rc){resource_stress_result(&resource,"REJECTED",resource_rc==-ERANGE?"INVALID_PARAMETERS":"INVALID_COMMAND",0);return;}
-  if(strcmp(resource.expected_boot_id,client->id.boot_id)){resource_stress_result(&resource,"REJECTED","BOOT_MISMATCH",0);return;}
-  if(resource_command.command_id[0]&&!strcmp(resource.command_id,resource_command.command_id)){
-   bool same=same_resource_command(&resource,&resource_command);
-   if(!same)resource_stress_result(&resource,"REJECTED","IDEMPOTENCY_CONFLICT",0);
-   else resource_stress_result(&resource_command,resource_last_status[0]?resource_last_status:(resource_running?"RUNNING":"FAILED"),NULL,resource_running?0:resource_duration_ms);
-   return;
-  }
-  if(resource_running){resource_stress_result(&resource,"REJECTED","BUSY",0);return;}
-  int start_rc=resource.action==XM_CPU_STRESS?
-   drive_cpu_stress_start(resource.workers,resource.load_percent,resource.duration_s):
-   drive_memory_stress_start(resource.memory_mib,resource.duration_s);
-  if(start_rc){const char *error=start_rc==-EBUSY?"BUSY":(start_rc==-EINVAL?"INVALID_PARAMETERS":"RESOURCE_UNAVAILABLE");resource_stress_result(&resource,"REJECTED",error,0);return;}
-  resource_command=resource;resource_running=true;resource_duration_ms=0;resource_started_ms=k_uptime_get();resource_stress_result(&resource_command,"RUNNING",NULL,0);return;
- }
  struct xm_auto_delay_command incoming;int rc=xm_auto_delay_command_parse(env.payload,&incoming);
  if(xm_zclient_latest_retained(client,fault_command_topic)){fault_result(&incoming,"REJECTED","INVALID_COMMAND",0);return;}
  if(rc){fault_result(&incoming,"REJECTED",rc==-ERANGE?"INVALID_PARAMETERS":"INVALID_COMMAND",0);return;}
@@ -312,21 +275,6 @@ static void receive_fault_command(void)
  if(rc){fault_result(&incoming,"REJECTED",rc==-EBUSY?"BUSY":"STRESS_FAILED",0);return;}
  fault_command=incoming;fault_running=true;fault_started_ms=k_uptime_get();
  fault_deadline_ms=fault_started_ms+(int64_t)incoming.duration_s*1000;fault_result(&fault_command,"RUNNING",NULL,0);
-}
-static void observe_resource_stress(void)
-{
- if(!resource_running)return;
- bool running=false,succeeded=false;int error=0;
- if(resource_command.action==XM_CPU_STRESS){
-  struct drive_cpu_stress_status status;drive_cpu_stress_status_get(&status);
-  running=status.state==DRIVE_CPU_STRESS_RUNNING;succeeded=status.state==DRIVE_CPU_STRESS_SUCCEEDED;error=status.error;
- }else{
-  struct drive_memory_stress_status status;drive_memory_stress_status_get(&status);
-  running=status.state==DRIVE_MEMORY_STRESS_RUNNING;succeeded=status.state==DRIVE_MEMORY_STRESS_SUCCEEDED;error=status.error;
- }
- if(running)return;resource_running=false;resource_duration_ms=(uint64_t)MAX(k_uptime_get()-resource_started_ms,0);
- if(succeeded)resource_stress_result(&resource_command,"SUCCEEDED",NULL,resource_duration_ms);
- else resource_stress_result(&resource_command,"FAILED",error==-ENOMEM?"RESOURCE_UNAVAILABLE":"STRESS_FAILED",resource_duration_ms);
 }
 static void observe_fault_command(void)
 {
@@ -373,7 +321,7 @@ static void owner(void *a,void *b,void *c) {
   client->accept_input=accept_input;client->accept_context=NULL;
   before=clock_us();(void)xm_zclient_poll(client,0);after=clock_us();
 #if defined(CONFIG_XENOVA_AUTO_DELAY_INJECTION)
-  receive_fault_command();observe_fault_command();observe_resource_stress();
+  receive_fault_command();observe_fault_command();
 #endif
   k_mutex_lock(&exchange_lock,K_FOREVER);stats.poll_max_us=MAX(stats.poll_max_us,after-before);k_mutex_unlock(&exchange_lock);
   refresh();
@@ -383,7 +331,6 @@ static void owner(void *a,void *b,void *c) {
  }
 #if defined(CONFIG_XENOVA_AUTO_DELAY_INJECTION)
  if(fault_running){fault_running=false;drive_auto_delay_stop();fault_result(&fault_command,"FAILED","AGENT_STOPPING",(uint64_t)MAX(k_uptime_get()-fault_started_ms,0));}
- if(resource_running){if(resource_command.action==XM_CPU_STRESS)drive_cpu_stress_stop();else drive_memory_stress_stop();resource_running=false;resource_duration_ms=(uint64_t)MAX(k_uptime_get()-resource_started_ms,0);resource_stress_result(&resource_command,"FAILED","AGENT_STOPPING",resource_duration_ms);}
 #endif
  if(initialized)xm_zclient_close(client);
  k_mutex_lock(&exchange_lock,K_FOREVER);

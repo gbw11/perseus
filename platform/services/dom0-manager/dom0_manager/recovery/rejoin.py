@@ -19,15 +19,8 @@ def valid_vm_trust_payload(payload):
     if not isinstance(payload,dict) or payload.get('trust')!='UNTRUSTED':return False
     command_id=payload.get('command_id')
     if not isinstance(command_id,str) or not command_id or len(command_id)>128:return False
-    reason=payload.get('reason')
-    if reason=='AUTO_DEADLINE_MISS':return type(payload.get('consecutive_misses')) is int and payload['consecutive_misses']>=5
-    if reason=='MEMORY_PRESSURE':
-        return (payload.get('metric')=='memory.kernel_heap.used_bytes' and
-                type(payload.get('used_percent')) is int and 0<=payload['used_percent']<=100 and
-                type(payload.get('threshold_percent')) is int and 50<=payload['threshold_percent']<=99 and
-                payload['used_percent']>=payload['threshold_percent'] and
-                type(payload.get('consecutive_samples')) is int and payload['consecutive_samples']>=2)
-    return False
+    return (payload.get('reason')=='AUTO_DEADLINE_MISS' and
+            type(payload.get('consecutive_misses')) is int and payload['consecutive_misses']>=5)
 
 class ProductionBootstrap:
     def __init__(self,config,observe,*,uid=0):
@@ -273,10 +266,9 @@ class RejoinCoordinator:
         except queue.Full:pass  # Dropped evidence expires; it never renews readiness.
 
     def on_trust(self,message):
-        """Keep FW32 advisory evidence without promoting it to VM-wide failure.
+        """Keep AUTO deadline evidence without promoting it to VM-wide failure.
 
-        Heap occupancy does not prove a required allocation failed. AUTO
-        deadline misses restrict that function; its lifecycle is authoritative
+        AUTO deadline misses restrict that function; its lifecycle is authoritative
         for Gateway selection. Xen/fatal/liveness recovery keeps its own path.
         """
         from xenova_mqtt import topics
@@ -286,12 +278,11 @@ class RejoinCoordinator:
             not valid_vm_trust_payload(payload) or row is None):return
         env=message.envelope
         if row['boot_id']!=env.get('boot_id') or app_instance(row,info.app_id)!=env.get('agent_instance_id'):return
-        scope='function' if payload['reason']=='AUTO_DEADLINE_MISS' else 'warning'
+        scope='function'
         key=(info.vm_id,payload['reason']);previous=self._legacy_faults.get(key,{})
         value={'vm_id':info.vm_id,'execution_id':row['execution_id'],'reason':payload['reason'],
                'scope':scope,'command_id':payload['command_id'],'received_monotonic':message.received_monotonic,
-               'evidence':{key:payload[key] for key in ('trust','consecutive_misses','metric','used_percent',
-                           'threshold_percent','consecutive_samples') if key in payload},
+               'evidence':{key:payload[key] for key in ('trust','consecutive_misses') if key in payload},
                'reports':min(previous.get('reports',0)+1,2**64-1)}
         # One MQTT owner publishes a small immutable snapshot. Diagnostics never
         # waits on the coordinator's receipt/fsync lock and creates no per-key cache.

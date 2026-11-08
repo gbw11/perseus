@@ -53,57 +53,6 @@ int xm_auto_delay_result_json(char *out,size_t n,const struct xm_auto_delay_comm
 	rc|=xm_put(out,n,&pos,"}");return rc?-ENOSPC:(int)pos;
 }
 
-int xm_resource_stress_command_parse(struct xm_span payload,struct xm_resource_stress_command *out)
-{
-	struct xm_json j;int64_t workers=0,load=0,memory=0,duration;char expires[40],action[24];
-	if(!out||parse_object(&j,payload))return -EINVAL;
-	memset(out,0,sizeof(*out));
-	if(j.tok[0].size<5||j.tok[0].size>6||
-	   command_text(&j,0,"command_id",out->command_id,sizeof(out->command_id),false)||
-	   command_text(&j,0,"operation_id",out->operation_id,sizeof(out->operation_id),true)||
-	   command_text(&j,0,"expected_boot_id",out->expected_boot_id,sizeof(out->expected_boot_id),false)||
-	   command_text(&j,0,"expires_at",expires,sizeof(expires),false)||
-	   command_text(&j,0,"action",action,sizeof(action),false))return -EINVAL;
-	if(strcmp(action,"cpu_stress")&&strcmp(action,"memory_stress"))return -ENOTSUP;
-	int parameters=xm_json_get(&j,0,"parameters");
-	if(!xm_json_is_object(&j,parameters))return -ERANGE;
-	if(!strcmp(action,"cpu_stress")){
-		out->action=XM_CPU_STRESS;
-		if(j.tok[parameters].size!=3||
-		   xm_json_int(&j,xm_json_get(&j,parameters,"workers"),&workers)||
-		   xm_json_int(&j,xm_json_get(&j,parameters,"load_percent"),&load)||
-		   xm_json_int(&j,xm_json_get(&j,parameters,"duration_s"),&duration)||
-		   workers<1||workers>4||load<10||load>100||duration<1||duration>120)return -ERANGE;
-		out->workers=(uint32_t)workers;out->load_percent=(uint32_t)load;
-	}else{
-		out->action=XM_MEMORY_STRESS;
-		if(j.tok[parameters].size!=2||
-		   xm_json_int(&j,xm_json_get(&j,parameters,"memory_mib"),&memory)||
-		   xm_json_int(&j,xm_json_get(&j,parameters,"duration_s"),&duration)||
-		   memory<1||memory>8||duration<1||duration>120)return -ERANGE;
-		out->memory_mib=(uint32_t)memory;
-	}
-	out->duration_s=(uint32_t)duration;return 0;
-}
-
-int xm_resource_stress_result_json(char *out,size_t n,const struct xm_resource_stress_command *c,
-				   const char *status,uint64_t duration_ms,const char *error)
-{
-	if(!out||!c||!status)return -EINVAL;
-	size_t pos=0;int rc=0;
-	rc|=xm_put(out,n,&pos,"{\"command_id\":");rc|=xm_put_json_string(out,n,&pos,c->command_id);
-	rc|=xm_put(out,n,&pos,",\"operation_id\":");rc|=c->operation_id[0]?xm_put_json_string(out,n,&pos,c->operation_id):xm_put(out,n,&pos,"null");
-	rc|=xm_put(out,n,&pos,",\"status\":");rc|=xm_put_json_string(out,n,&pos,status);
-	rc|=xm_put(out,n,&pos,",\"started_at\":null,\"finished_at\":null,\"duration_ms\":");
-	rc|=duration_ms?xm_put_uint(out,n,&pos,duration_ms):xm_put(out,n,&pos,"null");rc|=xm_put(out,n,&pos,",\"result\":{");
-	if(c->action==XM_CPU_STRESS){rc|=xm_put(out,n,&pos,"\"workers\":");rc|=xm_put_uint(out,n,&pos,c->workers);rc|=xm_put(out,n,&pos,",\"load_percent\":");rc|=xm_put_uint(out,n,&pos,c->load_percent);}
-	else{rc|=xm_put(out,n,&pos,"\"memory_mib\":");rc|=xm_put_uint(out,n,&pos,c->memory_mib);}
-	rc|=xm_put(out,n,&pos,",\"duration_s\":");rc|=xm_put_uint(out,n,&pos,c->duration_s);
-	rc|=xm_put(out,n,&pos,"},\"error\":");
-	if(error){rc|=xm_put(out,n,&pos,"{\"code\":");rc|=xm_put_json_string(out,n,&pos,error);rc|=xm_put(out,n,&pos,",\"message\":");rc|=xm_put_json_string(out,n,&pos,error);rc|=xm_put(out,n,&pos,"}");}else rc|=xm_put(out,n,&pos,"null");
-	rc|=xm_put(out,n,&pos,"}");return rc?-ENOSPC:(int)pos;
-}
-
 int xm_drive_command_json(char *out, size_t n, uint32_t generation, float v_mps, float steer_rad)
 {
 	size_t pos = 0;
