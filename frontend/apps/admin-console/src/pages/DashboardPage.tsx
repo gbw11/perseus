@@ -14,17 +14,19 @@ import {
 import type { Health } from '@xenova/ui';
 import type { CSSProperties } from 'react';
 import { Link } from 'react-router';
-import type { DriveState } from '../api/drive';
-import { useEvents, useMetrics, useVms } from '../api/queries';
+import type { DriveState, SocketState } from '../api/drive';
+import { useEvents, useMetrics, useTelemetryHeartbeat, LIVE_POLL_MS, useVms } from '../api/queries';
 import { restartSimRace, selectSimTrack, useSimState, type SimView } from '../api/sim';
 import type { Vm, VmEvent } from '../api/types';
 import { cpuPercentOf, latest, memoryPercentOf } from '../domain/vmMetrics';
+import { observedControl, vmAppObservations } from '../domain/driveObservations';
 import { clock, describe } from '../domain/events';
+import { publisherObservation } from '../domain/telemetryPublisher';
+import { buildManagedRamSeries, managedRamReason } from '../domain/managedRam';
 import { vmAuthorityOf } from '../domain/vmAuthority';
 import {
   ago,
   appHealth,
-  appReportOf,
   appHealthLabel,
   controlLabel,
   MODE_HEALTH,
@@ -41,10 +43,12 @@ import {
   vmOf,
   type AppId,
 } from '../domain/roles';
-import { STATE_HEALTH, STATE_LABEL } from '../format';
+import { AGENT_LABEL, STATE_HEALTH, STATE_LABEL } from '../format';
 import { useDrive } from '../layout/DriveContext';
 import { SimTrackSelect } from './SimTrackSelect';
 import styles from './pages.module.css';
+import { LiveDataAlert } from '../layout/LiveDataAlert';
+import { useNow } from '../useNow';
 
 const MOCK = import.meta.env.VITE_MOCK === 'true';
 /** 세 번째 VM 이 낸 AI 감지 영상 (MJPEG) — dom0 웹 프록시가 같은 origin 으로 넘긴다 (카메라 계약 camera-stream-v1) */
@@ -468,8 +472,6 @@ function SimCard({ sim, drive, board }: { sim: SimView; drive: DriveState | null
   );
 }
 
-type VmConnection = 'Connected' | 'Delayed' | 'Disconnected' | 'Unknown';
-
 /**
  * VM Dashboard / Overview.
  * API VM 목록을 그대로 카드로 그리고 VM 이름으로 부른다. 역할은 vm.role 이 있을 때만 표시한다.
@@ -477,10 +479,15 @@ type VmConnection = 'Connected' | 'Delayed' | 'Disconnected' | 'Unknown';
  */
 export function DashboardPage() {
   const { drive, socket } = useDrive();
-  const vms = useVms();
+  // 실패해도 카드를 남기고 카드가 '조회 불가' 로 표시한다
+  const vms = useVms(LIVE_POLL_MS, { keepLastData: true });
   const events = useEvents({ limit: 30 });
+  const now = useNow();
   const items = sortVms(vms.data?.items ?? []);
-  const activeVm = items.find((vm) => vm.vm_id === drive?.control?.active_vm_id);
+  const control = observedControl(drive, socket);
+  const activeVm = items.find((vm) => vm.vm_id === control?.active_vm_id);
+  const authority =
+    control && !control.active_vm_id && !control.active_app ? '없음' : (activeVm?.name ?? '미확인');
 
   return (
     <div className={styles.overviewPage}>
@@ -491,26 +498,14 @@ export function DashboardPage() {
         </div>
       </header>
 
-      <section className={styles.overviewSummary} aria-label="주행 및 연결 요약">
-        <OverviewSummaryItem
-          label="DRIVE MODE"
-          value={drive?.control?.mode ? MODE_LABEL[drive.control.mode] : 'Unknown'}
-        />
-        <OverviewSummaryItem label="CONTROL AUTHORITY" value={activeVm?.name ?? 'None'} />
-        <OverviewSummaryItem
-          label="TELEMETRY"
-          value={socket === 'open' ? 'Connected' : socket === 'connecting' ? 'Connecting' : 'Disconnected'}
-          tone={socket === 'open' ? 'ok' : socket === 'connecting' ? 'recovering' : 'fault'}
-        />
+      <section className={styles.overviewSummary} aria-label="주행 및 관측 요약">
+        <OverviewSummaryItem label="DRIVE MODE" value={control?.mode ? MODE_LABEL[control.mode] : '미확인'} />
+        <OverviewSummaryItem label="CONTROL AUTHORITY" value={authority} />
         <OverviewSummaryItem label="LAST OBSERVED" value={overviewObserved(vms.data?.observed_at)} />
       </section>
 
       {vms.isPending && <div className={styles.statePanel}>VM 상태를 불러오는 중입니다…</div>}
-      {vms.error && (
-        <div className={styles.statePanel} role="alert">
-          VM 상태를 불러오지 못했습니다. 연결을 확인해 주세요.
-        </div>
-      )}
+      <LiveDataAlert />
 
       {vms.isSuccess && items.length === 0 && <div className={styles.statePanel}>등록된 VM이 없습니다.</div>}
 
@@ -520,6 +515,9 @@ export function DashboardPage() {
             key={vm.vm_id}
             vm={vm}
             drive={drive}
+            socket={socket}
+            now={now}
+            vmStatusError={vms.isError}
             latestEvent={overviewLatestEvent(events.data?.items, vm.vm_id)}
           />
         ))}
@@ -537,24 +535,63 @@ function OverviewSummaryItem({ label, value, tone }: { label: string; value: str
   );
 }
 
+const AGENT_LINK_TONE = {
+  ONLINE: 'ok',
+  STALE: 'recovering',
+  OFFLINE: 'fault',
+  UNKNOWN: 'stopped',
+} satisfies Record<NonNullable<Vm['agent_status']>, Health>;
+
 function VmOverviewCard({
   vm,
   drive,
+  socket,
+  now,
+  vmStatusError,
   latestEvent,
 }: {
   vm: Vm;
   drive: DriveState | null;
+  socket: SocketState;
+  now: number;
+  vmStatusError: boolean;
   latestEvent: VmEvent | undefined;
 }) {
   const role = roleOf(vm, drive);
-  const metrics = useMetrics(vm.vm_id, true);
+  const linux = vm.guest_kind === 'linux';
+  // 현재값 카드에는 Memory 탭과 같은 짧은 이력·조회 주기를 사용한다.
+  const metrics = useMetrics(vm.vm_id, true, linux ? 5 : 1, LIVE_POLL_MS, { keepLastData: true });
+  const heartbeat = useTelemetryHeartbeat(linux ? '' : vm.vm_id);
+  const publisher = publisherObservation(vm.vm_id, heartbeat);
+  // LINK tracks heartbeat freshness; publisher collection health stays in the detailed diagnostics.
+  const telemetryFresh = !heartbeat.isError && !heartbeat.isPending && publisher.report?.status === 'FRESH';
+  const agent = vm.agent_status ?? 'UNKNOWN';
+  const linkLabel = linux
+    ? vmStatusError
+      ? '조회 불가'
+      : AGENT_LABEL[agent]
+    : telemetryFresh
+      ? '연결됨'
+      : publisher.label;
+  const linkTone = linux
+    ? vmStatusError
+      ? 'fault'
+      : AGENT_LINK_TONE[agent]
+    : telemetryFresh
+      ? 'ok'
+      : publisher.tone;
+  const telemetryAge = !heartbeat.isError && !heartbeat.isPending ? publisher.report?.age_ms : null;
   const samples = metrics.data?.items ?? [];
   const cpu = latest(samples, cpuPercentOf);
-  const memory = latest(samples, (sample) => memoryPercentOf(sample, vm));
-  const app = appReportOf(vm, drive);
-  const authority = vmAuthorityOf(role, vm, drive?.control?.active_vm_id);
-  const connection = overviewConnection(vm, app);
-  const health = appHealth(role, vm, app);
+  const ram = linux ? null : buildManagedRamSeries(samples, vm.vm_id, now);
+  const ramDisplay = ram?.recentObservation ?? ram?.current;
+  const memory = linux
+    ? latest(samples, (sample) => memoryPercentOf(sample, vm))
+    : ramDisplay?.status === 'ok'
+      ? Number(ramDisplay.percent)
+      : null;
+  const apps = vmAppObservations(vm.vm_id, drive, socket);
+  const authority = vmAuthorityOf(role, vm, observedControl(drive, socket)?.active_vm_id);
   const eventSummary = latestEvent
     ? `${clock(latestEvent.occurred_at)} · ${describe(latestEvent, () => vm.name).title}`
     : '최근 중요 이벤트 없음';
@@ -579,22 +616,41 @@ function VmOverviewCard({
 
       <div className={styles.vmStatusRows}>
         <OverviewStatusLine label="VM" value={STATE_LABEL[vm.state]} tone={STATE_HEALTH[vm.state]} />
-        <OverviewStatusLine label="APP" value={overviewAppStatus(health, !!app)} tone={health} />
+        <OverviewStatusLine label="APP" labelTitle="앱 상태" value={overviewAppSignal(apps, 'phaseLabel')} />
         <OverviewStatusLine
           label="LINK"
-          value={connection}
-          tone={overviewConnectionTone(connection)}
-          detail={app?.heartbeat_ago_ms != null ? ago(app.heartbeat_ago_ms) : undefined}
+          labelTitle={linux ? 'Linux Agent heartbeat (v1)' : 'Zephyr Telemetry heartbeat (v2)'}
+          value={linkLabel}
+          tone={linkTone}
+          detail={linux ? 'Agent' : `Telemetry${telemetryAge == null ? '' : ` · ${ago(telemetryAge)}`}`}
         />
       </div>
 
       <div className={styles.resourceBlock}>
-        <OverviewMetricBar label="CPU" value={cpu} unavailable={unavailable} />
+        <OverviewMetricBar
+          label="CPU"
+          value={cpu}
+          unavailable={metrics.isError ? '메트릭 조회 불가' : unavailable}
+        />
         <OverviewMetricBar
           label="Memory"
           value={memory}
-          unavailable={unavailable}
-          detail={vm.guest_kind === 'zephyr' ? 'Kernel heap' : `${vm.memory_mib} MiB allocated`}
+          precision={linux ? 0 : 3}
+          unavailable={
+            metrics.isError
+              ? '메트릭 조회 불가'
+              : (unavailable ??
+                (ram && ram.current.status !== 'ok'
+                  ? ram.recentObservation
+                    ? '관측 만료 · 최근 관측값'
+                    : managedRamReason(ram.current.reason)
+                  : null))
+          }
+          detail={
+            linux
+              ? `${vm.memory_mib} MiB allocated`
+              : `정적 예약 포함${ram?.lastObservationAt == null ? '' : ` · ${ago(Math.max(0, now - ram.lastObservationAt))}`}`
+          }
         />
       </div>
 
@@ -611,18 +667,20 @@ function VmOverviewCard({
 
 function OverviewStatusLine({
   label,
+  labelTitle,
   value,
   tone,
   detail,
 }: {
   label: string;
+  labelTitle?: string;
   value: string;
-  tone: Health;
+  tone?: Health;
   detail?: string;
 }) {
   return (
     <div className={styles.statusLine} data-tone={tone}>
-      <span>{label}</span>
+      <span title={labelTitle}>{label}</span>
       <strong>
         <i aria-hidden="true" /> {value}
       </strong>
@@ -634,11 +692,13 @@ function OverviewStatusLine({
 function OverviewMetricBar({
   label,
   value,
+  precision = 0,
   unavailable,
   detail,
 }: {
   label: string;
   value: number | null;
+  precision?: number;
   unavailable: string | null;
   detail?: string;
 }) {
@@ -647,11 +707,11 @@ function OverviewMetricBar({
     <div className={styles.metricRow}>
       <div>
         <span>{label}</span>
-        <strong>{value == null ? '—' : `${value.toFixed(0)}%`}</strong>
+        <strong>{value == null ? '—' : `${value.toFixed(precision)}%`}</strong>
       </div>
       <div
         className={styles.metricTrack}
-        aria-label={`${label} ${value == null ? '데이터 없음' : `${value.toFixed(0)}%`}`}
+        aria-label={`${label} ${value == null ? '데이터 없음' : `${value.toFixed(precision)}%`}`}
       >
         <i style={{ width: `${safeValue}%` }} />
       </div>
@@ -660,31 +720,14 @@ function OverviewMetricBar({
   );
 }
 
-function overviewConnection(vm: Vm, app: DriveState['apps'][string] | undefined): VmConnection {
-  if (app?.heartbeat_ago_ms != null) {
-    if (app.heartbeat_ago_ms <= 3000) return 'Connected';
-    if (app.heartbeat_ago_ms <= 10_000) return 'Delayed';
-    return 'Disconnected';
-  }
-  if (vm.agent_status === 'ONLINE') return 'Connected';
-  if (vm.agent_status === 'STALE') return 'Delayed';
-  if (vm.agent_status === 'OFFLINE') return 'Disconnected';
-  return 'Unknown';
-}
-
-function overviewConnectionTone(connection: VmConnection): Health {
-  if (connection === 'Connected') return 'ok';
-  if (connection === 'Delayed') return 'recovering';
-  if (connection === 'Disconnected') return 'fault';
-  return 'stopped';
-}
-
-function overviewAppStatus(health: Health, hasApp: boolean): string {
-  if (!hasApp) return 'Unknown';
-  if (health === 'ok') return 'Ready';
-  if (health === 'recovering') return 'Degraded';
-  if (health === 'fault') return 'Failed';
-  return 'Unknown';
+function overviewAppSignal(
+  reports: ReturnType<typeof vmAppObservations>,
+  field: 'phaseLabel' | 'heartbeatLabel',
+): string {
+  const labels = new Set(reports.map((report) => report[field]));
+  if (labels.size === 0) return '미확인';
+  if (labels.size === 1) return reports[0]![field];
+  return reports.map((report) => `${report.appId}: ${report[field]}`).join(' · ');
 }
 
 function overviewMetricUnavailable(pending: boolean, sampleCount: number): string | null {

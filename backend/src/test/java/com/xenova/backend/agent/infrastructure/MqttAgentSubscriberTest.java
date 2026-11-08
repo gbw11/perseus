@@ -101,4 +101,16 @@ class MqttAgentSubscriberTest {
         verify(heartbeatHandler).handle(topic, payload, true, RECEIVED_AT);
         verifyNoInteractions(agentHandler, telemetryHandler, recoveryHandler);
     }
+
+    @Test
+    void ignoresAnEmptyInventoryMessageFromARetainedClear() {
+        subscriber.messageArrived(AgentMessageHandler.TOPIC_PREFIX + "vm-1/inventory", new MqttMessage(new byte[0]));
+
+        verifyNoInteractions(agentHandler);
+    }
+
+    @Test
+    void inventoryTopicFollowsTheAgentTopicLayout() {
+        assertThat(MqttAgentSubscriber.inventoryTopic("vm-1")).isEqualTo("xenova/v1/vms/vm-1/inventory");
+    }
 }

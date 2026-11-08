@@ -105,8 +105,9 @@ class ReadContext:
         self.states,self.tombs=manager._read_states(action,spec,deadline)
         self.by_id={s['vm_id']:s for s in self.states}
         self.lifecycles={s['vm_id']:(s['lifecycle'],s['generation']) for s in self.states}
+        common=self.e.observation_common_inputs() if self.e is not None and self.states else None
         self.inputs={} if action=='registrations' else {s['vm_id']:(read_intent(manager.data,s['vm_id']) if self.e is None else
-                     self.e.observation_inputs(s['record'],self.lifecycles[s['vm_id']])) for s in self.states}
+                     self.e.observation_inputs(s['record'],self.lifecycles[s['vm_id']],_common=common)) for s in self.states}
         self.check()
 
     def check(self):

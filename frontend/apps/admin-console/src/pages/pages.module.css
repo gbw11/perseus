@@ -746,7 +746,7 @@ button.chip:hover:not(.chipOn) {
 }
 .overviewSummary {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   overflow: hidden;
   border: 1px solid var(--x-border);
   border-radius: 14px;
@@ -907,9 +907,11 @@ button.chip:hover:not(.chipOn) {
   display: flex;
   align-items: center;
   gap: 7px;
+  overflow-wrap: anywhere;
   font-size: var(--x-text-sm);
 }
 .statusLine strong i {
+  flex: none;
   width: 8px;
   height: 8px;
   border-radius: 50%;
@@ -996,15 +998,6 @@ button.chip:hover:not(.chipOn) {
   .vmGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .overviewSummary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .summaryItem:nth-child(2) {
-    border-right: 0;
-  }
-  .summaryItem:nth-child(-n + 2) {
-    border-bottom: 1px solid var(--x-border);
-  }
 }
 /* ---- S15P31E110-311 VM별 RX/TX 데이터 Pool ---- */
 .memoryHeadingMeta {
@@ -1025,11 +1018,12 @@ button.chip:hover:not(.chipOn) {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--x-space-4);
-  align-items: stretch;
+  /* VM별 상세 길이가 달라도 다른 카드에 빈 영역을 만들지 않는다. */
+  align-items: start;
 }
 .memoryVmCard {
   min-width: 0;
-  height: 100%;
+  height: auto;
   border-top: 4px solid var(--vm-accent);
 }
 .memoryVmTitle {
@@ -1049,6 +1043,12 @@ button.chip:hover:not(.chipOn) {
   display: grid;
   justify-items: end;
   gap: 4px;
+}
+.publisherStatus {
+  margin-bottom: var(--x-space-3);
+}
+.publisherStatus strong {
+  font-weight: 600;
 }
 .memoryNotice {
   margin-bottom: var(--x-space-3);
@@ -1182,6 +1182,57 @@ button.chip:hover:not(.chipOn) {
 .memoryLegend span[data-tone='tx'] i {
   background: var(--tx-accent);
 }
+/* Network 탭 그래프(현재 값을 보이는 범례, data-values)·툴팁의 라벨과 값은 선과 같은 색. xenova 테마 그래프 배경 대비 RX 10.2:1, TX 5.6:1 (AA 4.5:1 이상) */
+.memoryLegend[data-values] span[data-tone='rx'],
+.chartTooltip span[data-tone='rx'] {
+  color: var(--rx-accent);
+}
+.memoryLegend[data-values] span[data-tone='tx'],
+.chartTooltip span[data-tone='tx'] {
+  color: var(--tx-accent);
+}
+.memoryLegend[data-values] b,
+.chartTooltip b {
+  font-weight: 800;
+}
+.chartPlot {
+  position: relative;
+  cursor: crosshair;
+}
+.chartCursor {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--x-text-muted);
+  pointer-events: none;
+}
+.chartTooltip {
+  position: absolute;
+  top: var(--x-space-1);
+  z-index: 1;
+  display: grid;
+  gap: var(--x-space-1);
+  padding: var(--x-space-1) var(--x-space-2);
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius-sm);
+  background: var(--x-surface);
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-xs);
+  white-space: nowrap;
+  pointer-events: none;
+}
+/* 기준선 오른쪽 끝 근처에서는 왼쪽으로 펼쳐 그래프 밖으로 잘리지 않게 한다 */
+.chartTooltip[data-side='right'] {
+  margin-left: var(--x-space-2);
+}
+.chartTooltip[data-side='left'] {
+  transform: translateX(-100%);
+  margin-left: calc(-1 * var(--x-space-2));
+}
+.chartTooltip time {
+  color: var(--x-text-muted);
+}
 .memoryChart {
   position: relative;
   min-height: 170px;
@@ -1235,6 +1286,10 @@ button.chip:hover:not(.chipOn) {
   color: var(--x-text-muted);
   font-family: var(--x-font-mono);
   font-size: 10px;
+}
+.memoryChartBlock + .linuxMemorySummary,
+.memoryChartBlock + .poolSummaryGrid {
+  margin-top: var(--x-space-3);
 }
 .counterGrid {
   display: grid;
@@ -1376,6 +1431,136 @@ button.chip:hover:not(.chipOn) {
   stroke-linejoin: round;
   stroke-width: 2;
 }
+.appMemorySection {
+  margin-bottom: var(--x-space-4);
+}
+.appMemorySection > header,
+.appMemoryPool > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--x-space-2);
+  flex-wrap: wrap;
+}
+.appMemorySection h3 {
+  margin: 0;
+}
+.appMemorySection small,
+.appMemoryTime {
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+}
+.appMemoryGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--x-space-3);
+}
+.memoryGroup {
+  margin-top: var(--x-space-4);
+}
+.memoryGroup h4 {
+  margin: 0 0 var(--x-space-2);
+}
+.memoryGroupBadge {
+  display: inline-block;
+  padding: 3px 10px;
+  border: 1px solid var(--x-border);
+  border-radius: 999px;
+  font-size: var(--x-text-xs);
+  color: var(--x-text-muted);
+}
+.bufferState {
+  display: grid;
+  gap: 4px;
+  margin-top: var(--x-space-2);
+  font-size: var(--x-text-xs);
+}
+.bufferState span,
+.bufferState small {
+  color: var(--x-text-muted);
+}
+.memorySharedNetwork {
+  grid-column: 1 / -1;
+}
+.managedRamSection {
+  margin-bottom: var(--x-space-4);
+}
+.managedRamNotice {
+  grid-column: 1 / -1;
+}
+.appMemoryPool {
+  min-width: 0;
+  padding: var(--x-space-3);
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius);
+  background: var(--x-surface-2);
+  --pool-accent: var(--vm-accent);
+}
+.appMemoryPool header b {
+  color: var(--vm-accent);
+  font-family: var(--x-font-mono);
+}
+.appMemoryAmount {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: var(--x-space-2) 0;
+  font-family: var(--x-font-mono);
+}
+.appMemoryAmount > strong {
+  font-size: var(--x-text-lg);
+}
+.appMemoryAmount > span,
+.appMemoryPool dt {
+  color: var(--x-text-muted);
+}
+.appMemoryPool dl {
+  margin: var(--x-space-3) 0;
+  display: grid;
+  gap: 6px;
+  font-size: var(--x-text-xs);
+}
+.appMemoryPool dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--x-space-2);
+}
+.appMemoryPool dd {
+  margin: 0;
+  font-family: var(--x-font-mono);
+  overflow-wrap: anywhere;
+}
+.appMemoryNotice {
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+}
+.appPoolChart svg {
+  display: block;
+  width: 100%;
+  height: 80px;
+  overflow: visible;
+}
+.appPoolChart > div:last-child {
+  display: flex;
+  justify-content: space-between;
+  color: var(--x-text-muted);
+  font-size: 10px;
+}
+.appPoolChartEmpty {
+  display: grid;
+  place-items: center;
+  min-height: 80px;
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+}
+.appMemoryDot {
+  fill: var(--vm-accent);
+}
+.appMemoryTime {
+  display: block;
+  margin-top: var(--x-space-2);
+}
 @media (max-width: 1200px) {
   .memoryVmGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1505,21 +1690,6 @@ button.chip:hover:not(.chipOn) {
 .resourceFacts small {
   color: var(--x-text-muted);
   font-size: var(--x-text-xs);
-}
-.telemetryEmpty {
-  display: grid;
-  place-items: center;
-  gap: var(--x-space-2);
-  min-height: 160px;
-  padding: var(--x-space-5);
-  border: 1px dashed var(--x-border);
-  border-radius: var(--x-radius-sm);
-  color: var(--x-text-muted);
-  text-align: center;
-}
-.telemetryEmpty strong {
-  color: var(--x-text);
-  font-size: var(--x-text-lg);
 }
 .detailEvents {
   display: grid;
@@ -3537,4 +3707,151 @@ button.chip:hover:not(.chipOn) {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
+
+/* ---- Network 탭 카드 제목·상태 줄 ---- */
+/* 부제("인터랙션 · Debian 13")는 한 줄. 좁으면 말줄임 */
+.netVmTitle {
+  min-width: 0;
+}
+.netVmTitle small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 제목 아래 얇은 상태 줄. 세 카드 모두 한 줄 높이로 같은 자리에 온다 */
+.netStatusLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--x-space-1) var(--x-space-4);
+  min-height: calc(var(--x-text-xs) * 1.5);
+  margin-bottom: var(--x-space-3);
+  font-size: var(--x-text-xs);
+  line-height: 1.5;
+}
+/* 알약 배경 없이 상태 색 점 + 작은 글자. 글자는 본문 색이라 대비가 상태 색과 무관하다 */
+.netStatusItem {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--x-space-1);
+  color: var(--x-text);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: help;
+}
+.netStatusItem i {
+  width: 0.6em;
+  height: 0.6em;
+  border-radius: 50%;
+  background: var(--x-stopped);
+}
+.netStatusItem[data-tone='ok'] i {
+  background: var(--x-ok);
+}
+.netStatusItem[data-tone='recovering'] i {
+  background: var(--x-recovering);
+}
+.netStatusItem[data-tone='fault'] i {
+  background: var(--x-fault);
+}
+
+/* ---- Network 탭 RX/TX 표 (행 이름 | 간격 | RX 수신 | TX 송신). 숫자는 선과 같은 색, 단위는 작고 흐리게 ---- */
+/* 아래 그래프 블록(.memoryChartBlock)과 같은 좌우 안쪽 여백·테두리 폭을 두어,
+   행 이름은 그래프 제목과, TX 열 오른쪽 끝은 그래프 범례 끝과 같은 세로선에 온다 */
+.netTableBlock {
+  container-type: inline-size;
+  overflow-x: auto;
+  padding: 0 var(--x-space-3);
+  border: 1px solid transparent;
+  border-block: 0;
+}
+/* table-layout: fixed + colgroup → 열 너비가 값이 아니라 아래 간격 변수로만 정해진다.
+   RX·TX 열은 오른쪽부터 같은 폭으로 붙고, 남는 너비는 빈 간격 열이 가져간다.
+   그래서 같은 너비의 Zephyr·Linux 카드에서 RX·TX 열 시작 위치가 같고, 값이 바뀌어도 움직이지 않는다 */
+.netTable {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+/* 행 이름 열: "Pool"·"패킷" 이 들어가는 폭 (32px + 12px) */
+.netLabelCol {
+  width: calc(var(--x-space-6) + var(--x-space-3));
+}
+/* RX·TX 열: 가장 긴 값 "8388.6 KiB/s"(≈106px)와 다음 열 사이 여백이 들어가는 폭 (32px × 4 = 128px) */
+.netValueCol {
+  width: calc(var(--x-space-6) * 4);
+}
+.netTable th,
+.netTable td {
+  overflow: hidden;
+  padding: var(--x-space-1) 0;
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+}
+.netTable tbody th,
+.netTable thead td:first-child {
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+  font-weight: 500;
+}
+/* 제목은 값과 같은 왼쪽 시작점 */
+.netTable thead th {
+  font-size: var(--x-text-xs);
+  font-weight: 700;
+}
+.netTable .netGap {
+  padding: 0;
+}
+/* xenova 테마 카드 배경 대비: RX 11.4:1, TX 6.3:1, 주의 8.2:1, 위험 5.8:1, 단위(muted) 7.5:1 */
+.netTable [data-tone='rx'] {
+  color: var(--rx-accent);
+}
+.netTable [data-tone='tx'] {
+  color: var(--tx-accent);
+}
+.netTable td[data-level='warn'] {
+  color: var(--x-recovering);
+}
+.netTable td[data-level='fault'] {
+  color: var(--x-fault);
+}
+.netNumber {
+  display: flex;
+  align-items: baseline;
+  gap: var(--x-space-1);
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-lg);
+  font-weight: 800;
+  white-space: nowrap;
+}
+.netNumber small {
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+  font-weight: 500;
+}
+/* 보조 줄은 열 폭 안에서 말줄임, 전체 문구는 title 로 본다 */
+.netNote {
+  display: block;
+  overflow: hidden;
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 좁은 카드(표 영역이 행 이름 + RX + TX 폭 합계 300px 미만)에서는 숫자를 16px 로 줄이고
+   RX·TX 열도 32px × 3 = 96px 로 함께 줄인다. 그보다 더 좁으면 표 영역 안에서만 가로 스크롤된다 */
+@container (max-width: 300px) {
+  .netValueCol {
+    width: calc(var(--x-space-6) * 3);
+  }
+  .netNumber {
+    font-size: var(--x-text-md);
+  }
+}
+/* 수치 표와 아래 그래프 사이는 카드 사이 간격(--x-space-4)보다 한 단계 넓게 */
+.netTableBlock + .memoryChartBlock {
+  margin-top: var(--x-space-5);
 }

@@ -1,0 +1,72 @@
+{
+  "read_only": true,
+  "guest_input_bytes": 0,
+  "requests": [
+    {
+      "path": "/api/v1/vm-registrations",
+      "http": "200",
+      "curl_exit": 0,
+      "count": 3,
+      "item_keys": [
+        "vm_id",
+        "name",
+        "guest_kind",
+        "template_id",
+        "template_version",
+        "vcpus",
+        "memory_mib",
+        "assigned_ipv4"
+      ],
+      "items": [
+        {
+          "vm_id": "17cad3c4-b3cd-4b29-8740-e679d0eaebd4",
+          "name": "Debian Interaction",
+          "guest_kind": "linux",
+          "template_id": "debian-13-arm64",
+          "template_version": "1.0.5"
+        },
+        {
+          "vm_id": "de113a23-d80e-4333-94b8-788babe0e41e",
+          "name": "Zephyr 주행 A",
+          "guest_kind": "zephyr",
+          "template_id": "zephyr-drive-lattice-lab-arm64",
+          "template_version": "1.0.8"
+        },
+        {
+          "vm_id": "5002a22d-63d6-4f7a-9106-193b14499898",
+          "name": "Zephyr 주행 B",
+          "guest_kind": "zephyr",
+          "template_id": "zephyr-drive-lattice-lab-arm64",
+          "template_version": "1.0.8"
+        }
+      ]
+    },
+    {
+      "path": "/api/v1/vms",
+      "http": "200",
+      "curl_exit": 0,
+      "count": 3,
+      "item_keys": [
+        "vm_id",
+        "state",
+        "vcpus",
+        "memory_mib"
+      ],
+      "items": [
+        {
+          "vm_id": "17cad3c4-b3cd-4b29-8740-e679d0eaebd4",
+          "state": "running"
+        },
+        {
+          "vm_id": "de113a23-d80e-4333-94b8-788babe0e41e",
+          "state": "running"
+        },
+        {
+          "vm_id": "5002a22d-63d6-4f7a-9106-193b14499898",
+          "state": "running"
+        }
+      ]
+    }
+  ],
+  "upgrade_checks": []
+}

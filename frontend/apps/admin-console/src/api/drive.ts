@@ -27,10 +27,27 @@ export interface DriveApp {
   heartbeat_ago_ms: number | null;
 }
 
+export interface DriveSource {
+  status: 'fresh' | 'stale' | 'disconnected' | 'unknown';
+  age_ms: number | null;
+}
+
+export interface VmAppReport {
+  lifecycle: {
+    phase: 'WAITING' | 'ACTIVATING' | 'EXECUTING' | 'STOPPING' | 'RESIDUAL';
+    readiness: 'QUALIFIED' | 'READY' | 'NOT_READY';
+    reason: string | null;
+  } | null;
+  lifecycle_source: DriveSource;
+  heartbeat: { state: NonNullable<DriveApp['heartbeat_state']> } | null;
+  heartbeat_source: DriveSource;
+}
+
 /** 백엔드 DriveState (MQTT 계약 §5.4 필드, "*_ago_ms" 는 백엔드 시계 기준). 블록이 null 이면 아직 못 받음 */
 export interface DriveState {
   version: number;
   observed_at: string;
+  source?: DriveSource;
   control: {
     mode: DriveMode | null;
     generation: number | null;
@@ -38,6 +55,7 @@ export interface DriveState {
     active_vm_id: string | null;
     reason: string | null;
     received_ago_ms: number;
+    source?: DriveSource;
   } | null;
   vehicle: {
     applied_generation: number | null;
@@ -48,6 +66,7 @@ export interface DriveState {
     received_ago_ms: number;
   } | null;
   apps: Record<string, DriveApp>;
+  vm_apps?: Record<string, Record<string, VmAppReport>>;
   perception: {
     valid: boolean;
     received_ago_ms: number;
@@ -118,7 +137,12 @@ export function useAuthedSocket(path: string, onFrame: (frame: Frame) => void) {
       socketRef.current = ws;
       ws.onopen = () => ws.send(JSON.stringify({ type: 'auth', access_token: token }));
       ws.onmessage = (message) => {
-        const frame = JSON.parse(String(message.data)) as Frame;
+        let frame: Frame;
+        try {
+          frame = JSON.parse(String(message.data)) as Frame;
+        } catch {
+          return; // 깨진 프레임 하나로 onmessage 가 예외를 던지지 않게 버린다
+        }
         if (frame.type === 'authenticated') setState('open');
         else frameRef.current(frame);
       };
@@ -127,6 +151,8 @@ export function useAuthedSocket(path: string, onFrame: (frame: Frame) => void) {
         if (stopped) return;
         setState('closed');
         if (event.code === UNAUTHORIZED && !(await refreshSession())) return; // 세션 끝 → 로그인으로
+        // refresh 를 기다리는 사이 화면을 떠났으면 정리(clearTimeout)가 이미 끝났으므로 다시 걸지 않는다
+        if (stopped) return;
         timer = window.setTimeout(connect, RETRY_MS);
       };
     };
@@ -248,6 +274,11 @@ export const KEY_OF: Record<string, DriveKey> = {
   d: 'right',
   ' ': 'brake',
 };
+
+/** KeyboardEvent.key → 계약 키. Shift·CapsLock 으로 대문자가 와도 같은 키로 본다 (W 를 떼면 up 이 풀려야 한다) */
+export function driveKeyOf(key: string): DriveKey | undefined {
+  return KEY_OF[key.length === 1 ? key.toLowerCase() : key];
+}
 
 const ORDER: DriveKey[] = ['up', 'down', 'left', 'right', 'brake'];
 

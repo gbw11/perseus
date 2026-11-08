@@ -1,0 +1,5 @@
+{
+  "tls_websocket_upgrade": true,
+  "invalid_auth_close_code": 4401,
+  "guest_terminal_input_bytes": 0
+}

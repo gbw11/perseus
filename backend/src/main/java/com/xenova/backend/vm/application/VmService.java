@@ -1,5 +1,6 @@
 package com.xenova.backend.vm.application;
 
+import com.xenova.backend.agent.application.AgentInventoryCleaner;
 import com.xenova.backend.common.error.ApiException;
 import com.xenova.backend.event.application.EventRecorder;
 import com.xenova.backend.event.application.VmStateTracker;
@@ -8,6 +9,7 @@ import com.xenova.backend.template.domain.VmTemplate;
 import com.xenova.backend.vm.domain.CreateVmCommand;
 import com.xenova.backend.vm.domain.Vm;
 import com.xenova.backend.vm.domain.VmControlPort;
+import com.xenova.backend.vm.domain.VmControlOperation;
 import com.xenova.backend.vm.domain.VmLifecycle;
 import com.xenova.backend.vm.domain.VmRecord;
 import com.xenova.backend.vm.domain.VmRecordRepository;
@@ -21,6 +23,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
@@ -32,7 +35,7 @@ public class VmService {
     // dom0-manager rejected the request itself, so no domain or disk was created for this vm_id.
     // NOT_SUPPORTED: until the platform accepts a caller-chosen vm_id, every new create is refused this way.
     private static final Set<String> REJECTED_BY_DOM0 =
-            Set.of("INVALID_ARGUMENT", "INSUFFICIENT_RESOURCES", "VM_CONTROL_NOT_SUPPORTED");
+            Set.of("INVALID_ARGUMENT", "INSUFFICIENT_RESOURCES", "VM_CONTROL_NOT_SUPPORTED", "VM_NAME_CONFLICT");
     private static final String DOMAIN_EXISTS = "VM_ALREADY_EXISTS";
 
     private final VmControlPort vmControlPort;
@@ -41,6 +44,7 @@ public class VmService {
     private final EventRecorder eventRecorder;
     private final VmStateTracker stateTracker;
     private final VmRuntimeCache runtimeCache;
+    private final AgentInventoryCleaner inventoryCleaner;
     private final Clock clock;
 
     public VmService(
@@ -50,6 +54,7 @@ public class VmService {
             EventRecorder eventRecorder,
             VmStateTracker stateTracker,
             VmRuntimeCache runtimeCache,
+            AgentInventoryCleaner inventoryCleaner,
             Clock clock) {
         this.vmControlPort = vmControlPort;
         this.vmRecordRepository = vmRecordRepository;
@@ -57,6 +62,7 @@ public class VmService {
         this.eventRecorder = eventRecorder;
         this.stateTracker = stateTracker;
         this.runtimeCache = runtimeCache;
+        this.inventoryCleaner = inventoryCleaner;
         this.clock = clock;
     }
 
@@ -97,7 +103,8 @@ public class VmService {
         VmRecord record = findRecord(vmId);
         record.changeRole(role);
         vmRecordRepository.save(record);
-        return Vm.of(record, vmControlPort.find(vmId).orElse(null));
+        // Same source as get(): a live dom0-manager call here could fail after the role was already saved.
+        return Vm.of(record, runtimeCache.find(vmId).orElse(null));
     }
 
     // A retried request with the same name and spec returns the existing VM (200) instead of a duplicate.
@@ -123,26 +130,27 @@ public class VmService {
             return new CreateResult(underOperation(existing.getVmId(), () -> ensureRunning(existing)), false);
         }
 
-        VmRecord record = vmRecordRepository.save(
-                new VmRecord(UUID.randomUUID().toString(), command, template.guestKind(), clock.instant()));
+        VmRecord record;
+        try {
+            record = vmRecordRepository.save(
+                    new VmRecord(UUID.randomUUID().toString(), command, template.guestKind(), clock.instant()));
+        } catch (DataIntegrityViolationException exception) {
+            // Another request took the name between the check above and this insert (uk_vms_name).
+            throw new ApiException(HttpStatus.CONFLICT, "VM_NAME_CONFLICT", "이미 사용 중인 VM 이름입니다.");
+        }
         return new CreateResult(underOperation(record.getVmId(), () -> launchNew(record)), true);
     }
 
     private Vm launchNew(VmRecord record) {
         Vm vm;
         try {
-            VmRuntime runtime = vmControlPort.launch(record.getVmId(), record.launchSpec());
-            runtimeCache.put(record.getVmId(), runtime);
-            vm = Vm.of(record, runtime);
+            vm = launchDomain(record);
         } catch (ApiException exception) {
-            if (!DOMAIN_EXISTS.equals(exception.getCode())) {
-                // On a timeout the domain may still be coming up, so the record is kept and a retry can recover it.
-                if (REJECTED_BY_DOM0.contains(exception.getCode())) {
-                    vmRecordRepository.delete(record);
-                }
-                throw exception;
+            // On a timeout the domain may still be coming up, so the record is kept and a retry can recover it.
+            if (REJECTED_BY_DOM0.contains(exception.getCode())) {
+                vmRecordRepository.delete(record);
             }
-            vm = get(record.getVmId());
+            throw exception;
         }
         eventRecorder.vmCreated(record);
         // vm.created already tells the story; the state is only remembered so polling does not repeat it.
@@ -180,6 +188,18 @@ public class VmService {
         });
     }
 
+    public VmControlOperation reboot(String vmId, String requestKey) {
+        String validatedKey = validateRequestKey(requestKey);
+        findRecord(vmId);
+        return vmControlPort.requestReboot(vmId, validatedKey);
+    }
+
+    public VmControlOperation controlOperation(String vmId, String requestKey) {
+        String validatedKey = validateRequestKey(requestKey);
+        findRecord(vmId);
+        return vmControlPort.findControlOperation(vmId, validatedKey);
+    }
+
     // The platform retires the disk instead of deleting it. Keep the specification and vm_id for a future restore,
     // but hide the retired VM from the current v1 list/get/start/stop surface.
     public void destroy(String vmId) {
@@ -193,6 +213,8 @@ public class VmService {
             return null;
         });
         eventRecorder.vmDeleted(vmId, record.getName());
+        // Only after dom0-manager confirmed the delete. Failures are logged there and never fail the delete.
+        inventoryCleaner.vmDeleted(vmId);
     }
 
     // Marks the VM busy so the periodic state check does not report this operation's
@@ -228,26 +250,44 @@ public class VmService {
     }
 
     private Vm launch(VmRecord record) {
-        Vm vm;
+        Vm vm = launchDomain(record);
+        stateTracker.changedByUser(record.getVmId(), VmState.STOPPED, vm.state(), VmStateTracker.CAUSE_USER_START);
+        return vm;
+    }
+
+    // 409 VMExists for our own vm_id means an earlier launch already succeeded (contract 10.1), so the live
+    // domain is read back. Both create and start use this: the cached list may not have the domain yet.
+    private Vm launchDomain(VmRecord record) {
+        VmRuntime runtime;
         try {
-            VmRuntime runtime = vmControlPort.launch(record.getVmId(), record.launchSpec());
-            runtimeCache.put(record.getVmId(), runtime);
-            vm = Vm.of(record, runtime);
+            runtime = vmControlPort.launch(record.getVmId(), record.launchSpec());
         } catch (ApiException exception) {
-            // 409 VMExists for our own vm_id means an earlier launch already succeeded (contract 10.1).
             if (!DOMAIN_EXISTS.equals(exception.getCode())) {
                 throw exception;
             }
-            vm = Vm.of(record, vmControlPort.find(record.getVmId()).orElse(null));
+            runtime = vmControlPort.find(record.getVmId()).orElse(null);
         }
-        stateTracker.changedByUser(record.getVmId(), VmState.STOPPED, vm.state(), VmStateTracker.CAUSE_USER_START);
-        return vm;
+        if (runtime != null) {
+            runtimeCache.put(record.getVmId(), runtime);
+        }
+        return Vm.of(record, runtime);
     }
 
     private VmRecord findRecord(String vmId) {
         return vmRecordRepository.findById(vmId)
                 .filter(VmRecord::isRegistered)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "VM_NOT_FOUND", "존재하지 않는 VM입니다."));
+    }
+
+    private static String validateRequestKey(String requestKey) {
+        if (requestKey == null || requestKey.isEmpty() || requestKey.length() > 200
+                || requestKey.chars().anyMatch(character -> character < '!' || character > '~')) {
+            throw new ApiException(
+                    HttpStatus.BAD_REQUEST,
+                    "INVALID_ARGUMENT",
+                    "Idempotency-Key는 1~200자의 표시 가능한 ASCII 문자여야 합니다.");
+        }
+        return requestKey;
     }
 
     public record CreateResult(Vm vm, boolean created) {

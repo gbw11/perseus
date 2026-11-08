@@ -225,8 +225,10 @@ public class DisplayServiceWebSocketHandler extends TextWebSocketHandler {
     // Caller holds this. Reads the current desired_route, so a late call never sends an older revision.
     private void pushRoute(Peer peer, String displayId) {
         registry.routeSet(displayId).ifPresent(route -> {
-            send(peer, routeSetFrame(route));
-            registry.routeSent(displayId, route.revision());
+            // A failed send must not mark the revision as sent; the service gets it again on its next hello.
+            if (send(peer, routeSetFrame(route))) {
+                registry.routeSent(displayId, route.revision());
+            }
         });
     }
 
@@ -285,11 +287,13 @@ public class DisplayServiceWebSocketHandler extends TextWebSocketHandler {
         send(peer, frame);
     }
 
-    private void send(Peer peer, Object body) {
+    private boolean send(Peer peer, Object body) {
         try {
             peer.session.sendMessage(new TextMessage(objectMapper.writeValueAsString(body)));
+            return true;
         } catch (IOException | IllegalStateException exception) {
             log.debug("Display service socket send failed: {}", exception.getMessage());
+            return false;
         }
     }
 

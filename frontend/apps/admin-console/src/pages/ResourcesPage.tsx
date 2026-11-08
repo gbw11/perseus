@@ -1,8 +1,8 @@
 import { Card } from '@xenova/ui';
 import type { CSSProperties } from 'react';
 import type { DriveState } from '../api/drive';
-import { useMetrics, useVms } from '../api/queries';
-import type { Vm } from '../api/types';
+import { LIVE_POLL_MS, useMetrics, useVms } from '../api/queries';
+import type { MetricSample, Vm } from '../api/types';
 import { buildCpuChartScale, cpuChartY, formatCpuTick } from '../domain/cpuChart';
 import {
   buildDiskIoSnapshot,
@@ -12,184 +12,34 @@ import {
   linuxFreeMemory,
   type DiskIoCounter,
 } from '../domain/vmMetrics';
-import { buildMemoryPoolSeries, bytesToKiB, type PoolSnapshot } from '../domain/memoryPools';
-import {
-  ago,
-  osLabel,
-  ROLES,
-  roleOf,
-  sortVms,
-  UNASSIGNED_COLOR,
-  vmOf,
-  type AppId,
-  type Role,
-} from '../domain/roles';
+import { buildPacketRateSeries, bytesToKiB } from '../domain/memoryPools';
+import { ago, osLabel, roleOf, sortVms, UNASSIGNED_COLOR, type Role } from '../domain/roles';
 import { vmAuthorityOf } from '../domain/vmAuthority';
+import { observedControl } from '../domain/driveObservations';
 import { useDrive } from '../layout/DriveContext';
+import { AppMemoryPools } from './AppMemoryPools';
+import { ManagedRamSummary } from './ManagedRamSummary';
+import { sharedMemoryObservation, sharedObservedAt } from '../domain/sharedMemoryObservation';
+import { memoryObservationRunKey, selectMemoryObservationRun } from '../domain/memoryObservationRun';
+import { LiveDataAlert } from '../layout/LiveDataAlert';
+import { useNow } from '../useNow';
 import { MetricErrorNotice } from './MetricErrorNotice';
+import { NetworkDashboard } from './NetworkDashboard';
 import styles from './pages.module.css';
 
-/**
- * W-06 자원 (화면 정의서 W-06, UI-06) — 초안, 보기 전용. 자원은 VM 을 만들 때 정해지고 도중에 바꾸지 않는다:
- * 핀닝·스케줄러·메모리는 "지금 이렇게 나뉘어 있다" 를 보여 주는 용도다 (편집·적용 없음).
- * vCPU 수·메모리는 VM 목록(GET /api/v1/vms), 코어 배치·credit2 값은 RC카 시나리오 §2 표본 —
- * 실제 값 조회 API(-107)가 생기면 그 값으로 바꾼다. 화면 완성은 정수환 담당(-113·-114). 참고 시안: init/vcpu.
- */
+const MIB_BYTES = 1024 * 1024;
 
-type Domain = 'dom0' | AppId;
-
-const DOMAINS: { id: Domain; title: string; sub: string; color: string; dedicated: boolean }[] = [
-  { id: 'dom0', title: 'dom0', sub: 'Yocto · 관리 도메인', color: 'var(--x-text-muted)', dedicated: false },
-  {
-    id: 'autonomous',
-    title: ROLES.autonomous.title,
-    sub: 'Zephyr',
-    color: ROLES.autonomous.color,
-    dedicated: true,
-  },
-  { id: 'manual', title: ROLES.manual.title, sub: 'Zephyr', color: ROLES.manual.color, dedicated: true },
-  {
-    id: 'interaction',
-    title: ROLES.interaction.title,
-    sub: 'Debian 13',
-    color: ROLES.interaction.color,
-    dedicated: false,
-  },
-];
-const CORES = [0, 1, 2, 3];
-
-/** RC카 시나리오 §2: 자율·수동은 전용 1코어씩, 네비게이션은 남은 코어 */
-const PINS: Record<Domain, number[]> = { dom0: [0], autonomous: [1], manual: [2], interaction: [3] };
-const WEIGHT: Record<Domain, number> = { dom0: 512, autonomous: 512, manual: 512, interaction: 256 };
-const DOM0_MEMORY_MIB = 1024;
-
-export function ResourcesPage({ view = 'all' }: { view?: 'cpu' | 'memory' | 'all' }) {
-  const vms = useVms();
+/** Dashboard CPU·Memory·Network 탭 (/dashboard/cpu·/dashboard/memory·/dashboard/network) */
+export function ResourcesPage({ view }: { view: 'cpu' | 'memory' | 'network' }) {
+  const vms = useVms(LIVE_POLL_MS, { keepLastData: view === 'memory' });
   const { drive } = useDrive();
-  const vmFor = (d: Domain) => (d === 'dom0' ? undefined : vmOf(d, vms.data?.items, drive));
-  const memory = (d: Domain) => (d === 'dom0' ? DOM0_MEMORY_MIB : (vmFor(d)?.memory_mib ?? 0));
-  const vcpus = (d: Domain) => (d === 'dom0' ? 1 : (vmFor(d)?.vcpus ?? 0));
-  const totalMemory = DOMAINS.reduce((sum, d) => sum + memory(d.id), 0);
-  const guests = DOMAINS.filter((d) => d.id !== 'dom0');
-  const totalWeight = guests.reduce((sum, d) => sum + WEIGHT[d.id], 0);
-
   if (view === 'cpu') {
     return <CpuDashboard items={vms.data?.items} drive={drive} pending={vms.isPending} />;
   }
-
   if (view === 'memory') {
     return <MemoryDashboard items={vms.data?.items} drive={drive} pending={vms.isPending} />;
   }
-
-  return (
-    <div className={styles.page}>
-      <header className={styles.contentHeading}>
-        <div>
-          <span className={styles.contentEyebrow}>RESOURCE MONITORING</span>
-          <h1>Memory Usage</h1>
-        </div>
-      </header>
-
-      <Card title="코어 배치 (vCPU 핀닝)" actions={<span className={styles.dim}>RC카 시나리오 §2 표본</span>}>
-        <table className={styles.matrix}>
-          <thead>
-            <tr>
-              <th>도메인</th>
-              {CORES.map((c) => (
-                <th key={c}>CORE {c}</th>
-              ))}
-              <th>vCPU</th>
-            </tr>
-          </thead>
-          <tbody>
-            {DOMAINS.map((d) => (
-              <tr key={d.id}>
-                <td>
-                  <b style={{ color: d.color }}>{d.title}</b>
-                  <div className={styles.eyebrow}>{d.sub}</div>
-                </td>
-                {CORES.map((core) => {
-                  const on = PINS[d.id].includes(core);
-                  return (
-                    <td key={core}>
-                      <div
-                        className={[styles.cell, on ? styles.cellPinned : ''].join(' ')}
-                        style={
-                          { '--accent': d.color, display: 'grid', placeItems: 'center' } as CSSProperties
-                        }
-                      >
-                        {on ? (d.dedicated ? '전용' : '고정') : '—'}
-                      </div>
-                    </td>
-                  );
-                })}
-                <td className={styles.mono}>{vcpus(d.id) || '—'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <p className={styles.dim}>
-          주행 VM A·B는 코어를 혼자 쓴다 — 인포테인먼트 VM이 바빠져도 주행 명령 주기(50 Hz)가 흔들리지 않게.
-        </p>
-      </Card>
-
-      <div className={styles.cols2}>
-        <Card title="스케줄러 (credit2 weight)">
-          <p className={styles.dim}>
-            코어가 겹칠 때 CPU 시간을 나누는 비율. 지금은 코어가 겹치지 않아 참고값이다.
-          </p>
-          {guests.map((d) => {
-            const share = WEIGHT[d.id] / totalWeight;
-            return (
-              <div key={d.id} style={{ marginBottom: 'var(--x-space-3)' }}>
-                <div className={styles.row} style={{ justifyContent: 'space-between', marginBottom: 4 }}>
-                  <b style={{ color: d.color }}>{d.title}</b>
-                  <span className={styles.mono}>
-                    weight {WEIGHT[d.id]} · {Math.round(share * 100)}% · cap 없음
-                  </span>
-                </div>
-                <div className={styles.bar}>
-                  <i style={{ width: `${share * 100}%`, background: d.color }} />
-                </div>
-              </div>
-            );
-          })}
-        </Card>
-        <Card title="메모리" actions={<span className={styles.mono}>합계 {totalMemory} MiB</span>}>
-          <div className={styles.stack}>
-            {DOMAINS.map((d) => {
-              const share = totalMemory ? memory(d.id) / totalMemory : 0;
-              return (
-                <i
-                  key={d.id}
-                  title={`${d.title} ${memory(d.id)} MiB`}
-                  style={{ flexGrow: memory(d.id), background: d.color }}
-                >
-                  {share > 0.15 ? d.title : ''}
-                </i>
-              );
-            })}
-          </div>
-          <div className={styles.rows}>
-            {DOMAINS.map((d) => (
-              <div key={d.id}>
-                <span className={styles.legend}>
-                  <i style={{ background: d.color }} />
-                  {d.title}
-                </span>
-                <span className={styles.mono}>
-                  {memory(d.id) ? `${memory(d.id)} MiB` : '—'}
-                  {totalMemory && memory(d.id)
-                    ? ` · ${((memory(d.id) / totalMemory) * 100).toFixed(1)}%`
-                    : ''}
-                </span>
-              </div>
-            ))}
-          </div>
-        </Card>
-      </div>
-    </div>
-  );
+  return <NetworkDashboard items={vms.data?.items} drive={drive} pending={vms.isPending} />;
 }
 
 function MemoryDashboard({
@@ -212,11 +62,12 @@ function MemoryDashboard({
         </div>
         <div className={styles.memoryHeadingMeta}>
           <span>Linux 최근 5분</span>
-          <span>Zephyr heap 최근 5분 · Pool 최근 60초</span>
+          <span>Zephyr RAM·버퍼 최근 60초 · 힙 최근 5분</span>
         </div>
       </header>
 
       {pending && <div className={styles.statePanel}>VM 정보를 불러오는 중입니다…</div>}
+      <LiveDataAlert />
 
       <div className={styles.memoryVmGrid}>
         {vms.map((vm) =>
@@ -233,13 +84,12 @@ function MemoryDashboard({
 
 function MemoryVmPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
   const role = roleOf(vm, drive);
-  const metrics = useMetrics(vm.vm_id, true, 1, 2000);
-  const heapMetrics = useMetrics(vm.vm_id, true);
-  const series = buildMemoryPoolSeries(metrics.data?.items ?? []);
-  const heap = buildZephyrHeapSeries(heapMetrics.data?.items ?? []);
-  const authority = vmAuthorityOf(role, vm, drive?.control?.active_vm_id);
-  const lastUpdated = relativeTime(latestTime(series.lastObservedAt, heap.current?.observedAt ?? null));
-  const heapCurrent = heap.current;
+  const metrics = useMetrics(vm.vm_id, true, 1, LIVE_POLL_MS, { keepLastData: true });
+  const heapMetrics = useMetrics(vm.vm_id, true, 5, LIVE_POLL_MS, { keepLastData: true });
+  const samples = metrics.data?.items ?? [];
+  const { socket } = useDrive();
+  // Overview·VM 상세와 같이 소켓이 열려 있고 control 이 신선할 때만 ACTIVE/STANDBY 를 판정한다
+  const authority = vmAuthorityOf(role, vm, observedControl(drive, socket)?.active_vm_id);
   const style = {
     '--vm-accent': role?.color ?? UNASSIGNED_COLOR,
     '--rx-accent': 'var(--x-primary)',
@@ -253,7 +103,7 @@ function MemoryVmPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
       title={
         <span className={styles.memoryVmTitle}>
           <strong>{vm.name}</strong>
-          <small>{role?.short ?? '역할 미지정'} · Zephyr · 커널 heap · 네트워크 데이터 Pool</small>
+          <small>{role?.short ?? '역할 미지정'} · Zephyr · 앱 버퍼·힙·네트워크 풀</small>
         </span>
       }
       actions={
@@ -261,91 +111,107 @@ function MemoryVmPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
           <span className={styles.authority} data-authority={authority.toLowerCase()}>
             {authority}
           </span>
-          <small>마지막 갱신 {lastUpdated}</small>
+          <small>관측 시각과 만료는 영역별로 확인</small>
         </span>
       }
     >
-      {(metrics.error || heapMetrics.error) && <MetricErrorNotice />}
-
-      <MemoryUsageSummary
-        label="메모리 사용률"
-        badge={HEAP_BASIS_BADGE}
-        ariaLabel={`${vm.name} 메모리 사용률(커널 heap 기준)`}
-        percent={heapCurrent?.percent ?? null}
-        usedBytes={heapCurrent?.usedBytes ?? null}
-        totalBytes={heapCurrent?.totalBytes ?? null}
-        freeLabel="여유"
-        freeBytes={heapCurrent?.freeBytes ?? null}
-        freeNote={heapCurrent ? null : heapMetrics.isPending ? '수신 대기' : heap.reason}
-        format={formatKiB}
-      />
-      <UsageChart
-        title="메모리 사용률"
-        badge={HEAP_BASIS_BADGE}
-        ariaLabel={`${vm.name} 메모리 사용률(커널 heap 기준) 최근 5분 그래프`}
-        points={heap.points}
-      />
-
-      <div className={styles.poolSummaryGrid}>
-        <PoolSummary label="RX Pool" pool={series.rx} tone="rx" />
-        <PoolSummary label="TX Pool" pool={series.tx} tone="tx" />
-      </div>
-
-      <MemoryChart
-        title="패킷 처리율"
-        unit="packets/s"
-        ariaLabel={`${vm.name} RX TX 패킷 처리율 최근 60초`}
-        points={series.packetRates.map((point) => ({
-          observedAt: point.observedAt,
-          rx: point.rxPacketsPerSecond,
-          tx: point.txPacketsPerSecond,
-        }))}
-      />
-      <MemoryChart
-        title="Pool 점유율"
-        unit="%"
-        ariaLabel={`${vm.name} RX TX Pool 점유율 최근 60초`}
-        max={100}
-        points={series.usage.map((point) => ({
-          observedAt: point.observedAt,
-          rx: point.rxPercent,
-          tx: point.txPercent,
-        }))}
-      />
+      {(metrics.error || heapMetrics.error) && (
+        <MetricErrorNotice detail="최근 관측값·이력을 표시하며, 만료 여부는 영역별로 구분합니다." />
+      )}
+      <ManagedRamSummary vmId={vm.vm_id} vmName={vm.name} samples={samples} />
+      <p className={styles.dim}>
+        VM 구성 {vm.memory_mib.toLocaleString('ko-KR')} MiB · 관리 RAM과 내부 버퍼 점유를 분리합니다.
+      </p>
+      <AppMemoryPools vmId={vm.vm_id} vmName={vm.name} samples={samples}>
+        <SharedMemoryPanels vmName={vm.name} samples={samples} heapSamples={heapMetrics.data?.items ?? []} />
+      </AppMemoryPools>
     </Card>
   );
 }
 
-function PoolSummary({ label, pool, tone }: { label: string; pool: PoolSnapshot; tone: 'rx' | 'tx' }) {
-  const usable = pool.state === 'ok';
+function SharedMemoryPanels({
+  vmName,
+  samples,
+  heapSamples,
+}: {
+  vmName: string;
+  samples: MetricSample[];
+  heapSamples: MetricSample[];
+}) {
+  // 화면 전체가 같이 쓰는 1초 시계 — 같은 카드 안의 "n초 전"이 서로 다른 시계로 계산되지 않게
+  const now = useNow();
+  // The 5-minute heap query must also respect a new session first seen in the 60-second buffer query.
+  const allSamples = [...heapSamples, ...samples];
+  const run = selectMemoryObservationRun(allSamples, allSamples[0]?.vm_id ?? '');
+  const projectRun = (history: MetricSample[]) =>
+    (run.state === 'selected'
+      ? history.filter((sample) => memoryObservationRunKey(sample) === run.key)
+      : []
+    ).map((sample) => {
+      const family = sample.telemetry?.family;
+      const at = family === 'memory' || family === 'memory_regions' ? sharedObservedAt(sample, family) : null;
+      return at ? { ...sample, observed_at: at } : sample;
+    });
+  // Network reports do not carry the memory observation context.
+  const packetRates = buildPacketRateSeries(samples);
+  const heap = buildZephyrHeapSeries(projectRun(heapSamples));
+  const heapObservation = sharedMemoryObservation(
+    allSamples,
+    'memory',
+    ['memory.kernel_heap.used_bytes', 'memory.kernel_heap.free_bytes'],
+    now,
+  );
+  const currentHeapView =
+    (heapObservation.state === 'fresh' || heapObservation.state === 'expired') && heapObservation.sample
+      ? buildZephyrHeapSeries([heapObservation.sample])
+      : null;
+  const currentHeap = currentHeapView?.current ?? null;
   return (
-    <section className={styles.poolSummary} data-tone={tone}>
-      <div className={styles.poolSummaryHead}>
-        <span>
-          <i aria-hidden="true" />
-          {label}
-        </span>
-        <strong>{usable ? `${pool.usagePercent!.toFixed(1)}%` : '—'}</strong>
-      </div>
-      <div className={styles.poolAmount}>
-        <strong>{usable ? formatKiB(pool.usedBytes) : '—'}</strong>
-        <span>/ {usable ? formatKiB(pool.capacityBytes) : '—'}</span>
-      </div>
-      <div className={styles.poolFree}>
-        <span>여유</span>
-        <strong>{usable ? formatKiB(pool.freeBytes) : pool.reason}</strong>
-      </div>
-      <div
-        className={styles.poolBar}
-        role="progressbar"
-        aria-label={`${label} 사용률`}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={usable ? Math.round(pool.usagePercent!) : undefined}
+    <>
+      <section className={styles.appMemoryPool} aria-label={`${vmName} 공통 커널 힙`}>
+        <MemoryUsageSummary
+          label="커널 힙 사용률"
+          badge={HEAP_BASIS_BADGE}
+          ariaLabel={`${vmName} 커널 힙 사용률`}
+          percent={currentHeap?.percent ?? null}
+          usedBytes={currentHeap?.usedBytes ?? null}
+          totalBytes={currentHeap?.totalBytes ?? null}
+          freeLabel={heapObservation.state === 'expired' ? '관측 당시 여유' : '여유'}
+          expired={heapObservation.state === 'expired' && currentHeap != null}
+          freeBytes={currentHeap?.freeBytes ?? null}
+          freeNote={currentHeapView?.reason ?? heapObservation.reason}
+          format={formatKiB}
+        />
+        <p className={styles.dim}>
+          {heapObservation.reason}
+          {heapObservation.observedAt &&
+            ` · 원 관측 약 ${ago(Math.max(0, now - Date.parse(heapObservation.observedAt)))}`}
+        </p>
+        <UsageChart
+          title="커널 힙 사용률"
+          ariaLabel={`${vmName} 커널 힙 사용률 최근 5분 그래프`}
+          points={heap.points}
+        />
+      </section>
+      <section
+        className={`${styles.appMemoryPool} ${styles.memorySharedNetwork}`}
+        aria-label={`${vmName} 공통 네트워크 패킷`}
       >
-        <i style={{ width: `${usable ? Math.min(100, pool.usagePercent!) : 0}%` }} />
-      </div>
-    </section>
+        {/* RX/TX Pool 요약·Pool 점유율은 Network 탭으로 옮겼다 (S15P31E110-367). 패킷 처리율은 Memory 탭 정리 이슈에서 다룬다 */}
+        <h4>공통 네트워크 패킷</h4>
+
+        <MemoryChart
+          title="패킷 처리율"
+          unit="packets/s"
+          ariaLabel={`${vmName} RX TX 패킷 처리율 최근 60초`}
+          points={packetRates.map((point) => ({
+            observedAt: point.observedAt,
+            rx: point.rxPacketsPerSecond,
+            tx: point.txPacketsPerSecond,
+          }))}
+        />
+      </section>
+    </>
   );
 }
 
@@ -391,7 +257,7 @@ function MemoryChart({
         </span>
       </header>
       <div className={styles.memoryChart}>
-        {rxPoints || txPoints ? (
+        {rxPoints.length || txPoints.length ? (
           <svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label={ariaLabel}>
             {[0, 25, 50, 75, 100].map((value) => (
               <line
@@ -403,12 +269,22 @@ function MemoryChart({
                 className={styles.memoryGridLine}
               />
             ))}
-            {rxPoints && (
-              <polyline points={rxPoints} className={styles.memoryRxLine} vectorEffect="non-scaling-stroke" />
-            )}
-            {txPoints && (
-              <polyline points={txPoints} className={styles.memoryTxLine} vectorEffect="non-scaling-stroke" />
-            )}
+            {rxPoints.map((segment, index) => (
+              <polyline
+                key={`rx-${index}`}
+                points={segment}
+                className={styles.memoryRxLine}
+                vectorEffect="non-scaling-stroke"
+              />
+            ))}
+            {txPoints.map((segment, index) => (
+              <polyline
+                key={`tx-${index}`}
+                points={segment}
+                className={styles.memoryTxLine}
+                vectorEffect="non-scaling-stroke"
+              />
+            ))}
           </svg>
         ) : (
           <div className={styles.memoryChartEmpty}>데이터 없음</div>
@@ -457,6 +333,7 @@ function MemoryUsageSummary({
   freeBytes,
   freeNote,
   format,
+  expired = false,
 }: {
   label: string;
   badge?: BasisBadge;
@@ -470,6 +347,7 @@ function MemoryUsageSummary({
   freeBytes: number | null;
   freeNote: string | null;
   format: (bytes: number | null) => string;
+  expired?: boolean;
 }) {
   const clamped = percent == null ? null : Math.max(0, Math.min(100, percent));
   return (
@@ -495,7 +373,10 @@ function MemoryUsageSummary({
         aria-label={ariaLabel}
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-valuenow={clamped == null ? undefined : Math.round(clamped)}
+        aria-valuenow={clamped == null || expired ? undefined : Math.round(clamped)}
+        aria-valuetext={
+          expired && percent != null ? `최근 관측 ${percent.toFixed(1)}% · 관측 만료` : undefined
+        }
       >
         <i style={{ width: `${clamped ?? 0}%` }} />
       </div>
@@ -504,13 +385,16 @@ function MemoryUsageSummary({
 }
 
 function LinuxMemoryPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
+  const now = useNow();
   const role = roleOf(vm, drive);
-  const metrics = useMetrics(vm.vm_id, true);
+  const metrics = useMetrics(vm.vm_id, true, 5, LIVE_POLL_MS, { keepLastData: true });
   const samples = metrics.data?.items ?? [];
   const series = buildLinuxMemorySeries(samples, vm);
   const free = linuxFreeMemory(series);
   const disk = buildDiskIoSnapshot(samples);
-  const authority = vmAuthorityOf(role, vm, drive?.control?.active_vm_id);
+  const { socket } = useDrive();
+  // Overview·VM 상세와 같이 소켓이 열려 있고 control 이 신선할 때만 ACTIVE/STANDBY 를 판정한다
+  const authority = vmAuthorityOf(role, vm, observedControl(drive, socket)?.active_vm_id);
   const style = {
     '--vm-accent': role?.color ?? UNASSIGNED_COLOR,
   } as CSSProperties;
@@ -546,7 +430,7 @@ function LinuxMemoryPanel({ vm, drive }: { vm: Vm; drive: DriveState | null }) {
           <span className={styles.authority} data-authority={authority.toLowerCase()}>
             {authority}
           </span>
-          <small>마지막 갱신 {current ? relativeTime(current.observedAt) : '—'}</small>
+          <small>마지막 갱신 {current ? relativeTime(current.observedAt, now) : '—'}</small>
         </span>
       }
     >
@@ -614,11 +498,13 @@ function UsageChart({
   badge,
   ariaLabel,
   points,
+  emptyMessage = '데이터 없음',
 }: {
   title: string;
   badge?: BasisBadge;
   ariaLabel: string;
   points: readonly { observedAt: string; percent: number }[];
+  emptyMessage?: string;
 }) {
   const line = chartPoints(
     points.map((point) => ({ observedAt: point.observedAt, rx: point.percent, tx: null })),
@@ -639,7 +525,7 @@ function UsageChart({
         </span>
       </header>
       <div className={styles.memoryChart}>
-        {line ? (
+        {line.length ? (
           <svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label={ariaLabel}>
             {[0, 25, 50, 75, 100].map((value) => (
               <line
@@ -651,10 +537,17 @@ function UsageChart({
                 className={styles.memoryGridLine}
               />
             ))}
-            <polyline points={line} className={styles.linuxMemoryLine} vectorEffect="non-scaling-stroke" />
+            {line.map((segment, index) => (
+              <polyline
+                key={index}
+                points={segment}
+                className={styles.linuxMemoryLine}
+                vectorEffect="non-scaling-stroke"
+              />
+            ))}
           </svg>
         ) : (
-          <div className={styles.memoryChartEmpty}>데이터 없음</div>
+          <div className={styles.memoryChartEmpty}>{emptyMessage}</div>
         )}
         <span className={styles.memoryChartMax}>100%</span>
         <div className={styles.memoryChartAxis} aria-hidden="true">
@@ -666,27 +559,27 @@ function UsageChart({
   );
 }
 
-function chartPoints(points: ChartPoint[], key: 'rx' | 'tx', max: number): string {
-  if (!points.length) return '';
+function chartPoints(points: ChartPoint[], key: 'rx' | 'tx', max: number): string[] {
+  if (!points.length) return [];
   const start = Date.parse(points[0]!.observedAt);
   const end = Date.parse(points.at(-1)!.observedAt);
   const span = Math.max(1, end - start);
-  return points
-    .map((point) => {
-      const value = point[key];
-      if (value == null) return null;
-      const x = ((Date.parse(point.observedAt) - start) / span) * 100;
-      const y = 100 - (Math.max(0, Math.min(max, value)) / max) * 100;
-      return `${x.toFixed(2)},${y.toFixed(2)}`;
-    })
-    .filter((point): point is string => point != null)
-    .join(' ');
-}
-
-function latestTime(a: string | null, b: string | null): string | null {
-  if (!a) return b;
-  if (!b) return a;
-  return Date.parse(a) >= Date.parse(b) ? a : b;
+  const segments: string[][] = [];
+  let segment: string[] = [];
+  for (const point of points) {
+    const value = point[key];
+    // 미측정·카운터 초기화 경계에 선을 이어 연속 측정처럼 보이지 않게 한다.
+    if (value == null || !Number.isFinite(value)) {
+      if (segment.length) segments.push(segment);
+      segment = [];
+      continue;
+    }
+    const x = ((Date.parse(point.observedAt) - start) / span) * 100;
+    const y = 100 - (Math.max(0, Math.min(max, value)) / max) * 100;
+    segment.push(`${x.toFixed(2)},${y.toFixed(2)}`);
+  }
+  if (segment.length) segments.push(segment);
+  return segments.map((part) => part.join(' '));
 }
 
 function formatBytes(value: number): string {
@@ -706,12 +599,12 @@ function formatKiB(value: number | null): string {
 }
 
 function formatMiB(value: number): string {
-  return `${(value / (1024 * 1024)).toLocaleString('ko-KR', { maximumFractionDigits: 1 })} MiB`;
+  return `${(value / MIB_BYTES).toLocaleString('ko-KR', { maximumFractionDigits: 1 })} MiB`;
 }
 
-function relativeTime(value: string | null): string {
+function relativeTime(value: string | null, now: number): string {
   if (!value) return '—';
-  const elapsed = Math.max(0, Date.now() - Date.parse(value));
+  const elapsed = Math.max(0, now - Date.parse(value));
   return ago(elapsed);
 }
 
@@ -734,6 +627,7 @@ function CpuDashboard({
       </header>
 
       {pending && <div className={styles.statePanel}>VM 정보를 불러오는 중입니다…</div>}
+      <LiveDataAlert />
 
       <div className={styles.cpuGrid}>
         {sortVms(items ?? []).map((vm) => (

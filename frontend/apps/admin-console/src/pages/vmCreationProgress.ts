@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { formatElapsedTime } from '../format';
 
 export const VM_CREATION_LEAVE_MESSAGE =
   '다른 화면으로 이동해도 VM 생성은 계속됩니다. 완료 여부는 VM 목록에서 확인하세요.';
@@ -66,12 +67,8 @@ export function saveLastVmCreationDuration(durationMs: number): void {
   writeStorage(LAST_DURATION_KEY, String(Math.round(durationMs)));
 }
 
-export function formatVmCreationTime(durationMs: number): string {
-  const totalSeconds = Math.max(0, Math.floor(durationMs / 1000));
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
-}
+/** 생성 경과·예상 시간 — 정지·삭제 진행 표시와 같은 mm:ss */
+export const formatVmCreationTime = formatElapsedTime;
 
 export function estimatedRemainingTime(elapsedMs: number, previousDurationMs: number): number {
   return Math.max(0, previousDurationMs - Math.max(0, elapsedMs));

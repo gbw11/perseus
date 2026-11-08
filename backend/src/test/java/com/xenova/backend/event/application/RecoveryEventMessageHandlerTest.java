@@ -59,6 +59,33 @@ class RecoveryEventMessageHandlerTest {
         verify(eventStore, never()).store(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
     }
 
+    // The Worker publishes through xenova_mqtt, so the event arrives inside the common envelope (contract 11).
+    @Test
+    void acceptsTheEventInsideTheWorkerEnvelope() {
+        assertThat(handler.handle(envelope("dom0-server", "recovery.started", event("recovery.started", "")), RECEIVED_AT))
+                .isEqualTo(RecoveryEventMessageHandler.Result.ACCEPTED);
+        verify(eventStore).store(
+                org.mockito.ArgumentMatchers.argThat(event -> event.type().value().equals("recovery.started")),
+                org.mockito.ArgumentMatchers.eq(RECEIVED_AT));
+    }
+
+    @Test
+    void rejectsAnEnvelopeFromAnotherSourceOrWithAnotherType() {
+        assertThat(handler.handle(envelope("vm-agent", "recovery.started", event("recovery.started", "")), RECEIVED_AT))
+                .isEqualTo(RecoveryEventMessageHandler.Result.REJECTED);
+        assertThat(handler.handle(envelope("dom0-server", "recovery.failed", event("recovery.started", "")), RECEIVED_AT))
+                .isEqualTo(RecoveryEventMessageHandler.Result.REJECTED);
+        verify(eventStore, never()).store(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
+    private static byte[] envelope(String sourceId, String type, byte[] event) {
+        return bytes("""
+                {"schema_version":"1.0","message_id":"00000000-0000-0000-0000-0000000000aa",
+                 "source_id":"%s","boot_id":"b","agent_instance_id":"i","type":"%s","seq":1,
+                 "sent_at":"2026-10-23T01:00:01Z","payload":%s}
+                """.formatted(sourceId, type, new String(event, StandardCharsets.UTF_8)));
+    }
+
     @Test
     void rejectsOversizedPayloadAndStillAcceptsTheNextMessage() {
         byte[] oversized = new byte[RecoveryEventMessageHandler.MAX_PAYLOAD_BYTES + 1];

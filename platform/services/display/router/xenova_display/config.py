@@ -21,10 +21,13 @@ class Binding(BaseModel):
     app_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,64}$")
     app_ids: tuple[str, ...] = Field(default=(), max_length=2)
     app_topic_scope: Literal["legacy", "vm_scoped"] = "legacy"
+    report_profile: Literal["verified-drive-1", "warm-drive-1"] = "verified-drive-1"
     agent_supported: bool = False
 
     @model_validator(mode="after")
     def app_mapping(self):
+        if self.report_profile == "warm-drive-1" and self.app_topic_scope != "vm_scoped":
+            raise ValueError("warm profile requires VM-scoped drive apps")
         if self.app_topic_scope == "legacy":
             if self.app_id is None or self.app_ids:
                 raise ValueError("legacy requires one app_id and no app_ids")
@@ -108,6 +111,9 @@ class FeedSettings:
     gateway_budget_s: float = 0.5
 
     def __post_init__(self):
+        if any(b.report_profile == "warm-drive-1" for b in self.bindings):
+            # Explicit profile opt-in must not silently run with an older parser.
+            from xenova_mqtt.lifecycle import parse  # noqa: F401
         if self.drive_transport not in {"mqtt", "gateway"}:
             raise ValueError("invalid display drive transport")
         if not PurePosixPath(self.gateway_socket).is_absolute() or '\0' in self.gateway_socket:

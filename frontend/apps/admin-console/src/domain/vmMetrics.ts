@@ -97,14 +97,11 @@ export function cpuPercentOf(sample: MetricSample): number | null {
   return metricValue(sample, VM_CPU_PERCENT_METRIC) ?? metricValue(sample, ZEPHYR_CPU_PERCENT_METRIC);
 }
 
-/** 메모리 사용률(%). Linux 는 할당 메모리 대비, Zephyr 는 커널 heap(used+free) 대비 */
+/** 메모리 사용률(%). Linux 는 할당 메모리, Zephyr 는 커널 heap(accounted 또는 used+free) 대비 */
 export function memoryPercentOf(sample: MetricSample, vm: Pick<Vm, 'memory_mib'>): number | null {
   const used = metricValue(sample, LINUX_MEMORY_USED_METRIC);
   if (used != null) return (used / (vm.memory_mib * MIB_BYTES)) * 100;
-  const heapUsed = metricValue(sample, ZEPHYR_HEAP_USED_METRIC);
-  const heapFree = metricValue(sample, ZEPHYR_HEAP_FREE_METRIC);
-  if (heapUsed == null || heapFree == null || heapUsed + heapFree <= 0) return null;
-  return (heapUsed / (heapUsed + heapFree)) * 100;
+  return buildZephyrHeapSeries([sample]).current?.percent ?? null;
 }
 
 /** pick 이 값을 내는 가장 최근 표본의 값 */
@@ -168,13 +165,17 @@ export function linuxFreeMemory(series: LinuxMemorySeries): LinuxFreeMemory {
 export function buildZephyrHeapSeries(samples: readonly MetricSample[]): ZephyrHeapSeries {
   const ordered = [...samples].sort((a, b) => Date.parse(a.observed_at) - Date.parse(b.observed_at));
   let reason: string | null = null;
+  let current: ZephyrHeapPoint | null = null;
   const points = ordered.flatMap((sample): ZephyrHeapPoint[] => {
     if (!sample.values.some((value) => value.name.startsWith('memory.kernel_heap.'))) return [];
+    current = null;
     const usedBytes = validValue(sample, ZEPHYR_HEAP_USED_METRIC);
     const freeBytes = validValue(sample, ZEPHYR_HEAP_FREE_METRIC);
     if (usedBytes == null || freeBytes == null) {
       reason =
-        reasonOf(sample, ZEPHYR_HEAP_USED_METRIC) ?? reasonOf(sample, ZEPHYR_HEAP_FREE_METRIC) ?? NO_DATA;
+        (usedBytes == null ? reasonOf(sample, ZEPHYR_HEAP_USED_METRIC) : null) ??
+        (freeBytes == null ? reasonOf(sample, ZEPHYR_HEAP_FREE_METRIC) : null) ??
+        NO_DATA;
       return [];
     }
     const accounted = validValue(sample, ZEPHYR_HEAP_ACCOUNTED_METRIC);
@@ -185,99 +186,133 @@ export function buildZephyrHeapSeries(samples: readonly MetricSample[]): ZephyrH
       return [];
     }
     reason = null;
-    return [
-      {
-        observedAt: sample.observed_at,
-        usedBytes,
-        freeBytes,
-        totalBytes,
-        totalBasis: useAccounted ? 'accounted' : 'used_plus_free',
-        percent: (usedBytes / totalBytes) * 100,
-        highWaterBytes: validValue(sample, ZEPHYR_HEAP_HIGH_WATER_METRIC),
-      },
-    ];
+    current = {
+      observedAt: sample.observed_at,
+      usedBytes,
+      freeBytes,
+      totalBytes,
+      totalBasis: useAccounted ? 'accounted' : 'used_plus_free',
+      percent: (usedBytes / totalBytes) * 100,
+      highWaterBytes: validValue(sample, ZEPHYR_HEAP_HIGH_WATER_METRIC),
+    };
+    return [current];
   });
-  const current = points.at(-1) ?? null;
   return { points, current, reason: current ? null : reason };
 }
 
-interface DiskTotal {
+interface LabeledTotal {
   bytes: number | null;
-  devices: string;
+  /** 합산한 라벨 값 묶음 (예: "xvda,xvdb"). 묶음이 바뀌면 차분하지 않는다 */
+  members: string;
   reason: string | null;
 }
 
-interface DiskObservation {
+interface LabeledObservation {
   observedAt: string;
   bootId: string | null;
-  read: DiskTotal;
-  write: DiskTotal;
+  first: LabeledTotal;
+  second: LabeledTotal;
+}
+
+/** 두 누적 카운터(읽기/쓰기, 수신/송신)의 현재 값·속도와 표본 간 속도 시계열 */
+export interface LabeledCounterSeries {
+  observedAt: string | null;
+  first: DiskIoCounter;
+  second: DiskIoCounter;
+  rates: { observedAt: string; first: number | null; second: number | null }[];
 }
 
 /**
- * Linux 디스크 I/O. 장치별(labels.device) 누적 바이트를 합산하고,
- * 속도는 같은 boot_id 이고 장치 묶음이 같은 직전 표본과의 차이로만 구한다 (카운터 감소면 null).
+ * 라벨별(labels[labelKey]) 누적 바이트를 합산하고, 속도는 같은 boot_id 이고 라벨 묶음이 같으며
+ * 카운터가 줄지 않은 직전 표본과의 차이로만 구한다. Linux 디스크(device)·네트워크(iface)가 함께 쓴다.
  */
-export function buildDiskIoSnapshot(samples: readonly MetricSample[]): DiskIoSnapshot {
+export function buildLabeledCounterSeries(
+  samples: readonly MetricSample[],
+  names: readonly [string, string],
+  labelKey: string,
+): LabeledCounterSeries {
   const observations = [...samples]
     .sort((a, b) => Date.parse(a.observed_at) - Date.parse(b.observed_at))
-    .filter((sample) =>
-      sample.values.some(
-        (value) => value.name === LINUX_DISK_READ_METRIC || value.name === LINUX_DISK_WRITE_METRIC,
-      ),
-    )
-    .map((sample): DiskObservation => ({
+    .filter((sample) => sample.values.some((value) => value.name === names[0] || value.name === names[1]))
+    .map((sample): LabeledObservation => ({
       observedAt: sample.observed_at,
       bootId: sample.boot_id ?? null,
-      read: diskTotal(sample, LINUX_DISK_READ_METRIC),
-      write: diskTotal(sample, LINUX_DISK_WRITE_METRIC),
+      first: labeledTotal(sample, names[0], labelKey),
+      second: labeledTotal(sample, names[1], labelKey),
     }));
 
   const current = observations.at(-1);
   if (!current) {
     const missing = { totalBytes: null, bytesPerSecond: null, reason: NO_DATA };
-    return { observedAt: null, read: missing, write: missing };
+    return { observedAt: null, first: missing, second: missing, rates: [] };
   }
-  const previous = observations.at(-2);
-  const seconds = previous ? (Date.parse(current.observedAt) - Date.parse(previous.observedAt)) / 1000 : NaN;
-  const sameBoot = !!previous && current.bootId != null && current.bootId === previous.bootId;
 
-  const counter = (pick: (observation: DiskObservation) => DiskTotal): DiskIoCounter => {
-    const now = pick(current);
-    const before = previous ? pick(previous) : null;
-    let bytesPerSecond: number | null = null;
-    if (
-      sameBoot &&
-      before &&
-      now.bytes != null &&
-      before.bytes != null &&
-      now.devices === before.devices &&
-      Number.isFinite(seconds) &&
-      seconds > 0 &&
-      now.bytes >= before.bytes
-    ) {
-      bytesPerSecond = (now.bytes - before.bytes) / seconds;
-    }
-    return { totalBytes: now.bytes, bytesPerSecond, reason: now.bytes == null ? now.reason : null };
-  };
+  const rates = observations.slice(1).map((now, index) => {
+    const before = observations[index]!;
+    return {
+      observedAt: now.observedAt,
+      first: labeledRate(before, now, (observation) => observation.first),
+      second: labeledRate(before, now, (observation) => observation.second),
+    };
+  });
+  const latest = rates.at(-1);
+  const counter = (total: LabeledTotal, rate: number | null | undefined): DiskIoCounter => ({
+    totalBytes: total.bytes,
+    bytesPerSecond: rate ?? null,
+    reason: total.bytes == null ? total.reason : null,
+  });
 
   return {
     observedAt: current.observedAt,
-    read: counter((observation) => observation.read),
-    write: counter((observation) => observation.write),
+    first: counter(current.first, latest?.first),
+    second: counter(current.second, latest?.second),
+    rates,
   };
 }
 
-function diskTotal(sample: MetricSample, name: string): DiskTotal {
+/** Linux 디스크 I/O. 장치별(labels.device) 합산 */
+export function buildDiskIoSnapshot(samples: readonly MetricSample[]): DiskIoSnapshot {
+  const series = buildLabeledCounterSeries(
+    samples,
+    [LINUX_DISK_READ_METRIC, LINUX_DISK_WRITE_METRIC],
+    'device',
+  );
+  return { observedAt: series.observedAt, read: series.first, write: series.second };
+}
+
+function labeledRate(
+  before: LabeledObservation,
+  now: LabeledObservation,
+  pick: (observation: LabeledObservation) => LabeledTotal,
+): number | null {
+  const a = pick(before);
+  const b = pick(now);
+  const seconds = (Date.parse(now.observedAt) - Date.parse(before.observedAt)) / 1000;
+  if (
+    now.bootId == null ||
+    now.bootId !== before.bootId ||
+    a.bytes == null ||
+    b.bytes == null ||
+    a.members !== b.members ||
+    !Number.isFinite(seconds) ||
+    seconds <= 0 ||
+    b.bytes < a.bytes
+  ) {
+    return null;
+  }
+  return (b.bytes - a.bytes) / seconds;
+}
+
+function labeledTotal(sample: MetricSample, name: string, labelKey: string): LabeledTotal {
   const metrics = sample.values.filter((value) => value.name === name);
-  if (metrics.length === 0) return { bytes: null, devices: '', reason: NO_DATA };
+  if (metrics.length === 0) return { bytes: null, members: '', reason: NO_DATA };
   const invalid = metrics.find(
     (metric) => metric.value == null || !Number.isFinite(metric.value) || metric.value < 0,
   );
-  if (invalid) return { bytes: null, devices: '', reason: invalid.unavailable_reason || NO_DATA };
-  const devices = metrics
-    .map((metric) => metric.labels?.device ?? '')
+  if (invalid) return { bytes: null, members: '', reason: invalid.unavailable_reason || NO_DATA };
+  const members = metrics
+    .map((metric) => metric.labels?.[labelKey] ?? '')
     .sort()
     .join(',');
-  return { bytes: metrics.reduce((sum, metric) => sum + metric.value!, 0), devices, reason: null };
+  return { bytes: metrics.reduce((sum, metric) => sum + metric.value!, 0), members, reason: null };
 }
