@@ -1,7 +1,9 @@
 """관측 어댑터·MQTT 연결·감시 루프 (S15P31E110-124). 실제 브로커·플랫폼은 없다."""
 
 import json
+import queue
 from types import SimpleNamespace
+from dataclasses import replace
 from uuid import UUID
 
 import pytest
@@ -390,10 +392,12 @@ def test_worker_queues_judgments_publishes_health_and_skips_failed_observation()
     worker = RecoveryWorker(
         SETTINGS, observer, Watcher(SETTINGS, HeartbeatTable(), AppHeartbeatTable(), clock=lambda: clock[0]),
         link=lambda: link_state(client), health_publisher=HealthPublisher(client), clock=lambda: clock[0],
+        judgments=queue.Queue(maxsize=1),
     )
     judged = worker.run_once()
     assert [j.reason for j in judged] == [FailureReason.DOMAIN_CRASHED]
     assert worker.judgments.get_nowait().vm_id == DEBIAN and worker.judgments.empty()
+    assert worker.judgments_total == 1 and worker.judgments_dropped == 0
     assert [p[0] for p in client.published] == [health_topic(DEBIAN)] and client.published[0][2]["state"] == "UNHEALTHY"
 
     observations.insert(0, None)  # 다음 관측은 플랫폼 잠금 충돌
@@ -402,6 +406,55 @@ def test_worker_queues_judgments_publishes_health_and_skips_failed_observation()
     assert len(client.published) == 1
     observations[0] = []  # VM 이 등록에서 사라짐(삭제·보관): retained 건강 스냅샷을 지운다
     assert worker.run_once() == [] and client.cleared == [health_topic(DEBIAN)]
+
+
+@pytest.mark.parametrize('diagnostic_queue', [False, True])
+def test_repeated_closed_episodes_release_diagnostic_copies_but_keep_required_records(tmp_path, diagnostic_queue):
+    from dom0_manager.recovery.engine import RecoveryEngine, KEEP_CLOSED
+    from dom0_manager.recovery.policy import RecoveryPolicy
+    from dom0_manager.recovery.state import RecoveryStore
+
+    class NoPhysicalPlatform:
+        def __getattr__(self, name):
+            raise AssertionError('policy none must not call platform: ' + name)
+
+    clock, observations = [1000.0], []
+    beats = HeartbeatTable()
+    watcher = Watcher(SETTINGS, beats, clock=lambda: clock[0])
+    store = RecoveryStore(tmp_path/'recoveries.json')
+    engine = RecoveryEngine(RecoveryPolicy(policy='none'), NoPhysicalPlatform(), watcher, store,
+                            clock=lambda: clock[0], inline=True)
+    mirror = queue.Queue(maxsize=1) if diagnostic_queue else None
+    worker = RecoveryWorker(SETTINGS, lambda: list(observations), watcher, link=LinkState.down,
+                            engine=engine, judgments=mirror, clock=lambda: clock[0])
+    try:
+        for _ in range(60):
+            observations[:] = [_obs(state=VmState.crashed)]
+            clock[0] += 1
+            assert len(worker.run_once()) == 1
+            observations[:] = [replace(_obs(), desired_state='stopped')]
+            clock[0] += 1
+            assert worker.run_once() == []
+        assert worker.judgments_total == 60
+        assert len(engine.records()) == len(store.load()) == KEEP_CLOSED
+        assert len(engine._skipped) == KEEP_CLOSED
+        if mirror is None:
+            assert worker.judgments is None and worker.judgments_dropped == 0
+        else:
+            assert mirror.qsize() == 1 and worker.judgments_dropped == 59
+        # 반복 뒤 신선한 정상 신호를 처리한다. 진단 포화가 실행 판정이나 정상 회복을 막지 않는다.
+        clock[0] += 1
+        beats.record(DEBIAN, 'fixture-boot', 1, clock[0])
+        observations[:] = [_obs()]
+        assert worker.run_once() == [] and watcher.health(DEBIAN).state == HealthState.HEALTHY
+    finally:
+        worker.shutdown()
+
+
+def test_diagnostic_mirror_requires_an_explicit_finite_capacity():
+    with pytest.raises(ValueError, match='finite capacity'):
+        RecoveryWorker(SETTINGS, lambda: [], Watcher(SETTINGS, HeartbeatTable()),
+                       link=LinkState.down, judgments=queue.Queue())
 
 
 def test_worker_retries_retained_clear_even_when_observation_fails():
@@ -430,6 +483,7 @@ def test_worker_collects_engine_results_even_when_observation_fails():
     clock = [1000.0]
     calls = []
     engine = SimpleNamespace(on_judgment=lambda j, now: calls.append(("judgment", j.vm_id)), tick=lambda now: calls.append(("tick", now)),
+                             observation_unavailable=lambda: calls.append(('unavailable',)),
                              collect=lambda now: calls.append(("collect", now)), shutdown=lambda: calls.append(("shutdown",)))
 
     def observer():
@@ -437,7 +491,7 @@ def test_worker_collects_engine_results_even_when_observation_fails():
 
     worker = RecoveryWorker(SETTINGS, observer, Watcher(SETTINGS, HeartbeatTable(), AppHeartbeatTable(), clock=lambda: clock[0]),
                             link=LinkState.up, engine=engine, clock=lambda: clock[0])
-    assert worker.run_once() == [] and calls == [("collect", 1000.0)]  # 판정은 못 해도 끝난 복구 결과는 회수한다
+    assert worker.run_once() == [] and calls == [('unavailable',), ("collect", 1000.0)]  # 안정 근거를 끊고 원 결과는 회수한다.
     worker.shutdown()
     assert calls[-1] == ("shutdown",)
 
@@ -451,6 +505,18 @@ def test_worker_shutdown_marks_health_unavailable():
     assert client.published[-1][2]["state"] == "STARTING"
     worker.shutdown()
     assert client.published[-1][2]["state"] == "OBSERVATION_UNAVAILABLE" and client.published[-1][4] is True
+
+
+@pytest.mark.parametrize('scope',['warning','function',None])
+def test_legacy_resource_or_function_report_never_authorizes_vm_recovery(monkeypatch,scope):
+    watcher=Watcher(SETTINGS,HeartbeatTable(),AppHeartbeatTable(),clock=lambda:1000.)
+    def forbidden(*args):raise AssertionError('advisory promoted to VM failure')
+    monkeypatch.setattr(watcher,'report_untrusted',forbidden)
+    event={'vm_id':str(DEBIAN),'execution_id':str(UUID(int=77)),'scope':scope}
+    rejoin=SimpleNamespace(trust_events=lambda:[event])
+    worker=RecoveryWorker(SETTINGS,lambda:[_obs()],watcher,link=LinkState.up,
+                          clock=lambda:1000.,rejoin=rejoin)
+    assert worker.run_once()==[] and worker.judgments_total==0
 
 
 def test_worker_passes_subscription_state_to_watcher(tmp_path):

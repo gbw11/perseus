@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from .config import SimSettings
 
 TWO_PI = 2 * math.pi
-# 계약 v1.4 §11 sim.command obstacle.add: 폭은 종류로 정한다 (관리 콘솔 mock KIND_W 와 같음). 높이는 카메라 그림용
+# 계약 §12 sim.command obstacle.add: 폭은 종류로 정한다 (관리 콘솔 mock KIND_W 와 같음). 높이는 카메라 그림용
 KIND_W = {"cone": 0.18, "box": 0.30, "tires": 0.26}
 KIND_H = {"cone": 0.18, "box": 0.20, "tires": 0.15}
 

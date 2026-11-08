@@ -28,6 +28,27 @@ MAX_BYTES = 262144
 log = logging.getLogger(__name__)
 
 
+def _diagnostic_error(error):
+    """Bounded categories only; never export exception messages or paths."""
+    kind = ('platform_unavailable' if isinstance(error, PlatformUnavailable) else
+            'os_error' if isinstance(error, OSError) else
+            'invalid_data' if isinstance(error, (ValueError, TypeError)) else 'other')
+    try:
+        code = getattr(error, 'platform_code', None)
+        if code not in ('OPERATION_IN_PROGRESS', 'DEADLINE_EXCEEDED', 'TARGET_CHANGED',
+                        'OBSERVATION_UNAVAILABLE', 'HOST_QUIESCING', 'STORAGE_UNAVAILABLE'):
+            code = None
+        number = getattr(error, 'errno', None) if isinstance(error, OSError) else None
+        if type(number) is not int or not 0 < number < 4096:
+            number = None
+        reason = getattr(error, '_shared_observation_reason', None)
+        if reason not in ('frame_metadata_invalid', 'frame_expired_or_future', 'execution_identity_missing'):
+            reason = None
+        return kind, code, number, reason
+    except Exception:
+        return kind, None, None, None
+
+
 def host_boot_id():
     return str(UUID(Path('/proc/sys/kernel/random/boot_id').read_text().strip()))
 
@@ -43,16 +64,21 @@ def verified_platform_batch(driver, boot_id, started, clock=time.monotonic):
     for view in views:
         identity = UUID(view['vm_id'])
         observed = view.get('observed_monotonic_ms')
-        if (not identity.int or view.get('host_boot_id') != boot_id or type(observed) is not int
-                or not 0 <= clock() - observed / 1000 < MAX_AGE):
-            raise PlatformUnavailable('verified list observation is missing, expired or foreign')
+        metadata_valid = bool(identity.int) and view.get('host_boot_id') == boot_id and type(observed) is int
+        if not metadata_valid or not 0 <= clock() - observed / 1000 < MAX_AGE:
+            error = PlatformUnavailable('verified list observation is missing, expired or foreign')
+            error._shared_observation_reason = ('frame_metadata_invalid' if not metadata_valid else
+                                                'frame_expired_or_future')
+            raise error
         times.append(observed / 1000)
         domain = view_to_domain(view)
         if domain is not None:
             # Include the actual Xen incarnation even for an unmanaged execution.
             execution = view.get('execution_id') or view.get('xen_unique_id')
             if not isinstance(execution, str) or not 1 <= len(execution) <= 512:
-                raise PlatformUnavailable('verified list lacks an execution identity')
+                error = PlatformUnavailable('verified list lacks an execution identity')
+                error._shared_observation_reason = 'execution_identity_missing'
+                raise error
             rows.append(replace(domain, observation_id=execution))
     return rows, min(times) if times else started
 
@@ -115,7 +141,7 @@ class ObservationFile:
 
 
 class ObservationHub:
-    def __init__(self, driver, path, *, clock=time.monotonic, boot_id=None):
+    def __init__(self, driver, path, *, clock=time.monotonic, boot_id=None, diagnostics=False):
         self.driver = driver
         self.path = Path(path)
         self.clock = clock
@@ -125,15 +151,24 @@ class ObservationHub:
         self.publish_lock = threading.Lock()
         self.thread = None
         self.query_unavailable = False
+        self.diagnostics = diagnostics
+        self.previous_round = None
         self.reader = ObservationFile(path, clock=clock, boot_id=self.boot_id, owner_uid=os.geteuid())
 
-    def _publish(self, rows, observed):
+    def _publish(self, rows, observed, *, diagnostic=None):
         value = {'schema_version': 1, 'host_boot_id': self.boot_id, 'producer_epoch': self.epoch,
                  'status': 'ok' if rows is not None else 'unavailable', 'observed_mono': observed,
                  'domains': [asdict(row) for row in rows] if rows is not None else []}
         data = json.dumps(value, default=str).encode()
         if len(data) > MAX_BYTES:
             raise ValueError('observation exceeds size limit')
+        if diagnostic is not None:
+            try:
+                extra = json.dumps({**value, 'diagnostics': diagnostic}, default=str).encode()
+                if len(extra) <= MAX_BYTES:
+                    data = extra
+            except (TypeError, ValueError, OverflowError, RecursionError):
+                pass  # Optional timing must not suppress the actual observation.
         parent = self.path.parent
         parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         info = parent.lstat()
@@ -152,24 +187,66 @@ class ObservationHub:
 
     def refresh(self):
         started = self.clock()
+        outcome, error_kind, error_code, error_number, error_reason = 'ok', None, None, None, None
         try:
             observed = started
             if self.driver.name == 'platform':
                 rows, observed = verified_platform_batch(self.driver, self.boot_id, started, self.clock)
             else:
                 rows = self.driver.list_domains()
-            if not 0 <= self.clock() - observed < MAX_AGE:
+            finished = self.clock()
+            if not 0 <= finished - observed < MAX_AGE:
                 rows = None
+                outcome = 'expired'
             self.query_unavailable = rows is None
         except Exception as error:
             rows = None
             observed = started
+            outcome = 'query_error'
+            if self.diagnostics:
+                error_kind, error_code, error_number, error_reason = _diagnostic_error(error)
+            try:
+                finished = self.clock() if self.diagnostics else None
+            except Exception:
+                finished = None
             if not self.query_unavailable:
                 log.warning('shared VM query unavailable (%s)', type(error).__name__)
             self.query_unavailable = True
         with self.publish_lock:
             if not self.stop_event.is_set():
-                self._publish(rows, observed)
+                if not self.diagnostics:
+                    self._publish(rows, observed)
+                    return
+                try:
+                    publishing = self.clock()
+                except Exception:
+                    self._publish(rows, observed)
+                    return
+                current = {'query_started_mono': started, 'query_finished_mono': finished,
+                           'publish_started_mono': publishing, 'outcome': outcome,
+                           'error_kind': error_kind, 'platform_code': error_code,
+                           'errno': error_number, 'reason': error_reason}
+                published = False
+                publication_error_kind, publication_errno = None, None
+                try:
+                    # Publication completion is only known after rename. Carry
+                    # that duration in the next frame instead of writing twice.
+                    self._publish(rows, observed, diagnostic={
+                        'schema_version': 1, 'current': current,
+                        'previous_round': self.previous_round})
+                    published = True
+                except Exception as error:
+                    publication_error_kind, _, publication_errno, _ = _diagnostic_error(error)
+                    raise
+                finally:
+                    # Exactly one fixed-size round, no history or extra writer.
+                    try:
+                        self.previous_round = {**current, 'publish_finished_mono': self.clock(),
+                                               'published': published,
+                                               'publication_error_kind': publication_error_kind,
+                                               'publication_errno': publication_errno}
+                    except Exception:
+                        self.previous_round = None
 
     def _run(self):
         while not self.stop_event.is_set():
@@ -205,7 +282,8 @@ def install_observations(app):
         return
     if not Path(path).is_absolute():
         raise ValueError('XENOVA_OBSERVATIONS_PATH must be absolute')
-    hub = ObservationHub(app.state.driver, path)
+    hub = ObservationHub(app.state.driver, path,
+                         diagnostics=os.environ.get('XENOVA_OBSERVATION_DIAGNOSTICS') == '1')
     app.state.service.observations = hub
     app.state.observations = hub
     previous = app.router.lifespan_context

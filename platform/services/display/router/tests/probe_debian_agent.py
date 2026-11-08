@@ -42,13 +42,13 @@ import paho.mqtt.client as mqtt
 import uvicorn
 from dom0_manager.config import Settings
 from dom0_manager.drivers import build_driver
-from xenova_display.config import Binding,FeedSettings,DISPLAY_DRIVE_TOPIC
+from xenova_display.config import Binding,FeedSettings
 from xenova_display.main import create_app
 bindings=tuple(Binding.model_validate(b) for b in config['bindings'])
 topic=config.get('observation_topic','xenova/v1/vms/'+config['vm_id']+'/heartbeat')
 topics=[*[f'xenova/v1/apps/{b.app_id}/events' for b in bindings],
         *[t for b in bindings if b.agent_supported for t in
-          (f'xenova/v1/vms/{b.vm_id}/heartbeat',f'xenova/v1/vms/{b.vm_id}/inventory')],DISPLAY_DRIVE_TOPIC]
+          (f'xenova/v1/vms/{b.vm_id}/heartbeat',f'xenova/v1/vms/{b.vm_id}/inventory')]]
 passwords=root/'passwords'
 passwords.write_text('\n'.join(k+':'+v for k,v in config['hashes'].items())+'\n')
 passwords.chmod(0o600)

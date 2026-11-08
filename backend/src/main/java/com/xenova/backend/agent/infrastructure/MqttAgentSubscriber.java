@@ -2,6 +2,7 @@ package com.xenova.backend.agent.infrastructure;
 
 import com.xenova.backend.agent.application.AgentMessageHandler;
 import com.xenova.backend.agent.application.AgentCommandPublisher;
+import com.xenova.backend.agent.application.CommandResultMessageHandler;
 import com.xenova.backend.agent.application.RetainedInventoryClearer;
 import com.xenova.backend.agent.application.TelemetryHeartbeatMessageHandler;
 import com.xenova.backend.agent.application.VmTelemetryMessageHandler;
@@ -44,9 +45,10 @@ public class MqttAgentSubscriber
             AgentMessageHandler.TOPIC_PREFIX + "+/metrics",
             RecoveryEventMessageHandler.TOPIC,
             VmTelemetryMessageHandler.METRICS_TOPIC,
-            TelemetryHeartbeatMessageHandler.TOPIC
+            TelemetryHeartbeatMessageHandler.TOPIC,
+            CommandResultMessageHandler.TOPIC
     };
-    static final int[] QOS = {1, 1, 0, 1, 0, 0};
+    static final int[] QOS = {1, 1, 0, 1, 0, 0, 1};
     static final long ACTION_TIMEOUT_MS = 10_000;
 
     private static final Logger log = LoggerFactory.getLogger(MqttAgentSubscriber.class);
@@ -55,6 +57,7 @@ public class MqttAgentSubscriber
     private final AgentMessageHandler handler;
     private final VmTelemetryMessageHandler telemetryHandler;
     private final TelemetryHeartbeatMessageHandler telemetryHeartbeatHandler;
+    private final CommandResultMessageHandler commandResultHandler;
     private final RecoveryEventMessageHandler recoveryEventHandler;
     private final RecoveryEventBackfillService recoveryEventBackfillService;
     private final Clock clock;
@@ -75,6 +78,7 @@ public class MqttAgentSubscriber
             AgentMessageHandler handler,
             VmTelemetryMessageHandler telemetryHandler,
             TelemetryHeartbeatMessageHandler telemetryHeartbeatHandler,
+            CommandResultMessageHandler commandResultHandler,
             RecoveryEventMessageHandler recoveryEventHandler,
             RecoveryEventBackfillService recoveryEventBackfillService,
             Clock clock) {
@@ -82,6 +86,7 @@ public class MqttAgentSubscriber
         this.handler = handler;
         this.telemetryHandler = telemetryHandler;
         this.telemetryHeartbeatHandler = telemetryHeartbeatHandler;
+        this.commandResultHandler = commandResultHandler;
         this.recoveryEventHandler = recoveryEventHandler;
         this.recoveryEventBackfillService = recoveryEventBackfillService;
         this.clock = clock;
@@ -164,6 +169,10 @@ public class MqttAgentSubscriber
         }
         if (TelemetryHeartbeatMessageHandler.matches(topic)) {
             telemetryHeartbeatHandler.handle(topic, message.getPayload(), message.isRetained(), receivedAt);
+            return;
+        }
+        if (CommandResultMessageHandler.matches(topic)) {
+            commandResultHandler.handle(topic, message.getPayload(), message.isRetained(), receivedAt);
             return;
         }
         if (message.getPayload().length == 0 && topic.endsWith("/inventory")) {

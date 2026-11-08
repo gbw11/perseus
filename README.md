@@ -80,6 +80,7 @@ docker compose --env-file deploy/jenkins/.env -f compose.jenkins.yaml exec jenki
 - [VM 관리 API 계약](docs/contracts/vm-api-contract-v1.md)
 - [dom0 Manager OpenAPI](docs/contracts/dom0-manager-openapi.yaml)
 - [MQTT 계약](docs/contracts/mqtt-contract-v1.md)
+- [RC카 조립·배선 따라하기](docs/vehicle/assembly-guide.md)
 
 ## 프로젝트 구조
 

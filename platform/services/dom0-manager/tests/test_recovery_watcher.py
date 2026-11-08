@@ -96,6 +96,21 @@ def world():
     return World()
 
 
+def test_vm_untrusted_is_latched_to_execution_until_restart():
+    world=World();execution='11111111-1111-4111-8111-111111111111'
+    current=replace(obs(ZEPHYR,kind='zephyr',expected=True),execution_binding_available=True,execution_id=execution)
+    world.tick(current)
+    judgment=world.watcher.report_untrusted(current,execution,world.clock.now)
+    assert judgment.reason is FailureReason.VM_UNTRUSTED
+    assert world.health(ZEPHYR).state is HealthState.UNHEALTHY
+    # Fresh app traffic cannot make the distrusted execution healthy again.
+    world.app_beat();world.clock.now+=1
+    assert world.tick(current)==[] and world.health(ZEPHYR).reason is FailureReason.VM_UNTRUSTED
+    restarted=replace(current,domid=2,execution_id='22222222-2222-4222-8222-222222222222')
+    world.tick(restarted)
+    assert world.health(ZEPHYR).reason is not FailureReason.VM_UNTRUSTED
+
+
 # ---- Linux: agent.heartbeat ----
 
 

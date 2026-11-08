@@ -13,6 +13,9 @@ dependencies = [
     "paho-mqtt>=1.6,<3",
 ]
 
+[project.scripts]
+xenova-drive = "xenova_gateway.operator_client:main"
+
 [project.optional-dependencies]
 world = [
     # New binary receive bounds depend on the tested Paho parser boundary.

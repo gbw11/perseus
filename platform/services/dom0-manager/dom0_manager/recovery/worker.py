@@ -1,4 +1,4 @@
-"""감시 루프. 주기마다 관측 → 판정 → 복구 큐·건강 스냅샷. 복구 실행(S15P31E110-125)은 큐의 소비자가 한다."""
+"""관측·판정을 Engine에 전달한다. 선택적인 유한 큐는 진단 사본이며 실행 원본이 아니다."""
 
 from __future__ import annotations
 
@@ -40,7 +40,11 @@ class RecoveryWorker:
         self._observer = observer
         self._watcher = watcher
         self._link = link
-        self.judgments: queue.Queue[Judgment] = judgments or queue.Queue()
+        if judgments is not None and judgments.maxsize <= 0:
+            raise ValueError("diagnostic judgments queue must have a finite capacity")
+        self.judgments = judgments
+        self.judgments_total = 0
+        self.judgments_dropped = 0
         self._health = health_publisher
         self._engine = engine
         self._clock = clock
@@ -59,6 +63,7 @@ class RecoveryWorker:
             self.skipped += 1
             log.warning("observation skipped: %s %s", exc.code, exc.message)
             if self._engine is not None:
+                self._engine.observation_unavailable()
                 self._engine.collect(self._clock())  # 판정은 못 해도 끝난 복구 시도의 결과는 회수한다
                 if self._rejoin is not None:self._rejoin.completed(self._engine.completed_executions())
             self._report(None)
@@ -66,6 +71,14 @@ class RecoveryWorker:
         self.ticks += 1
         now = self._clock()
         judgments = self._watcher.tick(observations, now, link=self._link())
+        if self._rejoin is not None:
+            current={str(obs.vm_id):obs for obs in observations}
+            for event in self._rejoin.trust_events():
+                if event.get('scope')!='vm':continue
+                obs=current.get(event['vm_id'])
+                judgment=None if obs is None else self._watcher.report_untrusted(
+                    obs,event['execution_id'],now)
+                if judgment is not None:judgments.append(judgment)
         for judgment in judgments:
             log.warning(
                 "vm %s judged %s (desired=%s domid=%s xen=%s signal_age=%s) recovery_id=%s",
@@ -73,9 +86,14 @@ class RecoveryWorker:
                 judgment.xen_state.value if judgment.xen_state else None,
                 None if judgment.heartbeat_age_s is None else round(judgment.heartbeat_age_s, 1), judgment.recovery_id,
             )
-            self.judgments.put(judgment)
+            self.judgments_total += 1
             if self._engine is not None:
                 self._engine.on_judgment(judgment, now)
+            if self.judgments is not None:
+                try:
+                    self.judgments.put_nowait(judgment)
+                except queue.Full:
+                    self.judgments_dropped += 1
         if self._health is not None:
             for vm_id in self._watcher.removed_vm_ids():
                 self._health.clear(vm_id)
@@ -92,7 +110,7 @@ class RecoveryWorker:
         if self._status is None:
             return
         try:
-            self._status.report(observations)
+            self._status.submit(observations)
         except Exception:  # noqa: BLE001
             log.exception("worker status report failed; readers will see the status as stale")
 
@@ -109,6 +127,8 @@ class RecoveryWorker:
                 log.warning("health snapshots: only %d of %d marked OBSERVATION_UNAVAILABLE before stop; receivers fall back to lease expiry", count, len(healths))
             else:
                 log.info("health snapshots marked OBSERVATION_UNAVAILABLE for %d VM(s)", count)
+        if self._status is not None:
+            self._status.close()
 
     def run(self, stop: threading.Event) -> None:
         """단조 시계 기준 주기. 지연이 쌓이면 몰아 돌지 않고 다음 눈금으로 넘어간다."""

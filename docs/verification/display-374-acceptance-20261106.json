@@ -1,0 +1,1253 @@
+{
+  "issue": "S15P31E110-374",
+  "source_commit": "ae6ac6098d7bd0902242002ec62fbd5079b2dc3c",
+  "verdict": "deployment_done_freshness_acceptance_failed",
+  "normal_source_deployed": true,
+  "candidate_retained": true,
+  "api_only_restarted": true,
+  "baseline_shared_age_ms": 4206,
+  "candidate": [
+    {
+      "name": "xenova_execution.py",
+      "target": "/usr/lib/xenova/xenova_execution.py",
+      "expected_before_sha256": "2abe0fc5f7638cf652e6bd3afb1df56a2352809aeb53419193d88961931ccf04",
+      "candidate_sha256": "df36cc87e919dd9985c25a5441cb125380f87759035148b87ba165f5a3224ea7",
+      "bytes": 81281
+    },
+    {
+      "name": "xenova_management.py",
+      "target": "/usr/lib/xenova/xenova_management.py",
+      "expected_before_sha256": "eaedf7c76ed276e5487b89dbd5b353baac7463c166915bc20ea890938de07762",
+      "candidate_sha256": "6ae93b5aa407a64eb798cd5cd38fe78817510ee89edf3f6459422ad09edb85a4",
+      "bytes": 139980
+    }
+  ],
+  "initial_api_ready": {
+    "api": {
+      "ActiveState": "active",
+      "SubState": "running",
+      "MainPID": "139068"
+    },
+    "responses": [
+      {
+        "path": "/healthz",
+        "status": 200
+      },
+      {
+        "path": "/api/v1/vms",
+        "status": 503
+      }
+    ],
+    "shared": {
+      "epoch": "4b796bf0-a58d-4530-bf48-29cc0754db7d",
+      "status": "unavailable",
+      "age_ms": 3839
+    }
+  },
+  "bounded_diagnostic": {
+    "diagnostics": [],
+    "query": {
+      "ok": true,
+      "elapsed_s": 2.3858456410016515,
+      "error": null,
+      "views": 5
+    },
+    "trace_summary": {
+      "platform.registry": {
+        "calls": 2,
+        "errors": 0,
+        "inclusive_seconds": 0.2899197799997637,
+        "exclusive_seconds": 0.2899197799997637
+      },
+      "manager.registry-state": {
+        "calls": 18,
+        "errors": 0,
+        "inclusive_seconds": 0.005451449000247521,
+        "exclusive_seconds": 0.005451449000247521
+      },
+      "execution.publish_observation": {
+        "calls": 10,
+        "errors": 0,
+        "inclusive_seconds": 0.4747713059950911,
+        "exclusive_seconds": 0.4747713059950911
+      },
+      "external.command": {
+        "calls": 4,
+        "errors": 0,
+        "inclusive_seconds": 0.47503984100330854,
+        "exclusive_seconds": 0.47503984100330854
+      },
+      "storage.file_write": {
+        "calls": 5,
+        "errors": 0,
+        "inclusive_seconds": 0.001285506001295289,
+        "exclusive_seconds": 0.001285506001295289
+      },
+      "storage.file_fsync": {
+        "calls": 5,
+        "errors": 0,
+        "inclusive_seconds": 0.00041477399645373225,
+        "exclusive_seconds": 0.00041477399645373225
+      },
+      "storage.replace": {
+        "calls": 5,
+        "errors": 0,
+        "inclusive_seconds": 0.030803393998212414,
+        "exclusive_seconds": 0.030803393998212414
+      },
+      "storage.directory_fsync": {
+        "calls": 5,
+        "errors": 0,
+        "inclusive_seconds": 0.0004455130001588259,
+        "exclusive_seconds": 0.0004455130001588259
+      },
+      "storage.atomic_write": {
+        "calls": 5,
+        "errors": 0,
+        "inclusive_seconds": 0.10025094999946305,
+        "exclusive_seconds": 0.06730176300334278
+      },
+      "execution.observe_many": {
+        "calls": 1,
+        "errors": 0,
+        "inclusive_seconds": 1.8984252119989833,
+        "exclusive_seconds": 0.8125968389977061
+      },
+      "manager.view": {
+        "calls": 5,
+        "errors": 0,
+        "inclusive_seconds": 0.019459057002677582,
+        "exclusive_seconds": 0.019459057002677582
+      },
+      "read.round": {
+        "calls": 1,
+        "errors": 0,
+        "inclusive_seconds": 2.291853856000671,
+        "exclusive_seconds": 0.11436463400241337
+      },
+      "manager.call": {
+        "calls": 1,
+        "errors": 0,
+        "inclusive_seconds": 2.3174396159993194,
+        "exclusive_seconds": 0.025585759998648427
+      }
+    },
+    "load": "12.16 10.48 10.61 17/198 139350"
+  },
+  "concurrent_two_browsers": {
+    "duration_s": 136.14100000000326,
+    "sample_span_s": 135.875,
+    "samples": 167,
+    "http": {
+      "200": 167
+    },
+    "errors": {},
+    "extra_board_api_requests": 0,
+    "xen_status_per_response": {
+      "stale": 63,
+      "fresh": 104
+    },
+    "current_app_count": {
+      "0": 64,
+      "4": 98,
+      "3": 1,
+      "1": 4
+    },
+    "expired_vm_with_current_app_samples": [],
+    "source_transitions": [
+      {
+        "sample": 0,
+        "elapsed_s": 0.0,
+        "status": "stale"
+      },
+      {
+        "sample": 1,
+        "elapsed_s": 1.094,
+        "status": "fresh"
+      },
+      {
+        "sample": 5,
+        "elapsed_s": 4.094,
+        "status": "stale"
+      },
+      {
+        "sample": 6,
+        "elapsed_s": 5.312,
+        "status": "fresh"
+      },
+      {
+        "sample": 8,
+        "elapsed_s": 6.719,
+        "status": "stale"
+      },
+      {
+        "sample": 10,
+        "elapsed_s": 8.234,
+        "status": "fresh"
+      },
+      {
+        "sample": 11,
+        "elapsed_s": 9.109,
+        "status": "stale"
+      },
+      {
+        "sample": 12,
+        "elapsed_s": 9.969,
+        "status": "fresh"
+      },
+      {
+        "sample": 14,
+        "elapsed_s": 11.578,
+        "status": "stale"
+      },
+      {
+        "sample": 15,
+        "elapsed_s": 12.328,
+        "status": "fresh"
+      },
+      {
+        "sample": 19,
+        "elapsed_s": 15.984,
+        "status": "stale"
+      },
+      {
+        "sample": 21,
+        "elapsed_s": 18.0,
+        "status": "fresh"
+      },
+      {
+        "sample": 22,
+        "elapsed_s": 18.391,
+        "status": "stale"
+      },
+      {
+        "sample": 23,
+        "elapsed_s": 19.594,
+        "status": "fresh"
+      },
+      {
+        "sample": 25,
+        "elapsed_s": 20.953,
+        "status": "stale"
+      },
+      {
+        "sample": 27,
+        "elapsed_s": 22.672,
+        "status": "fresh"
+      },
+      {
+        "sample": 31,
+        "elapsed_s": 26.0,
+        "status": "stale"
+      },
+      {
+        "sample": 32,
+        "elapsed_s": 27.062,
+        "status": "fresh"
+      },
+      {
+        "sample": 34,
+        "elapsed_s": 28.562,
+        "status": "stale"
+      },
+      {
+        "sample": 35,
+        "elapsed_s": 29.5,
+        "status": "fresh"
+      },
+      {
+        "sample": 36,
+        "elapsed_s": 30.125,
+        "status": "stale"
+      },
+      {
+        "sample": 38,
+        "elapsed_s": 31.531,
+        "status": "fresh"
+      },
+      {
+        "sample": 40,
+        "elapsed_s": 33.031,
+        "status": "stale"
+      },
+      {
+        "sample": 41,
+        "elapsed_s": 34.0,
+        "status": "fresh"
+      },
+      {
+        "sample": 43,
+        "elapsed_s": 35.516,
+        "status": "stale"
+      },
+      {
+        "sample": 44,
+        "elapsed_s": 36.547,
+        "status": "fresh"
+      },
+      {
+        "sample": 46,
+        "elapsed_s": 37.969,
+        "status": "stale"
+      },
+      {
+        "sample": 48,
+        "elapsed_s": 39.359,
+        "status": "fresh"
+      },
+      {
+        "sample": 50,
+        "elapsed_s": 41.187,
+        "status": "stale"
+      },
+      {
+        "sample": 51,
+        "elapsed_s": 42.078,
+        "status": "fresh"
+      },
+      {
+        "sample": 55,
+        "elapsed_s": 45.234,
+        "status": "stale"
+      },
+      {
+        "sample": 56,
+        "elapsed_s": 46.437,
+        "status": "fresh"
+      },
+      {
+        "sample": 58,
+        "elapsed_s": 47.984,
+        "status": "stale"
+      },
+      {
+        "sample": 59,
+        "elapsed_s": 48.484,
+        "status": "fresh"
+      },
+      {
+        "sample": 61,
+        "elapsed_s": 50.109,
+        "status": "stale"
+      },
+      {
+        "sample": 62,
+        "elapsed_s": 50.781,
+        "status": "fresh"
+      },
+      {
+        "sample": 64,
+        "elapsed_s": 52.312,
+        "status": "stale"
+      },
+      {
+        "sample": 65,
+        "elapsed_s": 53.031,
+        "status": "fresh"
+      },
+      {
+        "sample": 67,
+        "elapsed_s": 54.547,
+        "status": "stale"
+      },
+      {
+        "sample": 68,
+        "elapsed_s": 55.594,
+        "status": "fresh"
+      },
+      {
+        "sample": 70,
+        "elapsed_s": 57.125,
+        "status": "stale"
+      },
+      {
+        "sample": 71,
+        "elapsed_s": 57.906,
+        "status": "fresh"
+      },
+      {
+        "sample": 73,
+        "elapsed_s": 59.484,
+        "status": "stale"
+      },
+      {
+        "sample": 74,
+        "elapsed_s": 60.234,
+        "status": "fresh"
+      },
+      {
+        "sample": 76,
+        "elapsed_s": 61.719,
+        "status": "stale"
+      },
+      {
+        "sample": 77,
+        "elapsed_s": 62.766,
+        "status": "fresh"
+      },
+      {
+        "sample": 79,
+        "elapsed_s": 64.203,
+        "status": "stale"
+      },
+      {
+        "sample": 80,
+        "elapsed_s": 65.266,
+        "status": "fresh"
+      },
+      {
+        "sample": 82,
+        "elapsed_s": 66.859,
+        "status": "stale"
+      },
+      {
+        "sample": 83,
+        "elapsed_s": 67.828,
+        "status": "fresh"
+      },
+      {
+        "sample": 85,
+        "elapsed_s": 69.219,
+        "status": "stale"
+      },
+      {
+        "sample": 87,
+        "elapsed_s": 70.625,
+        "status": "fresh"
+      },
+      {
+        "sample": 89,
+        "elapsed_s": 72.25,
+        "status": "stale"
+      },
+      {
+        "sample": 90,
+        "elapsed_s": 73.172,
+        "status": "fresh"
+      },
+      {
+        "sample": 92,
+        "elapsed_s": 74.797,
+        "status": "stale"
+      },
+      {
+        "sample": 94,
+        "elapsed_s": 76.547,
+        "status": "fresh"
+      },
+      {
+        "sample": 95,
+        "elapsed_s": 77.328,
+        "status": "stale"
+      },
+      {
+        "sample": 97,
+        "elapsed_s": 78.875,
+        "status": "fresh"
+      },
+      {
+        "sample": 104,
+        "elapsed_s": 84.047,
+        "status": "stale"
+      },
+      {
+        "sample": 105,
+        "elapsed_s": 85.187,
+        "status": "fresh"
+      },
+      {
+        "sample": 107,
+        "elapsed_s": 86.906,
+        "status": "stale"
+      },
+      {
+        "sample": 108,
+        "elapsed_s": 87.828,
+        "status": "fresh"
+      },
+      {
+        "sample": 109,
+        "elapsed_s": 88.453,
+        "status": "stale"
+      },
+      {
+        "sample": 110,
+        "elapsed_s": 89.437,
+        "status": "fresh"
+      },
+      {
+        "sample": 112,
+        "elapsed_s": 91.047,
+        "status": "stale"
+      },
+      {
+        "sample": 113,
+        "elapsed_s": 92.0,
+        "status": "fresh"
+      },
+      {
+        "sample": 115,
+        "elapsed_s": 93.328,
+        "status": "stale"
+      },
+      {
+        "sample": 116,
+        "elapsed_s": 94.125,
+        "status": "fresh"
+      },
+      {
+        "sample": 118,
+        "elapsed_s": 96.406,
+        "status": "stale"
+      },
+      {
+        "sample": 121,
+        "elapsed_s": 98.766,
+        "status": "fresh"
+      },
+      {
+        "sample": 123,
+        "elapsed_s": 100.312,
+        "status": "stale"
+      },
+      {
+        "sample": 124,
+        "elapsed_s": 101.312,
+        "status": "fresh"
+      },
+      {
+        "sample": 126,
+        "elapsed_s": 102.75,
+        "status": "stale"
+      },
+      {
+        "sample": 127,
+        "elapsed_s": 103.937,
+        "status": "fresh"
+      },
+      {
+        "sample": 129,
+        "elapsed_s": 105.656,
+        "status": "stale"
+      },
+      {
+        "sample": 130,
+        "elapsed_s": 106.594,
+        "status": "fresh"
+      },
+      {
+        "sample": 131,
+        "elapsed_s": 107.234,
+        "status": "stale"
+      },
+      {
+        "sample": 133,
+        "elapsed_s": 108.641,
+        "status": "fresh"
+      },
+      {
+        "sample": 134,
+        "elapsed_s": 109.953,
+        "status": "stale"
+      },
+      {
+        "sample": 136,
+        "elapsed_s": 111.375,
+        "status": "fresh"
+      },
+      {
+        "sample": 140,
+        "elapsed_s": 114.094,
+        "status": "stale"
+      },
+      {
+        "sample": 141,
+        "elapsed_s": 114.953,
+        "status": "fresh"
+      },
+      {
+        "sample": 143,
+        "elapsed_s": 117.094,
+        "status": "stale"
+      },
+      {
+        "sample": 144,
+        "elapsed_s": 118.078,
+        "status": "fresh"
+      },
+      {
+        "sample": 146,
+        "elapsed_s": 119.922,
+        "status": "stale"
+      },
+      {
+        "sample": 147,
+        "elapsed_s": 120.437,
+        "status": "fresh"
+      },
+      {
+        "sample": 148,
+        "elapsed_s": 121.359,
+        "status": "stale"
+      },
+      {
+        "sample": 150,
+        "elapsed_s": 122.891,
+        "status": "fresh"
+      },
+      {
+        "sample": 152,
+        "elapsed_s": 124.234,
+        "status": "stale"
+      },
+      {
+        "sample": 153,
+        "elapsed_s": 124.969,
+        "status": "fresh"
+      },
+      {
+        "sample": 155,
+        "elapsed_s": 126.781,
+        "status": "stale"
+      },
+      {
+        "sample": 156,
+        "elapsed_s": 127.875,
+        "status": "fresh"
+      },
+      {
+        "sample": 158,
+        "elapsed_s": 129.391,
+        "status": "stale"
+      },
+      {
+        "sample": 159,
+        "elapsed_s": 130.344,
+        "status": "fresh"
+      },
+      {
+        "sample": 160,
+        "elapsed_s": 131.047,
+        "status": "stale"
+      },
+      {
+        "sample": 161,
+        "elapsed_s": 132.047,
+        "status": "fresh"
+      },
+      {
+        "sample": 163,
+        "elapsed_s": 133.437,
+        "status": "stale"
+      },
+      {
+        "sample": 165,
+        "elapsed_s": 135.094,
+        "status": "fresh"
+      }
+    ],
+    "mqtt_connected_samples": 167,
+    "feed_epochs": [
+      "d07696d7-0941-4cc4-96f9-ca7973f5ac10"
+    ],
+    "drive_modes": {
+      "SAFE_STOP": 167
+    },
+    "drive_source": {
+      "fresh": 167
+    },
+    "roundtrip_ms": {
+      "median": 578,
+      "p95_nearest_rank": 1000,
+      "max": 1313
+    },
+    "continuous_freshness_pass": false
+  },
+  "quiet_new_commands_two_browsers": {
+    "duration_s": 136.81299999999464,
+    "sample_span_s": 135.57800000000861,
+    "samples": 169,
+    "http": {
+      "200": 169
+    },
+    "errors": {},
+    "extra_board_api_requests": 0,
+    "xen_status_per_response": {
+      "stale": 77,
+      "fresh": 92
+    },
+    "current_app_count": {
+      "0": 79,
+      "4": 85,
+      "1": 1,
+      "3": 1,
+      "2": 3
+    },
+    "expired_vm_with_current_app_samples": [],
+    "source_transitions": [
+      {
+        "sample": 0,
+        "elapsed_s": 0.0,
+        "status": "stale"
+      },
+      {
+        "sample": 2,
+        "elapsed_s": 1.484,
+        "status": "fresh"
+      },
+      {
+        "sample": 3,
+        "elapsed_s": 2.156,
+        "status": "stale"
+      },
+      {
+        "sample": 5,
+        "elapsed_s": 3.594,
+        "status": "fresh"
+      },
+      {
+        "sample": 7,
+        "elapsed_s": 5.188,
+        "status": "stale"
+      },
+      {
+        "sample": 8,
+        "elapsed_s": 5.906,
+        "status": "fresh"
+      },
+      {
+        "sample": 10,
+        "elapsed_s": 7.328,
+        "status": "stale"
+      },
+      {
+        "sample": 11,
+        "elapsed_s": 8.641,
+        "status": "fresh"
+      },
+      {
+        "sample": 13,
+        "elapsed_s": 10.266,
+        "status": "stale"
+      },
+      {
+        "sample": 18,
+        "elapsed_s": 14.063,
+        "status": "fresh"
+      },
+      {
+        "sample": 20,
+        "elapsed_s": 15.719,
+        "status": "stale"
+      },
+      {
+        "sample": 21,
+        "elapsed_s": 16.578,
+        "status": "fresh"
+      },
+      {
+        "sample": 25,
+        "elapsed_s": 20.078,
+        "status": "stale"
+      },
+      {
+        "sample": 26,
+        "elapsed_s": 21.438,
+        "status": "fresh"
+      },
+      {
+        "sample": 27,
+        "elapsed_s": 22.203,
+        "status": "stale"
+      },
+      {
+        "sample": 29,
+        "elapsed_s": 23.844,
+        "status": "fresh"
+      },
+      {
+        "sample": 31,
+        "elapsed_s": 25.234,
+        "status": "stale"
+      },
+      {
+        "sample": 32,
+        "elapsed_s": 26.297,
+        "status": "fresh"
+      },
+      {
+        "sample": 37,
+        "elapsed_s": 30.609,
+        "status": "stale"
+      },
+      {
+        "sample": 41,
+        "elapsed_s": 33.703,
+        "status": "fresh"
+      },
+      {
+        "sample": 43,
+        "elapsed_s": 35.344,
+        "status": "stale"
+      },
+      {
+        "sample": 44,
+        "elapsed_s": 35.813,
+        "status": "fresh"
+      },
+      {
+        "sample": 46,
+        "elapsed_s": 37.281,
+        "status": "stale"
+      },
+      {
+        "sample": 47,
+        "elapsed_s": 38.266,
+        "status": "fresh"
+      },
+      {
+        "sample": 49,
+        "elapsed_s": 39.969,
+        "status": "stale"
+      },
+      {
+        "sample": 53,
+        "elapsed_s": 43.172,
+        "status": "fresh"
+      },
+      {
+        "sample": 56,
+        "elapsed_s": 45.203,
+        "status": "stale"
+      },
+      {
+        "sample": 57,
+        "elapsed_s": 45.938,
+        "status": "fresh"
+      },
+      {
+        "sample": 62,
+        "elapsed_s": 49.828,
+        "status": "stale"
+      },
+      {
+        "sample": 63,
+        "elapsed_s": 50.984,
+        "status": "fresh"
+      },
+      {
+        "sample": 64,
+        "elapsed_s": 51.484,
+        "status": "stale"
+      },
+      {
+        "sample": 66,
+        "elapsed_s": 53.078,
+        "status": "fresh"
+      },
+      {
+        "sample": 68,
+        "elapsed_s": 54.672,
+        "status": "stale"
+      },
+      {
+        "sample": 69,
+        "elapsed_s": 55.547,
+        "status": "fresh"
+      },
+      {
+        "sample": 71,
+        "elapsed_s": 57.078,
+        "status": "stale"
+      },
+      {
+        "sample": 73,
+        "elapsed_s": 58.547,
+        "status": "fresh"
+      },
+      {
+        "sample": 75,
+        "elapsed_s": 60.25,
+        "status": "stale"
+      },
+      {
+        "sample": 79,
+        "elapsed_s": 63.406,
+        "status": "fresh"
+      },
+      {
+        "sample": 81,
+        "elapsed_s": 65.078,
+        "status": "stale"
+      },
+      {
+        "sample": 82,
+        "elapsed_s": 65.969,
+        "status": "fresh"
+      },
+      {
+        "sample": 83,
+        "elapsed_s": 66.563,
+        "status": "stale"
+      },
+      {
+        "sample": 84,
+        "elapsed_s": 67.578,
+        "status": "fresh"
+      },
+      {
+        "sample": 86,
+        "elapsed_s": 69.219,
+        "status": "stale"
+      },
+      {
+        "sample": 88,
+        "elapsed_s": 70.953,
+        "status": "fresh"
+      },
+      {
+        "sample": 89,
+        "elapsed_s": 71.234,
+        "status": "stale"
+      },
+      {
+        "sample": 90,
+        "elapsed_s": 72.734,
+        "status": "fresh"
+      },
+      {
+        "sample": 96,
+        "elapsed_s": 78.047,
+        "status": "stale"
+      },
+      {
+        "sample": 97,
+        "elapsed_s": 78.516,
+        "status": "fresh"
+      },
+      {
+        "sample": 99,
+        "elapsed_s": 80.391,
+        "status": "stale"
+      },
+      {
+        "sample": 101,
+        "elapsed_s": 81.875,
+        "status": "fresh"
+      },
+      {
+        "sample": 102,
+        "elapsed_s": 82.578,
+        "status": "stale"
+      },
+      {
+        "sample": 104,
+        "elapsed_s": 84.25,
+        "status": "fresh"
+      },
+      {
+        "sample": 106,
+        "elapsed_s": 85.844,
+        "status": "stale"
+      },
+      {
+        "sample": 107,
+        "elapsed_s": 86.797,
+        "status": "fresh"
+      },
+      {
+        "sample": 109,
+        "elapsed_s": 88.297,
+        "status": "stale"
+      },
+      {
+        "sample": 110,
+        "elapsed_s": 89.234,
+        "status": "fresh"
+      },
+      {
+        "sample": 112,
+        "elapsed_s": 91.031,
+        "status": "stale"
+      },
+      {
+        "sample": 116,
+        "elapsed_s": 94.172,
+        "status": "fresh"
+      },
+      {
+        "sample": 120,
+        "elapsed_s": 96.859,
+        "status": "stale"
+      },
+      {
+        "sample": 121,
+        "elapsed_s": 97.609,
+        "status": "fresh"
+      },
+      {
+        "sample": 123,
+        "elapsed_s": 99.156,
+        "status": "stale"
+      },
+      {
+        "sample": 124,
+        "elapsed_s": 100.266,
+        "status": "fresh"
+      },
+      {
+        "sample": 126,
+        "elapsed_s": 102.109,
+        "status": "stale"
+      },
+      {
+        "sample": 127,
+        "elapsed_s": 102.703,
+        "status": "fresh"
+      },
+      {
+        "sample": 129,
+        "elapsed_s": 104.297,
+        "status": "stale"
+      },
+      {
+        "sample": 130,
+        "elapsed_s": 105.078,
+        "status": "fresh"
+      },
+      {
+        "sample": 132,
+        "elapsed_s": 106.703,
+        "status": "stale"
+      },
+      {
+        "sample": 134,
+        "elapsed_s": 108.078,
+        "status": "fresh"
+      },
+      {
+        "sample": 135,
+        "elapsed_s": 108.875,
+        "status": "stale"
+      },
+      {
+        "sample": 141,
+        "elapsed_s": 113.672,
+        "status": "fresh"
+      },
+      {
+        "sample": 143,
+        "elapsed_s": 115.063,
+        "status": "stale"
+      },
+      {
+        "sample": 144,
+        "elapsed_s": 116.156,
+        "status": "fresh"
+      },
+      {
+        "sample": 150,
+        "elapsed_s": 121.141,
+        "status": "stale"
+      },
+      {
+        "sample": 151,
+        "elapsed_s": 122.25,
+        "status": "fresh"
+      },
+      {
+        "sample": 153,
+        "elapsed_s": 123.703,
+        "status": "stale"
+      },
+      {
+        "sample": 155,
+        "elapsed_s": 125.156,
+        "status": "fresh"
+      },
+      {
+        "sample": 156,
+        "elapsed_s": 125.938,
+        "status": "stale"
+      },
+      {
+        "sample": 158,
+        "elapsed_s": 127.5,
+        "status": "fresh"
+      },
+      {
+        "sample": 159,
+        "elapsed_s": 128.484,
+        "status": "stale"
+      },
+      {
+        "sample": 160,
+        "elapsed_s": 129.469,
+        "status": "fresh"
+      },
+      {
+        "sample": 162,
+        "elapsed_s": 131.141,
+        "status": "stale"
+      },
+      {
+        "sample": 166,
+        "elapsed_s": 134.297,
+        "status": "fresh"
+      },
+      {
+        "sample": 168,
+        "elapsed_s": 135.578,
+        "status": "stale"
+      }
+    ],
+    "mqtt_connected_samples": 169,
+    "feed_epochs": [
+      "d07696d7-0941-4cc4-96f9-ca7973f5ac10"
+    ],
+    "drive_modes": {
+      "SAFE_STOP": 169
+    },
+    "drive_source": {
+      "fresh": 169
+    },
+    "roundtrip_ms": {
+      "median": 594,
+      "p95_nearest_rank": 968,
+      "max": 1125
+    },
+    "continuous_freshness_pass": false
+  },
+  "quiet_scope": "User confirmed approximately two minutes without new VM control/deploy/load commands; existing services and extra trial VM remained running. Not an idle-board baseline.",
+  "preservation_checks": {
+    "same_non_api_service_states": true,
+    "cpu_affinities_unchanged": true,
+    "candidate_hashes_match": true,
+    "ssh_original_restored": true
+  },
+  "final_board": {
+    "source_hashes": {
+      "xenova_execution.py": "df36cc87e919dd9985c25a5441cb125380f87759035148b87ba165f5a3224ea7",
+      "xenova_management.py": "6ae93b5aa407a64eb798cd5cd38fe78817510ee89edf3f6459422ad09edb85a4"
+    },
+    "services": [
+      {
+        "Id": "xenova-dom0-manager.service",
+        "ActiveState": "active",
+        "MainPID": "139068"
+      },
+      {
+        "Id": "xenova-display-feed.service",
+        "ActiveState": "active",
+        "MainPID": "598"
+      },
+      {
+        "Id": "mosquitto.service",
+        "ActiveState": "active",
+        "MainPID": "821"
+      },
+      {
+        "Id": "xenova-gateway.service",
+        "ActiveState": "active",
+        "MainPID": "1504"
+      },
+      {
+        "Id": "xenova-recovery-worker.service",
+        "ActiveState": "inactive",
+        "MainPID": "0"
+      },
+      {
+        "Id": "xenova-runtime-log-collector.service",
+        "ActiveState": "active",
+        "MainPID": "514"
+      },
+      {
+        "Id": "tailscaled.service",
+        "ActiveState": "active",
+        "MainPID": "605"
+      }
+    ],
+    "cpu_affinities": [
+      {
+        "name": "Domain-0",
+        "domid": 0,
+        "vcpu": 0,
+        "affinity": "0,3"
+      },
+      {
+        "name": "Domain-0",
+        "domid": 0,
+        "vcpu": 1,
+        "affinity": "0,3"
+      },
+      {
+        "name": "Domain-0",
+        "domid": 0,
+        "vcpu": 2,
+        "affinity": "0,3"
+      },
+      {
+        "name": "Domain-0",
+        "domid": 0,
+        "vcpu": 3,
+        "affinity": "0,3"
+      },
+      {
+        "name": "debian-dev",
+        "domid": 1,
+        "vcpu": 0,
+        "affinity": "0,3"
+      },
+      {
+        "name": "zephyr-drive-a",
+        "domid": 2,
+        "vcpu": 0,
+        "affinity": "1"
+      },
+      {
+        "name": "zephyr-drive-b",
+        "domid": 3,
+        "vcpu": 0,
+        "affinity": "2"
+      },
+      {
+        "name": "vm-ff2b30806ed840529209c6823836e64a",
+        "domid": 16,
+        "vcpu": 0,
+        "affinity": "0,3"
+      }
+    ],
+    "shared": {
+      "status": "ok",
+      "age_ms": 3506,
+      "vms": [
+        {
+          "vm_id": "17cad3c4-b3cd-4b29-8740-e679d0eaebd4",
+          "state": "running"
+        },
+        {
+          "vm_id": "ff2b3080-6ed8-4052-9209-c6823836e64a",
+          "state": "running"
+        },
+        {
+          "vm_id": "de113a23-d80e-4333-94b8-788babe0e41e",
+          "state": "running"
+        },
+        {
+          "vm_id": "5002a22d-63d6-4f7a-9106-193b14499898",
+          "state": "running"
+        }
+      ]
+    },
+    "candidate_matches": true,
+    "ssh_original_restored": true
+  },
+  "ssh_cleanup": {
+    "ssh_original_hash_restored": true,
+    "temporary_port_removed": true,
+    "sshd_config_test": true
+  },
+  "pc_proxy_and_ssh_exit_code": 0,
+  "physical_hdmi_test": false,
+  "input_or_control_commands_sent": false
+}

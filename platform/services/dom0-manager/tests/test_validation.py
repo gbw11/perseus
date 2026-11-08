@@ -73,3 +73,22 @@ def test_spring_unicode_edge_spaces_are_preserved(client, name):
 ])
 def test_spring_ascii_edge_spaces_and_controls_are_rejected(client, name):
     _assert_invalid(client.post("/api/v1/vms", json=create_body(name=name)))
+
+
+def test_unclassified_error_uses_driver_error_body():
+    """openapi Error 500: 분류되지 않은 예외도 text/plain 이 아니라 {code: DriverError} 로 낸다."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from dom0_manager.api.errors import install_error_handlers
+
+    app = FastAPI()
+    install_error_handlers(app)
+
+    @app.get("/boom")
+    def boom():
+        raise KeyError("registration")
+
+    response = TestClient(app, raise_server_exceptions=False).get("/boom")
+    assert response.status_code == 500
+    assert response.json() == {"code": "DriverError", "message": "internal error", "detail": "KeyError"}

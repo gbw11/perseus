@@ -311,7 +311,8 @@ def test_no_budget_header_sends_no_budget(client, manager):
     stop(client)
     client.get(f"/api/v1/vms/{VM_A}")
     assert [c["budget_ms"] for c in manager.calls] == [None, None]
-    assert "timeout_ms" not in manager.calls[1]["spec"]
+    # 예산이 없어도 조회는 계약 한도 5초를 명시한다(하위 기본 15초를 쓰지 않는다, 2026-11-06 결정)
+    assert manager.calls[1]["spec"]["timeout_ms"] == 5000
 
 
 @pytest.mark.parametrize("value", ["0", "105001", "-1", "1.5", "abc", "010", " 100"])

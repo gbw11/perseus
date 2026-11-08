@@ -116,7 +116,6 @@ def inspect(*, port=8082, environment=None, marker=MARKER, query_units=units, ge
         checks["phone_first_marker"] = False
     observations = env.get("XENOVA_OBSERVATIONS_PATH", "")
     checks["shared_observations_configured"] = bool(observations and Path(observations).is_absolute())
-    checks["gateway_read_configured"] = env.get("XENOVA_DISPLAY_DRIVE_TRANSPORT") == "gateway"
     try:
         info = query_units()
         feed = info.get(UNITS[0], {})

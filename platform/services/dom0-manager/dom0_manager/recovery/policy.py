@@ -32,6 +32,9 @@ class RecoveryPolicy:
     # 켜려면 XENOVA_RECOVERY_ESCALATE_TO_FORCE=1 (플랫폼 force_restart_vm_ids 승인도 있어야 실제로 실행된다). 꺼져 있으면 그 시도는
     # 일반 실패로 소비되고 다음 시도도 graceful-restart 다
     escalate_to_force: bool = False
+    # E4는 승인된 두 값을 함께 공급할 때만 활성화한다. 운영 수치의 fallback은 없다.
+    stable_s: float | None = None
+    vm_max_attempts: int | None = None
 
     def __post_init__(self) -> None:
         if self.policy not in POLICIES:
@@ -46,6 +49,17 @@ class RecoveryPolicy:
                 raise ValueError(f"{name} must be a finite positive number of seconds, got {value!r}")
         if self.attempt_deadline_s > PLATFORM_DEADLINE_MAX_S:
             raise ValueError(f"attempt_deadline_s must be at most {PLATFORM_DEADLINE_MAX_S:g}s (platform recover_once limit)")
+        if (self.stable_s is None) != (self.vm_max_attempts is None):
+            raise ValueError('stable_s and vm_max_attempts must be configured together')
+        if self.stable_s is not None:
+            if type(self.stable_s) not in (int, float) or not math.isfinite(self.stable_s) or self.stable_s <= 0:
+                raise ValueError('stable_s must be positive finite seconds')
+            if type(self.vm_max_attempts) is not int or self.vm_max_attempts < self.max_attempts:
+                raise ValueError('vm_max_attempts must be an integer at least max_attempts')
+
+    @property
+    def budget_enabled(self) -> bool:
+        return self.stable_s is not None
 
     @property
     def enabled(self) -> bool:
@@ -77,4 +91,6 @@ class RecoveryPolicy:
             verify_timeout_s=read("XENOVA_RECOVERY_VERIFY_TIMEOUT", cls.verify_timeout_s, float),
             transient_retry_s=read("XENOVA_RECOVERY_TRANSIENT_RETRY", cls.transient_retry_s, float),
             escalate_to_force=read("XENOVA_RECOVERY_ESCALATE_TO_FORCE", "0", str).strip().lower() in ("1", "true", "yes"),
+            stable_s=float(env['XENOVA_RECOVERY_STABLE_S']) if 'XENOVA_RECOVERY_STABLE_S' in env else None,
+            vm_max_attempts=int(env['XENOVA_RECOVERY_VM_MAX_ATTEMPTS']) if 'XENOVA_RECOVERY_VM_MAX_ATTEMPTS' in env else None,
         )

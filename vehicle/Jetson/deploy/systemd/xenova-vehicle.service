@@ -1,0 +1,27 @@
+[Unit]
+Description=Xenova vehicle resident perception runtime
+Requires=xenovavehicle.slice
+After=xenovavehicle.slice
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=ssafy
+Group=ssafy
+Slice=xenovavehicle.slice
+KillMode=control-group
+KillSignal=SIGINT
+Delegate=no
+TimeoutStopSec=25s
+Restart=on-failure
+RestartSec=1s
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0077
+# Replace installation/profile paths explicitly before root-owned installation.
+ExecStart=/opt/xenova-vehicle/venv/bin/python -m xenova_vehicle runtime --profile /opt/xenova-vehicle/profiles/resident.json --state-dir /var/lib/xenova-vehicle/state --database /var/lib/xenova-vehicle/map.sqlite3 --output-root /var/lib/xenova-vehicle/diagnostics --service-scope systemd
+
+[Install]
+WantedBy=multi-user.target

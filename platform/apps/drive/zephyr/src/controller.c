@@ -2,6 +2,31 @@
 #include "controller.h"
 #include <string.h>
 
+bool drive_command_attempt_due(struct drive_command_gate *gate,const struct drive_command_context *context,
+ uint64_t check,const char *reason,float v_mps,float steer_rad)
+{
+ if(!gate)return true;
+ /* Exact zero excludes NaN/Inf without changing the existing output guard.
+  * Invalid metadata must pass to the original path, never become a cache key. */
+ size_t reason_length=reason?strnlen(reason,sizeof(gate->reason)):0;
+ if(!reason_length||reason_length>=sizeof(gate->reason)||v_mps!=0||steer_rad!=0||!context||
+    !context->control_revision||!context->connection_revision||!context->lifetime||!context->generation||
+    (context->mode!=DRIVE_AUTO&&context->mode!=DRIVE_MANUAL)||
+    strnlen(context->app_instance,sizeof(context->app_instance))!=XM_UUID_LEN){
+  gate->restricted=false;return true;
+ }
+ bool same=gate->restricted&&gate->context.control_revision==context->control_revision&&
+  gate->context.connection_revision==context->connection_revision&&gate->context.lifetime==context->lifetime&&
+  gate->context.generation==context->generation&&gate->context.mode==context->mode&&
+  !strcmp(gate->context.app_instance,context->app_instance)&&!strcmp(gate->reason,reason);
+ if(same&&gate->check==check)return false;
+ /* The check is a local supervisor observation, not a new command deadline.
+  * Retain only the last attempted check; do not claim queue or device success. */
+ gate->context=*context;gate->check=check;
+ memcpy(gate->reason,reason,reason_length+1);gate->restricted=true;
+ return true;
+}
+
 void drive_controller_init(struct drive_controller *c)
 {
  memset(c,0,sizeof(*c));drive_auto_adapter(&c->automatic,&c->auto_cfg);drive_manual_adapter(&c->manual,&c->manual_cfg);

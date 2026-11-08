@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xenova-vehicle"
+version = "0.1.0"
+description = "Jetson observation, perception, and mapping application"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+xenova-vehicle = "xenova_vehicle.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["xenova_vehicle*"]
+namespaces = false
+
+[tool.setuptools.package-data]
+"xenova_vehicle.simulation" = ["fixtures/*.json"]

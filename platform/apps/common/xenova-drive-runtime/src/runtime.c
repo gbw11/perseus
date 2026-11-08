@@ -89,6 +89,7 @@ static struct row rows[CONFIG_XENOVA_DRIVE_CAPTURE_ROWS];
 static struct xd_delivery deliveries[CONFIG_XENOVA_DRIVE_CAPTURE_ROWS];
 #endif
 static struct xd_inputs cycle_inputs;
+static int cycle_inputs_status;
 static const struct xd_received *command_input=&cycle_inputs.input;
 static int64_t command_valid_until;
 static struct xd_candidate candidate;
@@ -335,6 +336,20 @@ int xd_command_bound(int64_t valid_until_ms){
  if(valid_until_ms<=0)return -EINVAL;
  command_valid_until=valid_until_ms;return 0;
 }
+int xd_command_bound_us(uint64_t original_valid_until_guest_us){
+ /* xdiag counter-us and k_uptime ms are different clocks. Bracket the actual
+  * conversion; before+floor(remaining) cannot make the original E later. */
+ int64_t before=k_uptime_get();uint64_t counter;
+ int rc=xdiag_clock_us(&counter);if(rc)return rc;
+ int64_t after=k_uptime_get();
+ if(before<0||after<before)return -ERANGE;
+ if(original_valid_until_guest_us<=counter)return -ETIME;
+ uint64_t remaining=(original_valid_until_guest_us-counter)/1000;
+ if(remaining>(uint64_t)(INT64_MAX-before))return -EOVERFLOW;
+ int64_t bound=before+(int64_t)remaining;
+ if(bound<=after)return -ETIME;
+ return xd_command_bound(bound);
+}
 int xd_publish(struct xm_zclient *client,const char *topic,const char *type,const char *payload)
 {
 	ARG_UNUSED(client);
@@ -352,6 +367,7 @@ int xd_iteration_begin(void)
 	current.iteration_begin = now_us();
  command_input=&cycle_inputs.input;command_valid_until=0;
 	int rc = xd_io_snapshot(&cycle_inputs);
+	cycle_inputs_status = rc;
 	if (rc) {
 		/* Do not wait or mix generations. Missing input follows the existing
 		 * algorithm's idle/stop rules; a busy snapshot is not fresh data. */
@@ -361,6 +377,7 @@ int xd_iteration_begin(void)
 	return current.iteration_begin == UINT64_MAX ? -EIO : 0;
 }
 void xd_inputs_copy(struct xd_inputs *out) { if (out) { *out = cycle_inputs; } }
+int xd_inputs_status(void) { return cycle_inputs_status; }
 int xd_publish_completed(const char *topic,const char *type,const char *payload,
  uint64_t progress,int64_t produced_ms,const struct xd_inputs *source)
 {
@@ -469,7 +486,25 @@ void xd_command(struct xm_zclient *client, const char *topic, const char *json, 
 		if(command_valid_until)candidate.expires_ms=MIN(candidate.expires_ms,command_valid_until);
 		if ((v_mps!=0.0f||steer_rad!=0.0f) && command_input && !command_input->error)
 			candidate.expires_ms=MIN(candidate.expires_ms,command_input->received_ms+input_timeout_ms+1);
-		if (strlen(topic)>=sizeof(candidate.topic)||strlen(json)>=sizeof(candidate.json)) current.rc=-EMSGSIZE;
+		struct xm_drive_command2 modern;
+		struct xm_drive_command3 clocked;
+		int source_rc=0;
+		struct xm_span command_span={json,(uint16_t)strlen(json)};
+		int parsed=xm_drive_command3_parse(command_span,&clocked);
+		if(!parsed)modern=clocked.command;
+		else parsed=xm_drive_command2_parse(command_span,&modern);
+		if(!parsed&&
+		   !strcmp(modern.producer_role,"MANUAL")&&strcmp(modern.command_kind,"STOP")){
+			candidate.modern_manual=true;
+			if(!command_input||command_input->error)source_rc=-ENODATA;
+			else source_rc=xm_manual_input_parse((struct xm_span){command_input->payload,(uint16_t)command_input->length},&candidate.manual_source);
+			if(!source_rc&&(!command_valid_until||!candidate.manual_source.valid||
+			   strcmp(modern.driver_session,candidate.manual_source.session)||modern.driver_action_seq!=candidate.manual_source.action||
+			   modern.driver_state_seq!=candidate.manual_source.state||
+			   modern.valid_until_pi_us>candidate.manual_source.expires_pi_us))source_rc=-EXDEV;
+		}
+		if(source_rc)current.rc=source_rc;
+		else if (strlen(topic)>=sizeof(candidate.topic)||strlen(json)>=sizeof(candidate.json)) current.rc=-EMSGSIZE;
 		else { strcpy(candidate.topic,topic);strcpy(candidate.json,json);current.rc=xd_io_command(&candidate); }
 	}
 	current.submit_end = current.rc ? now_us() : candidate.queued_us;

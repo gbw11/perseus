@@ -26,8 +26,7 @@ TOKEN = "test-only-do-not-print"
 
 @pytest.fixture
 def environment():
-    return {"XENOVA_DISPLAY_TOKEN": TOKEN, "XENOVA_OBSERVATIONS_PATH": "/run/xenova/vm-observations.json",
-            "XENOVA_DISPLAY_DRIVE_TRANSPORT": "gateway"}
+    return {"XENOVA_DISPLAY_TOKEN": TOKEN, "XENOVA_OBSERVATIONS_PATH": "/run/xenova/vm-observations.json"}
 
 
 @pytest.fixture

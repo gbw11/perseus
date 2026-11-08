@@ -21,6 +21,9 @@ static struct xdh_health health[DRIVE_TASK_COUNT];
 static uint64_t seen[DRIVE_TASK_COUNT];
 static uint64_t assessed_revision[DRIVE_TASK_COUNT], assessed_connection[DRIVE_TASK_COUNT];
 static int64_t next_beat[DRIVE_TASK_COUNT], next_readiness[DRIVE_TASK_COUNT];
+#if defined(CONFIG_XENOVA_DRIVE_WARM) && defined(CONFIG_XENOVA_DRIVE_LATTICE)
+static struct drive_command_gate command_gate[DRIVE_TASK_COUNT];
+#endif
 #if defined(CONFIG_XENOVA_DRIVE_WARM)
 struct app_lifecycle {
  char instance[XM_UUID_LEN+1],last_phase[16],last_state[16],last_reason[65];
@@ -102,6 +105,7 @@ static void warm_report(enum drive_task task,const struct drive_result *selected
  int n=xm_app_lifecycle_json(payload,sizeof(payload),generation,++a->check,work->progress,phase,state,reason);
  xm_topic_vm_app_events(topic,sizeof(topic),inputs.vm_id,task==DRIVE_TASK_AUTO?AUTO_APP_ID:MANUAL_APP_ID);
  if(n>0)(void)xd_publish_supervision(topic,payload,a->check,tick,&inputs);
+ else (void)xdiag_error("app-supervision",n); /* 조합 거절(-EINVAL)이 소리 없이 100 ms 보고 공백이 되지 않게 */
  strcpy(a->last_phase,phase);strcpy(a->last_state,state);strcpy(a->last_reason,reason?reason:"");
  a->generation=generation;a->due=tick+100;
 }
@@ -144,6 +148,10 @@ static void provenance(const struct drive_completion *work,enum drive_task task)
  struct xd_received *in=task==DRIVE_TASK_AUTO?&source.perception:&source.input;
  in->seq=work->source.input_seq;in->received_ms=work->source.input_received_ms;
  in->error=work->source.input_length?0:-ENODATA;
+ /* 현대 MANUAL의 최종 송신 guard는 계산 당시 원 입력을 다시 검산한다.
+  * 최신 RX body로 대체하거나 metadata만 있는 빈 payload를 넘기지 않는다. */
+ in->length=work->source.input_length;
+ if(in->length)memcpy(in->payload,work->source.input,in->length);
 }
 static int offer(enum drive_task task,uint64_t release,uint64_t sequence,uint64_t iteration_begin)
 {
@@ -166,10 +174,53 @@ static int offer(enum drive_task task,uint64_t release,uint64_t sequence,uint64_
  memcpy(job.input,in->payload,job.input_length);
  return drive_workers_offer(task,&job);
 }
+/* Only the publication view changes epoch. The immutable completion remains
+ * in counter time for lattice preparation and its original lease guards. */
+static int command_time(const struct drive_completion *work,int64_t tick,int64_t *until,int64_t *age)
+{
+ const struct drive_sample *sample=&work->sample;
+ if(sample->clock_domain==DRIVE_SAMPLE_UPTIME_MS){
+  *until=sample->valid_until_ms;
+  *age=tick-(sample->binary_input?sample->input_received_ms:work->source.input_received_ms);
+  return 0;
+ }
+ if(sample->clock_domain!=DRIVE_SAMPLE_COUNTER_MS)return -EINVAL;
+ int64_t before=k_uptime_get();uint64_t counter;
+ int rc=xdiag_clock_us(&counter);if(rc)return rc;
+ int64_t after=k_uptime_get();
+ if(before<0||after<before||counter<work->end_us)return -ERANGE;
+ int64_t elapsed;
+ if(sample->binary_input){
+  if(sample->input_received_ms<0)return -ERANGE;
+  if((uint64_t)sample->input_received_ms>UINT64_MAX/1000)return -EOVERFLOW;
+  uint64_t source_us=(uint64_t)sample->input_received_ms*1000;
+  if(counter<source_us)return -ERANGE;
+  uint64_t delta=counter-source_us;
+  uint64_t age_ms=delta/1000+(delta%1000!=0);
+  /* Millisecond uptime quantization leaves up to one extra millisecond in
+   * the sampling interval. Charge it rather than understate input age. */
+  uint64_t sampling_ms=(uint64_t)(after-before)+1;
+  if(sampling_ms>(uint64_t)INT64_MAX||age_ms>(uint64_t)INT64_MAX-sampling_ms)return -EOVERFLOW;
+  elapsed=(int64_t)(age_ms+sampling_ms);
+ }else{
+  if(work->source.input_received_ms<0||after<work->source.input_received_ms)return -ERANGE;
+  elapsed=after-work->source.input_received_ms;
+ }
+ *age=elapsed;
+ if(sample->valid_until_ms<=0)return -ETIME;
+ if((uint64_t)sample->valid_until_ms>UINT64_MAX/1000)return -EOVERFLOW;
+ uint64_t expiry=(uint64_t)sample->valid_until_ms*1000;
+ if(counter>=expiry)return -ETIME;
+ uint64_t remaining_ms=(expiry-counter)/1000;
+ if(remaining_ms>(uint64_t)(INT64_MAX-before))return -EOVERFLOW;
+ int64_t bound=before+(int64_t)remaining_ms;
+ if(bound<=after)return -ETIME;
+ *until=bound;return 0;
+}
 int main(void)
 {
  char control[XM_TOPIC_MAX],input[XM_TOPIC_MAX],perception[XM_TOPIC_MAX];
- char events[XM_TOPIC_MAX],json[160];
+ char events[XM_TOPIC_MAX],json[XM_COMMAND2_BYTES+1];
  xm_topic_vehicle_control(control,sizeof(control));xm_topic_manual_input(input,sizeof(input));
  xm_topic_app_events(perception,sizeof(perception),"perception");
  drive_controller_init(&controller);
@@ -189,7 +240,9 @@ int main(void)
   if((rc=xd_iteration_begin()))break;
   xd_inputs_copy(&inputs);
 #if defined(CONFIG_XENOVA_DRIVE_LATTICE)
-  drive_lattice_context(&inputs);
+  /* An unobserved busy snapshot denies this cycle without revoking the
+   * derived clock; its original lease and observed disconnect guards remain. */
+  if(xd_inputs_status()!=-EBUSY)drive_lattice_context(&inputs);
 #endif
   struct xm_span cp={inputs.control.payload,inputs.control.length};
   if(inputs.control.error)cp=(struct xm_span){0};
@@ -261,13 +314,40 @@ int main(void)
       assessed_connection[0]==inputs.connection_revision&&assessed_connection[1]==inputs.connection_revision)
     xd_health_record(&health[DRIVE_TASK_AUTO],&health[DRIVE_TASK_MANUAL]);
    if(IS_ENABLED(CONFIG_XENOVA_DRIVE_WARM))xd_health_task_record(task,&work->health);
-   if(selected.mode!=DRIVE_STOP){
+   bool command_due=true;
+#if defined(CONFIG_XENOVA_DRIVE_WARM) && defined(CONFIG_XENOVA_DRIVE_LATTICE)
+   struct drive_command_context command_context={.control_revision=work->context_revision,
+    .connection_revision=work->source.connection_revision,.lifetime=work->source.lifetime,
+    .generation=selected.generation,.mode=selected.mode};
+   strcpy(command_context.app_instance,work->source.app_instance);
+   command_due=drive_command_attempt_due(&command_gate[task],&command_context,lifecycle[task].check,
+    work->sample.reason,work->sample.v_mps,work->sample.steer_rad);
+#endif
+   if(selected.mode!=DRIVE_STOP&&command_due){
     if((rc=xd_command_input(work->sample.binary_input?"world.track":automatic?"perception.result":"drive.input")))break;
-    if(work->sample.valid_until_ms>0&&(rc=xd_command_bound(work->sample.valid_until_ms)))break;
-    int encoded=xm_drive_command_json(json,sizeof(json),selected.generation,work->sample.v_mps,work->sample.steer_rad);
+    int64_t until=0,age=0;int encoded;
+#if defined(CONFIG_XENOVA_DRIVE_LATTICE)
+    struct xm_drive_command3 modern={0};uint64_t original_guest_until=0;
+    if(work->sample.modern_command){
+     status=drive_lattice_command(work,&modern,&original_guest_until);
+     bool stop=!strcmp(modern.command.command_kind,"STOP");
+     if(!status&&!stop){
+      int64_t unused_bound=0;status=command_time(work,tick,&unused_bound,&age);
+      if(!status)status=xd_command_bound_us(original_guest_until);
+     }else if(stop&&!work->sample.binary_input)age=tick-work->source.input_received_ms;
+     /* STOP은 만료한 계산/clock 때문에 보류하지 않는다. body는 원 completion을 나타낸다. */
+     encoded=status?status:xm_drive_command3_json(json,sizeof(json),&modern);
+     if(encoded>0)drive_lattice_command_attempt(work,&modern);
+    }else
+#endif
+    {
+     status=command_time(work,tick,&until,&age);
+     if(status&&status!=-ETIME){rc=status;break;}
+     if(!status&&until>0&&(rc=xd_command_bound(until)))break;
+     encoded=status?status:xm_drive_command_json(json,sizeof(json),selected.generation,work->sample.v_mps,work->sample.steer_rad);
+    }
     xd_command(&client,events,json,encoded,selected.generation,work->sample.v_mps,work->sample.steer_rad,
-     work->sample.binary_input?work->sample.input_sequence:work->source.input_seq,work->source.control_seq,
-     tick-(work->sample.binary_input?work->sample.input_received_ms:work->source.input_received_ms),
+     work->sample.binary_input?work->sample.input_sequence:work->source.input_seq,work->source.control_seq,age,
      automatic?controller.auto_cfg.perception_timeout_ms:controller.manual_cfg.input_timeout_ms);
    }
    if(automatic&&work->sample.auto_reason!=last_reason){

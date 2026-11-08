@@ -60,7 +60,9 @@ def test_symmetric_continuous_scenario_and_rejoin(tmp_path,first,other):
     w=World(tmp_path/'authority',first);w.arm();assert w.m.mode is Mode.AUTO
     old_exec=dict(w.execs);w.perception=False;w.tick(.1)
     assert w.m.mode is Mode.MANUAL and w.m.active_vm==first and w.execs==old_exec
-    w.tick(3.2);w.alive.remove(first);w.tick(.2)
+    assert not w.m.output_permitted
+    w.tick(3.2);assert w.resume();w.tick(6.4)
+    w.alive.remove(first);w.tick(.2)
     assert w.m.mode is Mode.MANUAL and w.m.active_vm==other
     w.perception=True;w.tick(3.4)
     assert w.m.mode is Mode.AUTO_READY and w.m.active_vm==other
@@ -177,6 +179,29 @@ def test_auto_ready_waits_for_both_app_applications_without_generation_bounce(tm
     w.m.on_readiness('autonomous',A,{'applied_generation':generation,'progress_seq':'9999','readiness':'READY','reason':None},w.t)
     w.m.step(w.t);assert w.m.phase=='APPLIED' and w.m.generation==generation
 
+def test_legacy_auto_deadline_selects_prepared_mirror_without_vm_distrust(tmp_path):
+    w=World(tmp_path/'authority');w.arm();old=w.m.generation
+    payload={'trust':'UNTRUSTED','reason':'AUTO_DEADLINE_MISS','consecutive_misses':5,'command_id':'delay-1'}
+    actions=w.m.on_vm_untrusted(A,'autonomous',payload,w.t)
+    assert w.m.active_vm==B and w.m.generation==old+1 and not w.m.output_permitted
+    assert w.auth.value['owner']==B and w.auth.value['pending']['arm_after_apply']
+    assert not w.auth.value.get('distrusted') and not w.m.untrusted
+    assert any(isinstance(action,PublishControl) for action in actions)
+    # The normal MANUAL session remains valid; control ownership still excludes
+    # A's AUTO output while B applies the new generation.
+    assert w.m._bound(A,w.t,'manual')
+    assert w.m.on_vm_untrusted(A,'autonomous',payload,w.t)==[]
+    w.tick(.1);assert w.m.output_permitted and w.m.active_vm==B
+    assert any(isinstance(action,ForwardDrive) for action in w.actions)
+
+def test_legacy_auto_deadline_without_prepared_mirror_enters_safe_stop(tmp_path):
+    w=World(tmp_path/'authority');w.arm();w.m.prepared[B,'autonomous'].observed=None
+    actions=w.m.on_vm_untrusted(A,'autonomous',
+        {'trust':'UNTRUSTED','reason':'AUTO_DEADLINE_MISS','consecutive_misses':5,'command_id':'delay-2'},w.t)
+    assert w.m.mode is Mode.SAFE_STOP and w.m.active_vm==A and not w.m.output_permitted
+    assert not w.m.untrusted and not w.auth.value.get('distrusted')
+    assert any(isinstance(action,ForwardStop) for action in actions)
+
 class Client:
     connected=True;connections=1
     def __init__(self):self.handlers={};self.published=[];self.status='acknowledged'
@@ -232,6 +257,18 @@ def test_runner_rejects_retained_and_stale_causation_resume(tmp_path):
         'progress_seq':'9999','readiness':'READY','reason':None},retained=True));runner._drain()
     assert w.m.prepared[A,'autonomous'].observed==p
 
+def test_runner_routes_current_nonretained_vm_trust_event(tmp_path):
+    w=World(tmp_path/'authority');w.arm();client=Client()
+    runner=VerifiedGatewayRunner(client,MockSink(),authority=w.auth,bindings=w.cache,vm_ids=(A,B),clock=lambda:w.t)
+    runner.subscribe();runner.begin();runner.machine=w.m
+    payload={'trust':'UNTRUSTED','reason':'AUTO_DEADLINE_MISS','consecutive_misses':5,'command_id':'delay-3'}
+    runner._enqueue(message(w,A,'autonomous','vm.trust',payload));runner._drain()
+    assert w.m.active_vm==B and w.auth.value['owner']==B
+    # A retained or standby-originated signal cannot revoke the new owner.
+    generation=w.m.generation
+    runner._enqueue(message(w,B,'autonomous','vm.trust',{**payload,'command_id':'delay-4'},retained=True));runner._drain()
+    assert w.m.generation==generation and w.m.active_vm==B
+
 def test_runner_control_puback_is_not_app_application_and_aux_failure_isolated(tmp_path):
     w=World(tmp_path/'authority');client=Client();client.status='pending'
     runner=VerifiedGatewayRunner(client,MockSink(),authority=w.auth,bindings=w.cache,vm_ids=(A,B),clock=lambda:w.t)
@@ -260,6 +297,7 @@ def test_dequeued_first_event_survives_scheduler_pause_before_drain(tmp_path,mon
 
 def _auto_ready(tmp_path):
     w=World(tmp_path/'authority');w.arm();w.perception=False;w.tick(.1)
+    w.tick(3.2);assert w.resume();w.tick(3.4)
     w.perception=True;w.tick(3.4);assert w.m.mode is Mode.AUTO_READY
     w.tick(3.2);return w
 

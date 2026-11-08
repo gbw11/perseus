@@ -4,7 +4,7 @@
 - 프레임 쪽(webcam·video)은 처리가 끝날 때마다 최신 결과 하나만 바꿔 끼운다 (LatestResult).
 - 발행 쪽은 1/15 s 마다 그 최신 결과를 낸다. 새 프레임이 아직 없으면 **같은 결과를 다시** 낸다 (새 seq).
   받는 쪽(자율주행 VM)은 latest-only 라 같은 값이 한 번 더 와도 해가 없고, 주기가 일정해야 끊김 판정이 쉽다.
-- 최신 결과가 stale_s(기본 0.5 s)보다 오래됐으면 **내지 않는다.** 카메라가 멈췄는데 옛 결과를 계속 내면
+- 최신 결과가 stale_s(기본 0.2 s)보다 오래됐으면 **내지 않는다.** 카메라가 멈췄는데 옛 결과를 계속 내면
   자율주행 VM 이 젯슨 끊김(시나리오 F6 → 정지)을 알아채지 못한다.
 """
 
@@ -98,7 +98,10 @@ class Publisher:
 
     def run(self, stop: threading.Event) -> None:
         while not stop.is_set():
-            self.tick()
+            try:
+                self.tick()
+            except Exception:  # 발행 스레드만 조용히 죽으면 프레임 루프는 돌아도 결과가 영영 안 나간다
+                log.exception("perception.result 발행 실패")
             if self._next is not None:
                 delay = self._next - self._clock()
                 if delay > 0:

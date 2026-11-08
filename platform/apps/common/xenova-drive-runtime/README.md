@@ -15,6 +15,13 @@ A/B가 같은 펌웨어에서 두 계산을 실행하는 구성은
 [건강 근거·행동 책임](../../../../docs/contracts/health-evidence-v1.md)을 따른다.
 매 iteration의 입력 사본에는 두 계산의 입력과 로컬 VM UUID가 함께 들어간다.
 `xd_command_input()`으로 선택 모드의 원 입력을 지정해 명령 만료를 계산한다.
+명시 input2/3은 원 Pi source/E와 session/action/state를 보존한다. 현대 MANUAL
+계산은 실제 clock으로 변환한 원 guest 기한을 `xd_command_bound_us()`에 전달한다.
+ms 전송 한도는 내림하며 수신/완료/재전송으로 원 E를 연장하지 않는다. 계산이 고정한
+입력은 후보와 함께 보관하고, 송신 owner가 현재 action/keys/epoch/grant·source 철회를
+다시 검사한다. same-held의 새 state는 기존 후보의 만료를 갱신하지 않는다.
+수신 owner만 가진 guest 수신 나이로 현대 입력의 Pi 시각 freshness를 주장하지 않으므로
+메모리 진단의 input2/3은 원 clock 검산 전 `UNCLASSIFIED`로 표시한다.
 v1 heartbeat는 고정된 두 앱별 칸을 사용하므로 서로 덮어쓰지 않으며,
 사건 처리 사이의 기존 제한 대기 규칙도 유지한다.
 

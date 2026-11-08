@@ -2,6 +2,7 @@
 /* Separate preemptible AUTO/MANUAL owners. Long callbacks hold no exchange
  * lock. A stuck callback is retained and reported, never forcibly recycled. */
 #include "workers.h"
+#include <xenova/auto_delay.h>
 #include <xenova/diagnostics.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/atomic.h>
@@ -75,6 +76,9 @@ static void run(void *argument, void *unused1, void *unused2)
    if (!t->running.input_length) { input.p = NULL; }
    result.rc = drive_adapter_run_until(&t->adapter, control, input, age,
      &t->running.manual_witness,t->running.app_instance,t->running.deadline_us,&result.sample);
+	if (t == &tasks[DRIVE_TASK_AUTO] && drive_auto_delay_active()) {
+		drive_auto_delay_apply();
+	}
   }
   int end_rc = xdiag_clock_us(&result.end_us);
   result.finished_ms = k_uptime_get();
@@ -83,6 +87,9 @@ static void run(void *argument, void *unused1, void *unused2)
    .clock_rc=clock_rc ? clock_rc : end_rc, .begin_us=result.begin_us, .end_us=result.end_us,
    .deadline_us=t->running.deadline_us};
   (void)xdh_assess(&work, result.end_us, k_uptime_get(), &t->resources, resource_rc, &result.health);
+	if (t == &tasks[DRIVE_TASK_AUTO]) {
+		(void)drive_auto_delay_observe_deadline(result.end_us > t->running.deadline_us);
+	}
   if (result.health.restrict_function) {
    result.sample.v_mps = result.sample.steer_rad = 0;
    if (!result.sample.reason || strcmp(result.sample.reason, "OUTPUT_INVALID")) result.sample.reason = "CALCULATION_FAILED";

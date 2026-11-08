@@ -154,16 +154,44 @@ export type StressRequest =
 export type StressType = 'CPU' | 'MEMORY';
 
 /** 202 응답. Agent 에 MQTT agent.command(action=stress)를 보냈다는 뜻이고, 실제 부하는 메트릭으로 확인한다 */
-export interface StressCommand {
+export interface SubmittedCommand {
   command_id: string;
   operation_id: string;
   vm_id: string;
+  submitted_at: string;
+  expires_at: string;
+}
+
+export interface StressCommand extends SubmittedCommand {
   type: StressType;
   /** CPU 는 워커 수, MEMORY 는 MiB */
   amount: number;
+  load_percent?: number | null;
   duration_s: number;
-  submitted_at: string;
-  expires_at: string;
+}
+
+/** POST /api/v1/vms/{id}/faults/auto-delay — Zephyr 주행 연산에 지연을 주는 데모 명령 */
+export interface AutoDelayRequest {
+  delay_ms: number;
+  duration_s: number;
+}
+
+export interface AutoDelayCommand extends SubmittedCommand {
+  delay_ms: number;
+  duration_s: number;
+}
+
+/** POST /api/v1/vms/{id}/faults/agent-exit — Linux Agent 종료 데모 명령 */
+export type AgentExitCommand = SubmittedCommand;
+
+export type CommandState = 'PENDING' | 'ACCEPTED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'REJECTED';
+
+export interface CommandStatusResponse {
+  command_id: string;
+  vm_id: string;
+  status: CommandState;
+  message?: string | null;
+  updated_at: string;
 }
 
 /** §2.3 */

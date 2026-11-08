@@ -146,6 +146,16 @@ def test_producer_token_cannot_read_control_api_or_spoof_a_vm(tmp_path):
         assert len(db.query()["items"]) == 1
 
 
+def test_ingest_401_uses_the_error_schema(tmp_path):
+    client, db, entry, headers = producer_client(tmp_path)
+    with client:
+        wrong = client.post("/api/v1/logs/ingest", json={"records": [entry]},
+                            headers={**headers, "Authorization": "Bearer wrong"})
+        assert wrong.status_code == 401
+        assert wrong.json() == {"code": "Unauthorized", "message": "source authentication required"}
+        assert db.query()["items"] == []
+
+
 def test_batches_are_validated_before_writing_and_keys_stay_private(tmp_path):
     client, db, entry, headers = producer_client(tmp_path)
     with client:

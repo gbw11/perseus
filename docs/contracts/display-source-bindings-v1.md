@@ -20,7 +20,7 @@ python -m xenova_display.bindings examples/integration-candidate-bindings.json -
 
 | 확인 대상 | 동작 |
 | --- | --- |
-| 구독 | 설정된 앱 events, 지원 Agent heartbeat/inventory, 별도 표시용 drive-state만 구독 |
+| 구독 | 설정된 앱 events, 지원 Agent heartbeat/inventory만 구독. 주행 상태는 MQTT가 아닌 [Gateway 읽기](display-gateway-read-v1.md)로 받음 |
 | SUBACK | 토픽별 pending/granted/denied/error/unavailable을 추적. 브로커 접속 성공만으로 구독 성공을 선언하지 않음 |
 | 식별 | 토픽·메시지 type·등록 UUID·app_id·발행 세대·증가 seq를 기존 계약과 대조. 게스트 보고에 source_id가 함께 있으면 거부 |
 | 재접속 | 새 SUBACK과 해당 연결에서 수신한 새 보고가 있어야 fresh. 이전 캐시를 정상 보고로 되살리지 않음 |

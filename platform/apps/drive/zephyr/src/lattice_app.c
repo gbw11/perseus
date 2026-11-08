@@ -30,26 +30,98 @@ static atomic_bool prepared_valid;
 static char copy_message[37];
 static uint64_t copy_revision,prepared_expiry;
 static char prepared_gateway[37];
-struct completion {uint64_t sequence,vehicle_sequence,finished_us;size_t tracker_index;uint32_t path_generation,maneuver_phase;char instance[37];struct de_witness world;};
+struct completion {uint64_t sequence,vehicle_sequence,finished_us;size_t tracker_index;unsigned segment_index;uint32_t path_generation,maneuver_phase;char instance[37];struct de_witness world;};
 static struct completion completion;
 static uint64_t exported_completion;
+static struct manual_lease_gate manual_gate;
+static struct xm_manual_input manual_neutral;
+static bool manual_neutral_seen;
+struct direction_phase {
+ bool active,has_stop;uint32_t generation;unsigned segment;int next_direction;
+ uint64_t end,maneuver_revision;struct xm_drive_command2 original_stop;
+ unsigned attempt_count;struct xm_drive_command2 attempts[8];
+};
+static struct direction_phase direction_phase;
+static const char nil_uuid[]="00000000-0000-0000-0000-000000000000";
+static void uuid_text(char out[37],const uint8_t bytes[16]){
+ static const char hex[]="0123456789abcdef";unsigned at=0;
+ for(unsigned i=0;i<16;i++){if(i==4||i==6||i==8||i==10)out[at++]='-';out[at++]=hex[bytes[i]>>4];out[at++]=hex[bytes[i]&15];}out[at]=0;
+}
+static bool uuid_same(const uint8_t bytes[16],const char text[37]){char expected[37];uuid_text(expected,bytes);return !strcmp(expected,text);}
+static void command_begin(struct drive_sample *out,bool manual,struct xm_span control){
+ out->modern_command=true;struct xm_drive_command2 *c=&out->command.command;
+ strcpy(c->producer_role,manual?"MANUAL":"AUTO");strcpy(c->command_kind,"STOP");
+ strcpy(c->mission_id,nil_uuid);strcpy(c->driver_session,nil_uuid);
+ struct xm_vehicle_control selected;if(!xm_vehicle_control_parse(control,&selected))c->generation=selected.generation;
+}
+static bool command_lease(struct drive_sample *out,const struct dl_clock *clock,const dw_vehicle *vehicle,uint64_t now,uint64_t limit){
+ if(!clock->acknowledged||!clock->probe_sequence||now>INT64_MAX-100000)return false;
+ uint64_t e=now+100000,pose=vehicle->pi_sample_us+(uint64_t)lp_selected_config.pose_age_us;
+ if(pose<vehicle->clock_error_us)return false;
+ pose-=vehicle->clock_error_us;
+ if(e>pose)e=pose;
+ if(e>clock->expires_pi)e=clock->expires_pi;
+ if(limit&&e>limit)e=limit;
+ if(e<=now||e>INT64_MAX||(clock->upper<0&&(uint64_t)(-(clock->upper+1))+1>INT64_MAX-e)||
+    (clock->upper>0&&e<(uint64_t)clock->upper))return false;
+ out->command.clock_probe_sequence=clock->probe_sequence;out->command.command.valid_until_pi_us=e;
+ out->command.command.vehicle_sequence=vehicle->sequence;out->valid_until_guest_us=(uint64_t)((int64_t)e-clock->upper);
+ out->clock_domain=DRIVE_SAMPLE_COUNTER_MS;out->valid_until_ms=(int64_t)(out->valid_until_guest_us/1000);
+ return out->valid_until_guest_us>0;
+}
+
+
+#if defined(CONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS)
+#include <zephyr/logging/log.h>
+LOG_MODULE_REGISTER(drive_prepare_diag,LOG_LEVEL_INF);
+/* Planner owner only; distinct stages spend a saturating boot quota.
+ * p: Pi time1, guest time2, proof4, path8, sequence16, expiry32, search snapshot64. */
+struct prep_observation {unsigned present,path,proof;uint64_t rev,seq,pi,guest,until;};
+static unsigned prep_diag_count,prep_diag_seen;
+static void prep_diagnostic(unsigned phase,int rc,int returned,int why,const struct prep_observation *v){
+ if(!phase||phase>16||prep_diag_count>=16||(prep_diag_seen&(1U<<(phase-1))))return;
+ prep_diag_seen|=1U<<(phase-1);unsigned index=++prep_diag_count;
+ LOG_INF("XD_PREP_DIAG n=%u cap=16 phase=%u rc=%d ret=%d why=%d p=%u path=%u proof=%u rev=%llu seq=%llu pi=%llu guest=%llu until=%llu",
+  index,phase,rc,returned,why,v->present|((phase>=2&&phase<=5)?64U:0U),v->path,v->proof,(unsigned long long)v->rev,
+  (unsigned long long)v->seq,(unsigned long long)v->pi,(unsigned long long)v->guest,(unsigned long long)v->until);
+}
+#define PREP_LOCAL struct prep_observation diag={0}
+#define PREP_VALUE(bit,field,value) do{diag.field=(value);diag.present|=(bit);}while(0)
+#define PREP_DIAG(phase,rc,returned,why) prep_diagnostic(phase,rc,returned,why,&diag)
+#define PREP_REQUIRE(phase,call,returned) do{int detail=(call);if(detail){PREP_DIAG(phase,detail,returned,0);return returned;}}while(0)
+#else
+#define PREP_LOCAL
+#define PREP_VALUE(...) ((void)0)
+#define PREP_DIAG(...) ((void)0)
+#define PREP_REQUIRE(phase,call,returned) do{if(call)return returned;}while(0)
+#endif
 
 static int clock_us(void *unused,uint64_t *out){ARG_UNUSED(unused);return xdiag_clock_us(out);}
 static bool cancelled(void *unused){ARG_UNUSED(unused);return atomic_get(&stop)||atomic_get(&planner_stop)||xd_stopping();}
 static bool tracker_cancelled(void *unused){ARG_UNUSED(unused);return atomic_get(&stop)||drive_task_stopping(DRIVE_TASK_AUTO)||xd_stopping();}
-static int current_vehicle(struct dl_clock *clock,uint64_t *now,dw_vehicle *vehicle){
- int rc=dl_clock_get(clock,now);if(rc)return rc;
+static int current_vehicle_role(bool manual,struct dl_clock *clock,uint64_t *now,dw_vehicle *vehicle){
+ int rc=manual?dl_manual_clock_get(clock,now):dl_clock_get(clock,now);if(rc)return rc;
  struct xt_bootstrap boot;if(xd_context_get(&boot))return -EAGAIN;
  if(dw_vehicle_latest(&engine.odometry,vehicle)||strcmp(vehicle->host_boot,boot.identity.host_boot_id)||
   strcmp(vehicle->odom_epoch,clock->trust.odom_epoch)||*now<vehicle->pi_sample_us||
   *now-vehicle->pi_sample_us+vehicle->clock_error_us>lp_selected_config.pose_age_us)return -ENODATA;
+ if(clock->acknowledged&&(!vehicle->has_gateway_instance||!vehicle->has_pi_session||
+    strcmp(vehicle->gateway_instance,clock->gateway)||strcmp(vehicle->vehicle,lp_selected_config.vehicle)||
+    strcmp(vehicle->calibration,lp_selected_config.calibration)))return -EXDEV;
  return 0;
 }
+static int current_vehicle(struct dl_clock *clock,uint64_t *now,dw_vehicle *vehicle){return current_vehicle_role(false,clock,now,vehicle);}
 static int64_t valid_until(const struct dl_clock *clock,const dw_vehicle *vehicle){
  int64_t pi=(int64_t)vehicle->pi_sample_us+(int64_t)lp_selected_config.pose_age_us-vehicle->clock_error_us;
  if(pi<=clock->upper)return 0;
  int64_t end=(pi-clock->upper)/1000;
  return end<(int64_t)(clock->expires_guest/1000)?end:(int64_t)(clock->expires_guest/1000);
+}
+static int mission_profile(bool *required){
+ struct dw_handle handle;const struct dw_snapshot *map;
+ if(dw_acquire(&engine.maps,&handle,&map))return -EAGAIN;
+ *required=(map->world.required_features&DW_LANE_MODEL)!=0;
+ return dw_release(&engine.maps,handle)?-EAGAIN:0;
 }
 static const char *qualified(const void *unused,struct xm_span input,int64_t age){
  ARG_UNUSED(unused);ARG_UNUSED(input);ARG_UNUSED(age);
@@ -59,18 +131,28 @@ static const char *qualified(const void *unused,struct xm_span input,int64_t age
  if(current_vehicle(&clock,&now,&vehicle))return "POSE_UNAVAILABLE";
  struct de_reference ph;const struct lp_path *path;
  if(de_path_acquire(&engine,&ph,&path))return "STATE_PREPARING";
- bool applied=false;
+ bool applied=false,transition=false,local=false;
  if(!k_mutex_lock(&app_metadata,K_NO_WAIT)){
   uint64_t guest=0;
   applied=!clock_us(NULL,&guest)&&prepared_valid&&prepared.generation==ph.generation&&guest<=prepared_expiry;
+  local=locally_active;transition=direction_phase.active&&!local;
   k_mutex_unlock(&app_metadata);
  }
  struct dw_handle mh;const struct dw_snapshot *map;const char *reason="WORLD_UNAVAILABLE";
  if(!dw_acquire(&engine.maps,&mh,&map)){
-  dw_pose pose;
+  dw_pose pose;xenova_drive_MissionGrant mission;bool required=(map->world.required_features&DW_LANE_MODEL)!=0;
+  uint64_t scene_generation=0;
   if(dw_snapshot_time(map,now,(uint64_t)lp_selected_config.live_age_us,NULL))reason="OBSERVATION_EXPIRED";
+  else if(dw_scene_time(&engine.maps,&map->world,now,NULL,&scene_generation)||
+          dw_scene_generation(&engine.maps,engine.paths[ph.slot].scene_generation,now,NULL)||
+          (scene_generation&&engine.paths[ph.slot].scene_generation!=scene_generation))reason="SCENE_UNAVAILABLE";
   else if(dw_current_pose(&map->world,&engine.odometry,now,lp_selected_config.pose_age_us,&pose,NULL))reason="POSE_UNAVAILABLE";
   else if(strcmp(path->frame,map->world.frame_epoch)||strcmp(path->odom,map->world.odom_epoch)||strcmp(path->configuration,map->world.configuration)||strcmp(path->reference,map->world.reference_id))reason="CONTEXT_CHANGED";
+  else if(required&&(dl_mission_get(&mission,now)||!mission.admitted||mission.kind!=1))reason="MISSION_UNAVAILABLE";
+  else if(required&&!lp_mission_matches(path,&mission))reason="MISSION_CONTEXT_CHANGED";
+  else if(transition)reason="DIRECTION_STOP_REQUIRED";
+  else if(!local&&path->execution.segments_count>1&&path->execution.mission.active_segment+1<path->execution.segments_count&&
+          path->initial_tracker_index>=path->execution.segments[path->execution.mission.active_segment].last_index-1)reason="DIRECTION_STOP_REQUIRED";
   else reason=applied?NULL:"STATE_PREPARING";
   (void)dw_release(&engine.maps,mh);
  }
@@ -78,43 +160,187 @@ static const char *qualified(const void *unused,struct xm_span input,int64_t age
 }
 static bool state_usable(const void *context){ARG_UNUSED(context);return !engine.stopping&&atomic_load(&prepared_valid);}
 static const char *manual_qualified(const void *unused,struct xm_span input,int64_t age){
- ARG_UNUSED(unused);struct xm_manual_sample sample;uint32_t keys;
- if(!input.p)return "INPUT_UNAVAILABLE";
+ ARG_UNUSED(unused);if(!input.p)return "INPUT_UNAVAILABLE";
  if(age<0||age>manual_config.input_timeout_ms)return "INPUT_STALE";
+ struct xm_manual_input modern;int parsed=xm_manual_input_parse(input,&modern);
+ struct dl_clock clock;uint64_t now;dw_vehicle vehicle;
+ if(parsed!=-ENOMSG){
+  if(parsed||(!modern.valid&&strcmp(modern.reason,"USER_RELEASE")&&strcmp(modern.reason,"REARM_REQUIRED")))return "INPUT_INVALID";
+  if(current_vehicle_role(true,&clock,&now,&vehicle))return "POSE_UNAVAILABLE";
+  if(modern.source_pi_us>now)return "INPUT_STALE";
+  bool zero=!modern.keys&&(modern.valid||!strcmp(modern.reason,"USER_RELEASE")||!strcmp(modern.reason,"REARM_REQUIRED"));
+  if(zero)return now-modern.source_pi_us<=(uint64_t)manual_config.input_timeout_ms*1000?NULL:"INPUT_STALE";
+  if(modern.expires_pi_us<=now)return "INPUT_STALE";
+  /* 실제 neutral source의 zero 준비는 이전 HELD의 blocked latch와 독립이다. */
+  return NULL;
+ }
+ struct xm_manual_sample sample;uint32_t keys;
  if(xm_drive_input_parse(input,&keys))return "INPUT_INVALID";
  int rc=xm_manual_sample_parse(input,&sample);
- if(rc!=-ENOMSG&&(rc||!sample.valid||(uint64_t)age+sample.age_ms>manual_config.input_timeout_ms))return "INPUT_INVALID";
- struct dl_clock clock;uint64_t now;dw_vehicle vehicle;
+ /* adapter.c manual_qualify 와 같은 사유: 형식 오류 INVALID, 세션 무효 UNAVAILABLE, 원 나이 초과 STALE (계약 6.2) */
+ if(rc!=-ENOMSG){
+  if(rc)return "INPUT_INVALID";
+  if(!sample.valid)return "INPUT_UNAVAILABLE";
+  if((uint64_t)age+sample.age_ms>(uint64_t)manual_config.input_timeout_ms)return "INPUT_STALE";
+ }
  return current_vehicle(&clock,&now,&vehicle)?"POSE_UNAVAILABLE":NULL;
 }
+/* tracker owner만 실제 원 STOP witness를 현재 immutable path에 한 번 소비한다. */
+static bool stop_matches(const struct xm_drive_command2 *stop,const xenova_drive_DirectionGateWitness *gate){
+ return gate->control_generation==stop->generation&&gate->producer_role==1&&gate->calculation_sequence==stop->calculation_sequence&&
+  gate->plan_revision==stop->plan_revision&&gate->phase_revision==stop->phase_revision&&gate->segment_index==stop->segment_index&&
+  gate->cusp_index==stop->cusp_index&&uuid_same(gate->mission_id.bytes,stop->mission_id)&&gate->mission_revision==stop->mission_revision&&
+  gate->grant_revision==stop->grant_revision&&!gate->driver_action_seq&&!gate->driver_state_seq;
+}
+static float advance_direction(const struct dl_clock *clock,uint64_t now,const dw_vehicle *vehicle){
+ if(!clock->acknowledged)return NAN;
+ xenova_drive_DirectionGateWitness gate;if(dl_direction_get(false,&gate,now))return NAN;
+ struct xm_drive_command2 stop={0};uint64_t end=0;unsigned segment=0;int next_direction=0;bool matched=false;
+ if(k_mutex_lock(&app_metadata,K_NO_WAIT))return NAN;
+ if(direction_phase.active&&engine.tracker.initialized&&engine.tracker.segment>direction_phase.segment)direction_phase.active=false;
+ if(direction_phase.active&&now<direction_phase.end&&gate.gate.requested_direction==direction_phase.next_direction){
+  if(!direction_phase.has_stop){
+   /* 로컬 offer는 실제 remote serial pin이 아니다. finite 원 시도 중 exact witness만 고른다. */
+   for(unsigned i=0;i<direction_phase.attempt_count;i++)if(stop_matches(&direction_phase.attempts[i],&gate)){
+    direction_phase.original_stop=direction_phase.attempts[i];direction_phase.has_stop=true;break;
+   }
+  }
+  matched=direction_phase.has_stop&&stop_matches(&direction_phase.original_stop,&gate);
+  if(matched){stop=direction_phase.original_stop;end=direction_phase.end;segment=direction_phase.segment;next_direction=direction_phase.next_direction;}
+ }
+ k_mutex_unlock(&app_metadata);
+ if(!matched||gate.gate.state<2)return NAN;
+ struct de_reference h;const struct lp_path *path;if(de_path_acquire(&engine,&h,&path))return NAN;
+ float steer=vehicle->has_measured_steering_rad?vehicle->measured_steering_rad:vehicle->has_estimated_steering_rad?vehicle->estimated_steering_rad:NAN;
+ bool settled=false;float target=NAN;
+ if(segment+1<path->execution.segments_count){unsigned index=path->execution.segments[segment+1].first_index;
+  target=path->points[index].steering_rad;
+  settled=isfinite(steer)&&fabsf(steer-target)+vehicle->steering_error_rad<=lp_selected_config.max_steering_error;
+ }
+ struct lp_direction_fact fact={.path_revision=gate.plan_revision,.maneuver_revision=gate.phase_revision,
+  .calculation_sequence=gate.calculation_sequence,.serial_stop_sequence=gate.gate.stop_command_sequence,.gate_revision=gate.gate.gate_revision,
+  .expires_pi_us=gate.valid_until_pi_us<end?gate.valid_until_pi_us:end,.next_segment=segment+1,
+  .direction=next_direction,.current=true,.stationary=true,.steering_settled=settled&&gate.gate.state==4};
+ bool advanced=h.generation==engine.tracker.path_token&&lp_tracker_next_segment(&engine.tracker,path,now,stop.calculation_sequence,&fact);
+ (void)de_path_release(&engine,h);
+ if(advanced&&!k_mutex_lock(&app_metadata,K_NO_WAIT)){direction_phase.active=false;direction_phase.has_stop=false;k_mutex_unlock(&app_metadata);}
+ return !advanced&&isfinite(target)?target:NAN;
+}
 static int automatic(void *unused,struct xm_span control,struct xm_span input,int64_t age,uint64_t deadline,struct drive_sample *out){
- ARG_UNUSED(unused);ARG_UNUSED(control);ARG_UNUSED(input);ARG_UNUSED(age);
+ ARG_UNUSED(unused);ARG_UNUSED(input);ARG_UNUSED(age);command_begin(out,false,control);out->binary_input=true;
  struct dl_clock clock;uint64_t now;dw_vehicle vehicle;
- out->binary_input=true;
  if(current_vehicle(&clock,&now,&vehicle)){out->reason="POSE_UNAVAILABLE";return 0;}
+ bool required;if(mission_profile(&required)){out->reason="WORLD_UNAVAILABLE";return 0;}
+ out->modern_command=required;
+ xenova_drive_MissionGrant mission={0};if(required&&(!clock.acknowledged||dl_mission_for_local(&mission,now))){out->reason="MISSION_UNAVAILABLE";return 0;}
+ float hold_target=advance_direction(&clock,now,&vehicle);
+ if(required&&!k_mutex_lock(&app_metadata,K_NO_WAIT)){
+  if(direction_phase.active&&(!uuid_same(mission.mission_id.bytes,direction_phase.original_stop.mission_id)||
+     mission.mission_revision!=direction_phase.original_stop.mission_revision))memset(&direction_phase,0,sizeof(direction_phase));
+  k_mutex_unlock(&app_metadata);
+ }
  struct lp_budget budget={deadline,clock_us,tracker_cancelled,NULL,NULL};struct lp_command command;
- enum de_result rc=de_track(&engine,now,.02f,&command,&vehicle,budget);
+ enum de_result rc=required?de_track_mission(&engine,&mission,now,.02f,&command,&vehicle,budget):de_track(&engine,now,.02f,&command,&vehicle,budget);
  if(rc){out->reason=rc==DE_PATH?lp_reason(command.result):de_reason(rc);return 0;}
- out->v_mps=command.velocity;out->steer_rad=command.steer;out->nearest_m=command.known_distance;
- out->valid_until_ms=valid_until(&clock,&vehicle);out->input_sequence=(int64_t)vehicle.sequence;
- int64_t map_end=((int64_t)command.valid_until_pi_us-clock.upper)/1000;
- if(map_end<out->valid_until_ms)out->valid_until_ms=map_end;
+ out->v_mps=command.velocity;out->steer_rad=command.velocity?command.steer:0;out->nearest_m=command.known_distance;
+ out->clock_domain=DRIVE_SAMPLE_COUNTER_MS;out->valid_until_ms=valid_until(&clock,&vehicle);out->input_sequence=(int64_t)vehicle.sequence;
+ int64_t map_end=((int64_t)command.valid_until_pi_us-clock.upper)/1000;if(map_end<out->valid_until_ms)out->valid_until_ms=map_end;
  out->input_received_ms=((int64_t)vehicle.pi_sample_us-(int64_t)vehicle.clock_error_us-clock.upper)/1000;
  if(out->valid_until_ms<=0){out->v_mps=out->steer_rad=0;out->reason="CLOCK_ERROR";return 0;}
- /* A worker completion is not exported until its real health/deadline
-  * assessment is consumed by the coordinator. Preserve the input witness. */
  out->path_generation=engine.last_track_path.generation;out->tracker_index=engine.tracker.index;
- out->maneuver_phase=command.maneuver_phase;
+ out->maneuver_phase=command.maneuver_phase;out->segment_index=command.segment_index;out->cusp_index=command.cusp_index;
  strcpy(out->map_epoch,engine.last_track_world.map_epoch);out->reference_revision=engine.last_track_world.reference_revision;
  out->observation_sequence=engine.last_track_world.observation_sequence;
+ if(required){
+  struct xm_drive_command2 *body=&out->command.command;uuid_text(body->mission_id,mission.mission_id.bytes);
+  body->mission_revision=mission.mission_revision;body->grant_revision=mission.grant_revision;
+  body->world_sequence=out->observation_sequence;body->phase_revision=0;body->segment_index=command.segment_index;body->cusp_index=command.cusp_index;
+  struct de_reference h;const struct lp_path *path;if(de_path_acquire(&engine,&h,&path)){out->reason="PATH_CHANGED";out->v_mps=out->steer_rad=0;return 0;}
+  bool same_path=h.generation==out->path_generation;
+  body->plan_revision=path->revision;body->phase_revision=path->maneuver_revision;
+  (void)de_path_release(&engine,h);
+  if(!same_path){out->reason="PATH_CHANGED";out->v_mps=out->steer_rad=0;return 0;}
+  if(!command_lease(out,&clock,&vehicle,now,command.valid_until_pi_us)){out->reason="CLOCK_ERROR";out->v_mps=out->steer_rad=0;return 0;}
+  if(command.gate_required){
+   if(k_mutex_lock(&app_metadata,K_NO_WAIT)){out->reason="DIRECTION_BUSY";return 0;}
+   if(!direction_phase.active){
+    uint64_t end=now<=(uint64_t)INT64_MAX-lp_selected_config.direction_phase_us?now+lp_selected_config.direction_phase_us:0;
+    if(mission.execution_deadline_pi_us&&end>mission.execution_deadline_pi_us)end=mission.execution_deadline_pi_us;
+    direction_phase=(struct direction_phase){.active=true,.generation=body->generation,.segment=command.segment_index,
+      .next_direction=command.requested_direction,.end=end,.maneuver_revision=body->phase_revision,.original_stop=*body};
+   }
+   bool current=direction_phase.generation==body->generation&&direction_phase.maneuver_revision==body->phase_revision&&
+    direction_phase.segment==command.segment_index&&now<direction_phase.end;
+   bool attempts_full=!direction_phase.has_stop&&direction_phase.attempt_count>=8;
+   out->phase_until_pi_us=direction_phase.end;out->gate_required=true;out->requested_direction=command.requested_direction;
+   k_mutex_unlock(&app_metadata);
+   body->stop_reason=3;
+   if(!current)out->reason="DIRECTION_PHASE_EXPIRED";
+   else if(attempts_full)out->reason="DIRECTION_ATTEMPT_LIMIT";
+   else if(isfinite(hold_target)){out->hold_steer=true;out->steer_rad=hold_target;}
+   if(out->command.command.valid_until_pi_us>out->phase_until_pi_us){
+    out->command.command.valid_until_pi_us=out->phase_until_pi_us;
+    out->valid_until_guest_us=(uint64_t)((int64_t)out->phase_until_pi_us-clock.upper);
+    out->valid_until_ms=(int64_t)(out->valid_until_guest_us/1000);
+   }
+  }
+ }
  return 0;
 }
 static float bounded_float(float value,float lo,float hi){return fminf(hi,fmaxf(lo,value));}
+static void manual_unavailable(const struct xm_manual_input *source,const struct xm_vehicle_control *control){
+ /* 계산 owner의 실제 실패는 fresh B entry가 아니다. source/기한을 다시 만들지 않는다. */
+ struct manual_lease_facts facts={0};struct manual_lease_command ignored;
+ (void)manual_lease_step(&manual_config,&manual_gate,source,control,&facts,&ignored);
+ if(source->action>manual_gate.rejected_action)manual_gate.rejected_action=source->action;
+}
 static int manual(void *unused,struct xm_span control,struct xm_span input,int64_t age,uint64_t deadline,struct drive_sample *out){
  ARG_UNUSED(unused);ARG_UNUSED(deadline);
- const char *reason=manual_qualified(NULL,input,age);if(reason){out->reason=reason;return 0;}
- struct dl_clock clock;uint64_t now;dw_vehicle vehicle;
- if(current_vehicle(&clock,&now,&vehicle)){out->reason="POSE_UNAVAILABLE";return 0;}
+ struct xm_manual_input source;int modern=xm_manual_input_parse(input,&source);
+ if(modern!=-ENOMSG){
+  command_begin(out,true,control);if(modern){manual_gate.running=false;manual_gate.waiting_stop=true;manual_gate.continuation_closed=true;out->reason="INPUT_INVALID";return 0;}
+  struct xm_drive_command2 *body=&out->command.command;strcpy(body->driver_session,source.session);
+  body->driver_action_seq=source.action;body->driver_state_seq=source.state;
+  struct xm_vehicle_control selected={0};struct xt_bootstrap boot;struct dl_clock clock;uint64_t now;dw_vehicle vehicle;
+  if(xm_vehicle_control_parse(control,&selected)||xd_context_get(&boot)||current_vehicle_role(true,&clock,&now,&vehicle)){
+   if(source.kind!=XM_MANUAL_NEUTRAL_ONLY||source.keys||manual_gate.seen)manual_unavailable(&source,&selected);
+   out->reason="POSE_UNAVAILABLE";return 0;
+  }
+  if(!command_lease(out,&clock,&vehicle,now,source.keys?source.expires_pi_us:0)&&source.valid&&source.keys){manual_unavailable(&source,&selected);out->reason="INPUT_STALE";return 0;}
+  out->input_sequence=(int64_t)source.sample;
+  bool current=!strcmp(selected.active_vm_id,boot.identity.vm_id)&&!strcmp(selected.active_app,"manual")&&
+   !strcmp(selected.mode,"MANUAL")&&!strcmp(selected.manual_session,source.session);
+  if(source.kind==XM_MANUAL_NEUTRAL_ONLY&&!source.keys&&source.valid&&source.source_pi_us<=now&&
+     now-source.source_pi_us<=(uint64_t)manual_config.input_timeout_ms*1000){
+   manual_neutral=source;manual_neutral_seen=true;return 0;
+  }
+  if(!source.keys&&(source.valid||!strcmp(source.reason,"USER_RELEASE"))){manual_neutral=source;manual_neutral_seen=true;}
+  xenova_drive_DirectionGateWitness gate;bool ready=!dl_direction_get(true,&gate,now)&&gate.gate.state==4&&
+   uuid_same(gate.driver_session.bytes,source.session)&&gate.driver_state_seq<=source.state;
+  /* 원 Pi Authority가 검산한 same-SID carry다. 새 B의 첫 진입에서만 core가 소비하며
+   * 움직이는 차를 stationary라고 꾸미거나 serial STOP 번호를 만들지 않는다. */
+  bool continuation=current&&!strcmp(selected.manual_policy,"CONTINUE_SESSION")&&source.valid&&
+   source.source_pi_us<=now&&source.expires_pi_us>now&&source.generation<=selected.generation;
+  bool same_neutral=ready&&manual_neutral_seen&&!strcmp(manual_neutral.session,source.session)&&
+   !strcmp(manual_neutral.source_instance,source.source_instance)&&!strcmp(manual_neutral.input_epoch,source.input_epoch)&&
+   !strcmp(manual_neutral.device_instance,source.device_instance)&&manual_neutral.grant_revision==source.grant_revision&&
+   gate.driver_state_seq==manual_neutral.state&&gate.driver_action_seq==manual_neutral.action&&source.action>manual_neutral.action;
+  struct manual_lease_facts facts={.now_pi_us=now,.command_until_pi_us=body->valid_until_pi_us,
+   .stop_sequence=ready?gate.gate.stop_command_sequence:0,.current=current,.stop_ready=ready&&(same_neutral||continuation),.continuation=continuation};
+  struct manual_lease_command target;int rc=manual_lease_step(&manual_config,&manual_gate,&source,&selected,&facts,&target);
+  if(rc){out->reason=rc==-ETIME?"INPUT_STALE":rc==-EAGAIN?"DIRECTION_STOP_REQUIRED":"INPUT_UNAVAILABLE";return 0;}
+  if(target.stop||!target.target.v_mps)return 0;
+  float steer=vehicle.has_measured_steering_rad?vehicle.measured_steering_rad:vehicle.has_estimated_steering_rad?vehicle.estimated_steering_rad:NAN;
+  if(!isfinite(steer)||!vehicle.has_steering_error_rad||vehicle.steering_error_rad>lp_selected_config.max_steering_error){manual_unavailable(&source,&selected);out->reason="STEERING_UNAVAILABLE";return 0;}
+  float requested=bounded_float(target.target.v_mps,-lp_selected_config.max_reverse_velocity,lp_selected_config.max_velocity);
+  if(vehicle.velocity_mps*requested< -.001f){manual_unavailable(&source,&selected);out->reason="DIRECTION_STOP_REQUIRED";return 0;}
+  float allowed=lp_selected_config.max_steer-vehicle.steering_error_rad;
+  out->steer_rad=steer+bounded_float(bounded_float(target.target.steer_rad,-allowed,allowed)-steer,-lp_selected_config.steer_rate*.02f,lp_selected_config.steer_rate*.02f);
+  out->v_mps=vehicle.velocity_mps+bounded_float(requested-vehicle.velocity_mps,-lp_selected_config.max_brake*.02f,lp_selected_config.max_accel*.02f);
+  return 0;
+ }
+ const char *why=manual_qualified(NULL,input,age);if(why){out->reason=why;return 0;}
+ struct dl_clock clock;uint64_t now;dw_vehicle vehicle;if(current_vehicle(&clock,&now,&vehicle)){out->reason="POSE_UNAVAILABLE";return 0;}
  float steer=vehicle.has_measured_steering_rad?vehicle.measured_steering_rad:vehicle.has_estimated_steering_rad?vehicle.estimated_steering_rad:NAN;
  if(!isfinite(steer)||!vehicle.has_steering_error_rad||vehicle.steering_error_rad>lp_selected_config.max_steering_error){out->reason="STEERING_UNAVAILABLE";return 0;}
  struct manual_inputs inputs={.control_payload=control,.input_payload=input,.input_age_ms=age};struct manual_command target;const char *state;
@@ -124,22 +350,29 @@ static int manual(void *unused,struct xm_span control,struct xm_span input,int64
  float requested=bounded_float(target.v_mps,-lp_selected_config.max_reverse_velocity,lp_selected_config.max_velocity);
  if(vehicle.velocity_mps*requested<0)requested=0;
  out->v_mps=vehicle.velocity_mps+bounded_float(requested-vehicle.velocity_mps,-lp_selected_config.max_brake*.02f,lp_selected_config.max_accel*.02f);
- if(requested==0)out->v_mps=0; /* request stop, never a physical-stop assertion */
- out->valid_until_ms=valid_until(&clock,&vehicle);return 0;
+ if(requested==0)out->v_mps=0;
+ out->clock_domain=DRIVE_SAMPLE_COUNTER_MS;out->valid_until_ms=valid_until(&clock,&vehicle);return 0;
 }
 void drive_lattice_adapter(struct drive_adapter *adapter,bool is_manual){
+ if(is_manual){memset(&manual_gate,0,sizeof(manual_gate));manual_neutral_seen=false;}
  *adapter=(struct drive_adapter){.calculate_until=is_manual?manual:automatic,.input_timeout_ms=200,
   .state_ready=true,.requires_state_sync=!is_manual,.state_usable=is_manual?NULL:state_usable,
   .qualify=is_manual?manual_qualified:qualified,.manual_input=is_manual};
 }
 static int prepare_current(const dw_state *copy){
- struct dl_clock mapping;uint64_t now;if(dl_clock_get(&mapping,&now))return -EAGAIN;
- uint64_t guest;if(clock_us(NULL,&guest))return -EIO;
+ PREP_LOCAL;
+ struct dl_clock mapping;uint64_t now;PREP_REQUIRE(6,dl_clock_get(&mapping,&now),-EAGAIN);
+ PREP_VALUE(1,pi,now);
+ uint64_t guest;PREP_REQUIRE(7,clock_us(NULL,&guest),-EIO);
+ PREP_VALUE(2,guest,guest);
  struct lp_budget budget={guest+lp_selected_config.planner_budget_us,clock_us,cancelled,NULL,NULL};
  struct de_reference proof;struct de_witness witness;dw_vehicle vehicle;
- enum de_result rc=de_prepare(&engine,now,&proof,&witness,&vehicle,budget);if(rc)return -EAGAIN;
- struct xt_bootstrap boot;if(xd_context_get(&boot))return -EAGAIN;
- struct de_reference ph;const struct lp_path *path;if(de_path_acquire(&engine,&ph,&path))return -EAGAIN;
+ enum de_result rc=de_prepare(&engine,now,&proof,&witness,&vehicle,budget);
+ if(rc){PREP_DIAG(8,rc,-EAGAIN,0);return -EAGAIN;}
+ PREP_VALUE(4,proof,proof.generation);
+ struct xt_bootstrap boot;PREP_REQUIRE(9,xd_context_get(&boot),-EAGAIN);
+ struct de_reference ph;const struct lp_path *path;PREP_REQUIRE(10,de_path_acquire(&engine,&ph,&path),-EAGAIN);
+ PREP_VALUE(8,path,ph.generation);PREP_VALUE(8,rev,path->revision);
  xenova_drive_AppliedState result={0};
  strcpy(result.vm,boot.identity.vm_id);strcpy(result.execution,boot.identity.execution_id);strcpy(result.app_instance,boot.auto_instance_id);
  strcpy(result.host_boot,boot.identity.host_boot_id);strcpy(result.gateway_instance,mapping.gateway);
@@ -151,13 +384,27 @@ static int prepare_current(const dw_state *copy){
  result.has_vehicle_sequence=true;
  result.maneuver_revision=path->maneuver_revision;
  result.rebuilt=copy==NULL;result.applied=ph.generation==proof.generation;
+#if defined(CONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS)
+ int metadata_rc=k_mutex_lock(&app_metadata,K_NO_WAIT),expiry_rc=0;bool expired=false;
+ if(!metadata_rc){
+#else
  if(!k_mutex_lock(&app_metadata,K_NO_WAIT)){
+#endif
   if(!engine.stopping&&!strcmp(app_instance,boot.auto_instance_id)&&preparation_sequence<UINT64_MAX){
    int64_t bound=((int64_t)witness.valid_until_pi_us-mapping.upper)/1000;
    uint64_t ended=0;
+#if defined(CONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS)
+   if(bound>0)PREP_VALUE(32,until,(uint64_t)bound*1000);
+   if(bound<=0||(expiry_rc=clock_us(NULL,&ended))||ended>(uint64_t)bound*1000){
+    expired=true;
+#else
    if(bound<=0||clock_us(NULL,&ended)||ended>(uint64_t)bound*1000){
+#endif
     result.applied=false;result.has_reason=true;strcpy(result.reason,"PREPARATION_EVIDENCE_EXPIRED");
    }
+#if defined(CONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS)
+   if(bound>0&&!expiry_rc)PREP_VALUE(2,guest,ended);
+#endif
    if(!copy&&prepared.generation==proof.generation&&!strcmp(prepared_gateway,mapping.gateway)&&copy_message[0]){
     result.has_copy_message_id=true;strcpy(result.copy_message_id,copy_message);result.state_revision=copy_revision;result.rebuilt=false;
    }
@@ -170,7 +417,16 @@ static int prepare_current(const dw_state *copy){
   k_mutex_unlock(&app_metadata);
  }
  (void)de_path_release(&engine,ph);
+#if defined(CONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS)
+ if(!result.calculation_sequence){PREP_DIAG(11,metadata_rc,-EAGAIN,0);return -EAGAIN;}
+ PREP_VALUE(16,seq,result.application_sequence);
+ int returned=dl_applied(&result);
+ if(expired)PREP_DIAG(12,expiry_rc,returned,0);
+ PREP_DIAG(returned?13:result.applied?14:15,returned,returned,0);
+ return returned;
+#else
  return result.calculation_sequence?dl_applied(&result):-EAGAIN;
+#endif
 }
 static void reject_state(const dw_state *copy,enum de_result reason){
  struct dl_clock clock;uint64_t now;struct xt_bootstrap boot;
@@ -195,13 +451,26 @@ static void planner(void *a,void *b,void *c){
  ARG_UNUSED(a);ARG_UNUSED(b);ARG_UNUSED(c);
  const dw_state *copy=NULL;int slot=-1;bool applying=false;
  while(!cancelled(NULL)){
-  struct dl_clock mapping;uint64_t now,guest;
+  struct dl_clock mapping;uint64_t now,guest;PREP_LOCAL;
+#if defined(CONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS)
+  int mapping_rc=dl_clock_get(&mapping,&now),guest_rc=0;
+  if(!mapping_rc){PREP_VALUE(1,pi,now);guest_rc=clock_us(NULL,&guest);}
+  if(mapping_rc||guest_rc){PREP_DIAG(1,mapping_rc?mapping_rc:guest_rc,0,0);k_sleep(K_MSEC(2));continue;}
+#else
   if(dl_clock_get(&mapping,&now)||clock_us(NULL,&guest)){k_sleep(K_MSEC(2));continue;}
+#endif
+  PREP_VALUE(2,guest,guest);PREP_DIAG(16,0,0,0);
+  xenova_drive_MissionGrant mission;bool required;
+  if(mission_profile(&required)||!required||dl_mission_get(&mission,now))(void)de_mission(&engine,NULL,now);
+  else (void)de_mission(&engine,&mission,now);
   if(engine.planning){
    enum de_result rc=de_plan_slice(&engine,4,now);
+#if defined(CONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS)
+   if(!engine.planning)PREP_DIAG(rc==DE_OK?5:4,rc,rc,atomic_load(&engine.search_reason));
+#endif
    if(!engine.planning&&rc==DE_OK)(void)prepare_current(NULL);
   }else if(engine.apply_pending){
-   enum de_result rc=de_apply_finish(&engine);
+   enum de_result rc=de_apply_finish(&engine,now);
     if(rc!=DE_BUSY){if(rc==DE_OK)(void)prepare_current(copy);else if(rejected(rc))reject_state(copy,rc);dl_state_release(slot);slot=-1;copy=NULL;applying=false;}
   }else{
    if(slot<0)slot=dl_state_take(&copy);
@@ -218,6 +487,10 @@ static void planner(void *a,void *b,void *c){
    }else{
     struct lp_budget budget={guest+lp_selected_config.planner_budget_us,clock_us,cancelled,NULL,NULL};
     enum de_result started=de_plan_start(&engine,now,budget);
+#if defined(CONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS)
+    if(started==DE_OK)PREP_DIAG(3,started,started,atomic_load(&engine.search_reason));
+    else if(started!=DE_WAITING&&started!=DE_BUSY)PREP_DIAG(2,started,started,atomic_load(&engine.search_reason));
+#endif
     if(started==DE_OK&&!engine.planning)(void)prepare_current(NULL);
    }
   }
@@ -227,7 +500,7 @@ static void planner(void *a,void *b,void *c){
  }
  de_stop(&engine);
  while(engine.planning)(void)de_plan_slice(&engine,1,0);
- while(engine.apply_pending)(void)de_apply_finish(&engine);
+ while(engine.apply_pending)(void)de_apply_finish(&engine,0);
  if(slot>=0)dl_state_release(slot);
 }
 static int planner_start(void){
@@ -255,11 +528,40 @@ void drive_lattice_completed(const struct drive_completion *work){
  if(k_mutex_lock(&app_metadata,K_NO_WAIT))return;
  if(!engine.stopping&&!strcmp(app_instance,work->source.app_instance)){
   if(prepared.generation!=work->sample.path_generation){copy_message[0]=0;copy_revision=0;}
-  completion=(struct completion){.sequence=work->progress,.vehicle_sequence=(uint64_t)work->sample.input_sequence,
-   .tracker_index=work->sample.tracker_index,.path_generation=work->sample.path_generation,.finished_us=work->end_us,.maneuver_phase=work->sample.maneuver_phase};
+  completion=(struct completion){.sequence=work->sequence,.vehicle_sequence=(uint64_t)work->sample.input_sequence,
+  .tracker_index=work->sample.tracker_index,.segment_index=work->sample.segment_index,.path_generation=work->sample.path_generation,.finished_us=work->end_us,.maneuver_phase=work->sample.maneuver_phase};
   strcpy(completion.instance,app_instance);strcpy(completion.world.map_epoch,work->sample.map_epoch);
   completion.world.reference_revision=work->sample.reference_revision;completion.world.observation_sequence=work->sample.observation_sequence;
   prepared.generation=work->sample.path_generation;prepared_valid=true;prepared_expiry=(uint64_t)work->sample.valid_until_ms*1000;
+ }
+ k_mutex_unlock(&app_metadata);
+}
+int drive_lattice_command(const struct drive_completion *work,struct xm_drive_command3 *out,uint64_t *guest_until){
+ if(!work||!out||!guest_until||!work->sample.modern_command)return -EINVAL;
+ *out=work->sample.command;*guest_until=work->sample.valid_until_guest_us;
+ struct xm_drive_command2 *c=&out->command;
+ c->calculation_sequence=work->sequence;c->completed_guest_us=work->end_us;
+ c->v_mps=work->sample.reason?0:work->sample.v_mps;c->steer_rad=work->sample.reason?0:work->sample.steer_rad;
+ bool hold=work->sample.hold_steer&&!work->sample.reason;
+ bool stop=!hold&&!c->v_mps&&!c->steer_rad;
+ strcpy(c->command_kind,hold?"HOLD_STEER":stop?"STOP":"DRIVE");
+ out->next_direction=work->sample.gate_required?work->sample.requested_direction:0;
+ if(!stop&&!hold)out->next_direction=0;
+ if(stop&&!c->stop_reason)c->stop_reason=work->sample.reason?2:0;
+ if(stop){
+  /* 안전 STOP은 clock/World/driver 준비를 기다리지 않는다. 알려진 원 context는 유지한다. */
+  if(!out->clock_probe_sequence)c->valid_until_pi_us=0;
+ }else if(!out->clock_probe_sequence||!c->valid_until_pi_us||!*guest_until)return -ETIME;
+ return 0;
+}
+void drive_lattice_command_attempt(const struct drive_completion *work,const struct xm_drive_command3 *command){
+ if(!work||!command||!work->sample.gate_required||strcmp(command->command.command_kind,"STOP"))return;
+ if(k_mutex_lock(&app_metadata,K_NO_WAIT))return;
+ if(direction_phase.active&&!direction_phase.has_stop&&direction_phase.generation==command->command.generation&&
+    direction_phase.segment==command->command.segment_index&&direction_phase.maneuver_revision==command->command.phase_revision){
+  bool duplicate=false;
+  for(unsigned i=0;i<direction_phase.attempt_count;i++)if(direction_phase.attempts[i].calculation_sequence==command->command.calculation_sequence)duplicate=true;
+  if(!duplicate&&direction_phase.attempt_count<8)direction_phase.attempts[direction_phase.attempt_count++]=command->command;
  }
  k_mutex_unlock(&app_metadata);
 }
@@ -279,7 +581,7 @@ int drive_lattice_reset_poll(int64_t deadline){
  planner_joined=true;rc=de_restart(&engine);if(rc){planner_joined=false;return -EAGAIN;}
  struct xt_bootstrap boot;if(xd_context_get(&boot)){de_stop(&engine);planner_joined=false;return -EAGAIN;}
  if(k_mutex_lock(&app_metadata,K_NO_WAIT)){de_stop(&engine);planner_joined=false;return -EAGAIN;}
- strcpy(app_instance,boot.auto_instance_id);prepared_valid=false;memset(&completion,0,sizeof(completion));
+ strcpy(app_instance,boot.auto_instance_id);prepared_valid=false;memset(&completion,0,sizeof(completion));memset(&direction_phase,0,sizeof(direction_phase));
  preparation_sequence=snapshot_revision=exported_completion=0;copy_message[0]=0;copy_revision=prepared_expiry=0;prepared_gateway[0]=0;k_mutex_unlock(&app_metadata);
  return planner_start();
 }
@@ -325,8 +627,14 @@ int drive_lattice_snapshot(dw_state *out){
  work=completion;generation=current_generation;revision=snapshot_revision+1;k_mutex_unlock(&app_metadata);
  struct de_reference h;const struct lp_path *path;if(de_path_acquire(&engine,&h,&path))return -EBUSY;
  int rc=-EAGAIN;
- if(h.generation==work.path_generation){
-  memset(out,0,sizeof(*out));out->major=1;strcpy(out->source_vm,boot.identity.vm_id);strcpy(out->source_execution,boot.identity.execution_id);
+ struct dl_clock mapping;uint64_t pi_now;xenova_drive_MissionGrant mission;
+ bool required=(path->world_features&DW_LANE_MODEL)!=0;
+ bool mission_ok=!required||(!dl_clock_get(&mapping,&pi_now)&&!dl_mission_for_local(&mission,pi_now)&&lp_mission_matches(path,&mission));
+ bool basis_ok=!path->task.active||(path->basis.bound&&!strcmp(path->basis.map,work.world.map_epoch)&&
+  !strcmp(path->basis.frame,path->frame)&&!strcmp(path->basis.odom,path->odom)&&!strcmp(path->basis.configuration,path->configuration)&&
+  !strcmp(path->basis.calibration,lp_selected_config.calibration)&&!strcmp(path->basis.primitive,lp_selected_assets.sha256));
+ if(h.generation==work.path_generation&&mission_ok&&basis_ok){
+  memset(out,0,sizeof(*out));if(!lp_state_export(path,out)){(void)de_path_release(&engine,h);return -EINVAL;}strcpy(out->source_vm,boot.identity.vm_id);strcpy(out->source_execution,boot.identity.execution_id);
   strcpy(out->source_app_instance,boot.auto_instance_id);out->source_generation=generation;out->state_revision=revision;
   strcpy(out->frame_epoch,path->frame);strcpy(out->odom_epoch,path->odom);strcpy(out->configuration,path->configuration);
   strcpy(out->calibration,lp_selected_config.calibration);strcpy(out->primitive,lp_selected_assets.sha256);strcpy(out->reference_id,path->reference);
@@ -337,6 +645,7 @@ int drive_lattice_snapshot(dw_state *out){
    out->has_merge_passed_reference_revision=true;out->merge_passed_reference_revision=path->merge_passed_reference_revision;
   }
   out->calculation_sequence=work.sequence;out->tracker_index=work.tracker_index;out->complete=true;
+  if(out->has_mission)out->mission.active_segment=work.segment_index;
   out->path_count=path->count;memcpy(out->path,path->points,path->count*sizeof(*path->points));
   uint8_t random[16];sys_rand_get(random,sizeof(random));xm_uuid4_format(out->message_id,random);
   strcpy(out->map_epoch,work.world.map_epoch);out->observation_seq=work.world.observation_sequence;rc=0;

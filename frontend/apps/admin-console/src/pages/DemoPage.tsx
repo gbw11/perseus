@@ -1,5 +1,6 @@
 import { Button, Card, Modal, StatusBadge, useToast } from '@xenova/ui';
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { Link, useNavigate } from 'react-router';
 import { ApiError } from '../api/client';
 import {
   driveKeyOf,
@@ -53,6 +54,12 @@ export function DemoPage() {
           <span className={styles.draft}>강제 종료 API(-135) 미구현 — mock 모드에서만 동작</span>
         )}
       </section>
+      <nav className={styles.simulatorTabs} aria-label="Simulator 하위 메뉴">
+        <Link to="/simulator" aria-current="page">
+          시뮬레이션 제어
+        </Link>
+        <Link to="/simulator/stress">부하 테스트</Link>
+      </nav>
       <div className={styles.cols3}>
         {ROLE_ORDER.map((app) => (
           <IsolationCard key={app} app={app} />
@@ -80,6 +87,7 @@ const KILL_EFFECT: Record<AppId, string> = {
 };
 
 function IsolationCard({ app }: { app: AppId }) {
+  const navigate = useNavigate();
   const { drive } = useDrive();
   const vms = useVms();
   const toast = useToast();
@@ -88,7 +96,6 @@ function IsolationCard({ app }: { app: AppId }) {
   const vm = vmOf(app, vms.data?.items, drive);
   const state = drive?.apps[app];
   const health = appHealth(role, vm, state);
-  const linux = vm?.guest_kind === 'linux';
   const down = vm?.state !== 'running' || health === 'recovering' || health === 'fault';
   const active = !!vm && drive?.control?.active_vm_id === vm.vm_id && drive.control.received_ago_ms < 3000;
   return (
@@ -128,14 +135,8 @@ function IsolationCard({ app }: { app: AppId }) {
           >
             강제 종료
           </Button>
-          <Button
-            variant="secondary"
-            disabled
-            title={
-              linux ? '에이전트 부하 명령(-123) 미구현' : 'Zephyr VM 은 에이전트가 없어 부하를 줄 수 없다'
-            }
-          >
-            CPU 부하
+          <Button variant="secondary" disabled={!vm} onClick={() => navigate('/simulator/stress')}>
+            부하 테스트
           </Button>
         </div>
       </div>

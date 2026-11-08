@@ -252,6 +252,23 @@ DELETE /api/v1/drive/resume  3초 카운트다운 취소 → drive.resume.cancel
 보고가 없는 구형 Agent나 과거 DB 행의 값은 `null`이며 빈 표만으로 수집 결과를 판단할 수 없습니다.
 표본 만료는 기존 `stale` 필드로 확인합니다. Flyway V8은 기존 프로세스 스냅샷에 nullable 열을 추가합니다.
 
+## VM 부하·장애 주입 명령
+
+Linux VM의 CPU·메모리 부하, Zephyr AUTO 연산 지연, 명령 상태 조회 계약은
+[VM 명령 API v1](../docs/contracts/vm-command-api-v1.md)을 따릅니다.
+
+```text
+POST /api/v1/vms/{vmId}/stress/cpu
+POST /api/v1/vms/{vmId}/stress/memory
+POST /api/v1/vms/{vmId}/faults/auto-delay
+POST /api/v1/vms/{vmId}/faults/agent-exit
+GET  /api/v1/vms/{vmId}/commands/{commandId}
+```
+
+제출 API는 `202`와 `command_id`를 반환합니다. MQTT 결과를 받기 전에는 `PENDING`, 이후에는
+`ACCEPTED/RUNNING/SUCCEEDED/FAILED/REJECTED`입니다. Flyway V9의
+`agent_command_results`가 명령별 최신 상태와 계약 위반을 저장합니다.
+
 ## 테스트
 
 Windows:
