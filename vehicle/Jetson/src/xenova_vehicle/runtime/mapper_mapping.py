@@ -133,13 +133,19 @@ class MapperMapping:
     physical profile이 준비되면 최초 원 PROVENANCE 요청을 한 번만 생성한다. 실패/만료/
     UNKNOWN을 새 UUID/nonce/기한으로 자동 재발행하지 않는다. scene-only 전환은 이미
     수락한 range cursor를 유지하지만 실제 geometry source 교체는 새 owner를 요구한다.
+    선택 clock_us는 원 compute 완료 clock이며 codec에도 그대로 전달한다. None은
+    실제 monotonic clock을 유지하고 시각/기한/현재 수락을 생성하지 않는다.
     """
     def __init__(self,context_port,mailbox,raw_binding,calibration,profile,*,initial_storage_material,
                  complete=None,provenance_block_count=1<<20,job_lifetime_us=5_000_000,
-                 crossing=None,aisle_lane_indices=None):
+                 crossing=None,aisle_lane_indices=None,clock_us=None):
         if (type(context_port) is not MappingContextPort or type(mailbox) is not MapperStorageMailbox
                 or type(raw_binding) is not RawBinding or type(calibration) is not CalibrationProfile or type(profile) is not MapperProfile):
             raise ValueError('actual context port/mailbox/raw/calibration/mapper profile required')
+        if clock_us is not None and not callable(clock_us):
+            raise ValueError('optional original completion clock must be callable')
+        # None은 codec의 실제 monotonic clock이다. 원 now_us를 완료시각으로 고정하지 않는다.
+        self._completion_clock=clock_us
         if (type(initial_storage_material) is not tuple or len(initial_storage_material)!=2
                 or type(initial_storage_material[0]) is not dict or type(initial_storage_material[1]) is not dict):
             raise ValueError('original admitted D binding/bootstrap required')
@@ -285,7 +291,7 @@ class MapperMapping:
             map_frame_id='odom:'+self._context.odom_epoch,body=self.calibration.body,
             method_manifest_sha256=self.profile.sha256,input_kind='LIVE',calibration_profile=self.calibration,
             parking_aisles=self.profile.parking_aisles,aisle_lane_indices=self._roles,crossing=self._crossing,
-            lane_profile=self.profile.pipeline.registration)
+            lane_profile=self.profile.pipeline.registration,clock_us=self._completion_clock)
         scope=scope.with_parking_method(catalogs._accepted.parking.method)
         collector.rebind_scope(scope)
         if self._complete is not None:scope=catalogs.restore_complete(self._complete,current_scope=scope,now_us=now_us);collector.rebind_scope(scope)
@@ -377,7 +383,8 @@ class MapperMapping:
                     delivery=self.catalogs.take_delivery()
                     if delivery is not None:self._consume(delivery,now_us)
             return bound
-        self.mailbox.compute_encode_pending(current_context_sha256=self._context.sha256,now_us=now_us)
+        self.mailbox.compute_encode_pending(current_context_sha256=self._context.sha256,now_us=now_us,
+            clock_us=self._completion_clock)
         if self._pending is not None:
             pending=self._pending
             if pending.via_catalog:
@@ -395,7 +402,15 @@ class MapperMapping:
                     self._pending=None;return 'UNSTARTED_EXPIRED'
                 if not pending.via_catalog:self.mailbox.compute_offer(pending.request,now_us=now_us)
                 return 'WAIT_ORIGINAL_D_JOB'
-        if self.mailbox.main_peek() is not None:return 'WAIT_PHYSICAL_RELEASE'
+        peek=self.mailbox.main_peek()
+        if peek is not None:
+            catalog_pending=None if self.catalogs is None else self.catalogs.pending
+            if catalog_pending is not None and catalog_pending.request is peek.request:
+                # 독립 catalog 작업의 원 consumer가 완료를 읽어야 mailbox도 비워진다.
+                # delivery는 기존 일정 owner가 take_delivery로 받도록 남긴다.
+                status=self.catalogs.maintenance(now_us=now_us)
+                if self.mailbox.main_peek() is None:return status
+            return 'WAIT_PHYSICAL_RELEASE'
         if self.collector is None:
             if self._range_request is not None:return 'PROVENANCE_ORIGINAL_TERMINAL'
             if json_bytes(self._material,2048)['bootstrap']['status']=='COMPLETE' and self._complete is None:return 'WAIT_SOURCE_COMPLETE'

@@ -147,13 +147,17 @@ class MapperCatalogs:
 
     crossing은 명시 bytes 또는 (road,stamp)->bytes 정책이다. None이면 UNCONFIGURED.
     D job/nonce는 caller가 원 기한과 함께 제공하며 이 객체는 ID/시각을 생성하지 않는다.
+    선택 clock_us는 encode 완료의 원 compute clock이며 None은 실제 monotonic이다.
     """
     def __init__(self, context, *, mailbox, clock_id, map_frame_id, body,
             method_manifest_sha256, input_kind, calibration_profile=None, parking_aisles=(),
             aisle_lane_indices=None, crossing=None, lane_profile=RegistrationProfile(),
-            parking_profile=ParkingProfile(), association_profile=AssociationProfile()):
+            parking_profile=ParkingProfile(), association_profile=AssociationProfile(), clock_us=None):
         if type(context) is not StorageContext or type(mailbox) is not MapperStorageMailbox or mailbox.context_sha256 != context.sha256:
             raise ValueError('same original context/mailbox required')
+        if clock_us is not None and not callable(clock_us):
+            raise ValueError('optional original completion clock must be callable')
+        self._completion_clock=clock_us
         if type(body) is not BodyModel or type(lane_profile) is not RegistrationProfile:
             raise ValueError('explicit body/registration policy required')
         if (type(parking_aisles) is not tuple or len(parking_aisles) > 4
@@ -408,7 +412,8 @@ class MapperCatalogs:
         self._owner(); uint(now_us)
         if self._staged is not None: raise CatalogNotReady('geometry draft is not terminal')
         current_sha = self.context.sha256 if self._transition is None else self._transition.sha256
-        self.mailbox.compute_encode_pending(current_context_sha256=current_sha, now_us=now_us)
+        self.mailbox.compute_encode_pending(current_context_sha256=current_sha, now_us=now_us,
+            clock_us=self._completion_clock)
         if self._pending is not None:
             if not self._submitted and now_us >= self._pending.request.job.expires_us:
                 self._unoffered_terminal(self._pending, 'EXPIRED', now_us)

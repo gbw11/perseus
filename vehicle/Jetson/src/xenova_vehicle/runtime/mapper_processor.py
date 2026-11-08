@@ -91,7 +91,7 @@ class ResidentMapperProcessor:
             if type(value) is not dict or set(value)!={'binding','bootstrap'}:raise ValueError('exact original D material required')
             self._mapping=MapperMapping(self._mapping_context_port,self._mapping_mailbox,self._binding,
                 self._accepted.calibration,self._config,initial_storage_material=(value['binding'],value['bootstrap']),
-                complete=self._durable_source)
+                complete=self._durable_source,clock_us=self.clock)
             if self._checkpoint_interval is not None:
                 from .mapper_storage_schedule import MapperStorageSchedule
                 self._storage_schedule=MapperStorageSchedule(self._mapping,interval_us=self._checkpoint_interval,
