@@ -24,7 +24,13 @@ PB_BIND(xenova_drive_VehicleSample, xenova_drive_VehicleSample, 2)
 PB_BIND(xenova_drive_DriveState, xenova_drive_DriveState, 4)
 
 
+PB_BIND(xenova_drive_TaskReferenceState, xenova_drive_TaskReferenceState, 2)
+
+
 PB_BIND(xenova_drive_ClockProbe, xenova_drive_ClockProbe, AUTO)
+
+
+PB_BIND(xenova_drive_GuestClockReceipt, xenova_drive_GuestClockReceipt, AUTO)
 
 
 PB_BIND(xenova_drive_WorldTrust, xenova_drive_WorldTrust, 2)
@@ -67,6 +73,9 @@ PB_BIND(xenova_drive_GearSegment, xenova_drive_GearSegment, AUTO)
 
 
 PB_BIND(xenova_drive_DirectionGateRef, xenova_drive_DirectionGateRef, AUTO)
+
+
+PB_BIND(xenova_drive_DirectionGateWitness, xenova_drive_DirectionGateWitness, AUTO)
 
 
 PB_BIND(xenova_drive_MissionGrant, xenova_drive_MissionGrant, 2)

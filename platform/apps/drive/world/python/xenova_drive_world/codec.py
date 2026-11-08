@@ -1,5 +1,6 @@
 """유한 world/state 계약의 형식·기하 검증. 권위·시계·센서 수락을 발급하지 않는다."""
 import math
+from uuid import UUID
 from google.protobuf.message import DecodeError
 from . import world_pb2 as schema
 
@@ -11,20 +12,24 @@ PARKING_MODEL=4
 LOCALIZATION_BOUNDS=8
 WORLD_FEATURES=15
 STATE_FEATURES=7
+STATE_TASK_REFERENCE=8
+STATE_KNOWN_FEATURES=STATE_FEATURES|STATE_TASK_REFERENCE
 CELL_ROAD=8
 MAX_U63=(1<<63)-1
 NIL_UUID=bytes(16)
 _STR64={'vehicle','configuration','calibration','primitive','reference_id','reason','device','mapper_device'}
 _UUID_BYTES={'admission_id','survey_id','mission_id','scene_admission_id','operator_request_nonce','sensor_instance',
-             'request_nonce','nonce','pi_host_boot','gateway_instance','owner_vm','owner_execution','app_instance'}
+             'request_nonce','nonce','pi_host_boot','gateway_instance','owner_vm','owner_execution','app_instance',
+             'driver_session'}
 _REPEATED_CAPS={'DriveState.path':512,'DriveState.segments':3,'LaneModel.lanes':2,
     'LaneGeometry.centerline':32,'LaneModel.divider':32,'WorldSnapshot.parking_slots':8,
-    'ParkingSlot.corners':4,'MissionExecution.selected_slot_polygon':4}
+    'ParkingSlot.corners':4,'MissionExecution.selected_slot_polygon':4,
+    'TaskReferenceState.basis_prefix':64}
 _MESSAGE_CAPS={'WorldSnapshot':32768,'DriveState':32768,'DriveLink':32768,'LaneModel':1408,
     'ParkingSlot':256,'MapLocalization':96,'SceneAdmissionRef':96,'ParkingSetMeta':64,
     'MissionGrant':1024,'MissionBudgetRequest':512,'MissionBudgetReply':1536,
     'MapperClockProbe':1024,'MapperClockReply':1024,'SurveySummary':288,'SceneGrant':1024,
-    'TofObservation':1024}
+    'TofObservation':1024,'TaskReferenceState':1024,'GuestClockReceipt':64,'DirectionGateWitness':512}
 
 
 def _bytes_bound(field):
@@ -69,6 +74,12 @@ def _positive(message,*names):
 
 def _nonnegative(message,*names):
     if any(getattr(message,name)<0 for name in names):raise ValueError('negative bound or distance')
+
+
+def _source_uuid(value):
+    try: parsed=UUID(value)
+    except (ValueError,AttributeError) as error:raise ValueError('canonical source UUID') from error
+    if not parsed.int or str(parsed)!=value:raise ValueError('canonical source UUID')
 
 
 def _scene_pair(message,revision='scene_admission_revision'):
@@ -301,8 +312,15 @@ def _validate_one(message):
         elif message.HasField('scene'):raise ValueError('scene requires new world profile')
     elif isinstance(message,schema.DriveState):
         if message.world_features not in (0,1,11,15):raise ValueError('unsupported state world features')
-        if not message.HasField('state_features') or message.state_features!=STATE_FEATURES or not message.HasField('mission'):
+        features=message.state_features
+        if (not message.HasField('state_features') or features&STATE_FEATURES!=STATE_FEATURES
+                or features&~STATE_KNOWN_FEATURES or not message.HasField('mission')):
             raise ValueError('state features/mission required')
+        task=message.HasField('task_reference')
+        if bool(features&STATE_TASK_REFERENCE)!=task or task and not message.world_features&LANE_MODEL:
+            raise ValueError('state task feature/presence/world profile')
+        if task and message.task_reference.basis_revision>message.reference_revision:
+            raise ValueError('task basis revision exceeds calculation witness')
         if not message.complete or not 2<=len(message.path)<=512 or message.tracker_index>=len(message.path):raise ValueError('incomplete path state')
         if message.direction not in (-1,0,1) or message.maneuver_phase>2:raise ValueError('maneuver')
         if message.HasField('merge_passed_reference_revision') and (not message.direction or
@@ -344,6 +362,17 @@ def _validate_one(message):
     elif name=='SceneAdmissionRef':
         _positive(message,'admission_revision','survey_revision')
         if message.policy not in (0,1) or not message.policy and message.allow_restore_after_mapper_restart:raise ValueError('scene policy')
+    elif name=='TaskReferenceState':
+        _positive(message,'home_lane_id','from_lane_id','selected_lane_id','basis_revision')
+        if message.changing!=(message.from_lane_id!=message.selected_lane_id):
+            raise ValueError('task lane intent')
+        points=[_xy(p) for p in message.basis_prefix]
+        if not 2<=len(points)<=64 or points[0]==points[-1]:raise ValueError('task basis open prefix')
+        _simple(points)
+        for a,b,c in zip(points,points[1:],points[2:]):
+            if abs(_cross(a,b,c))<1e-6 and (b[0]-a[0])*(c[0]-b[0])+(b[1]-a[1])*(c[1]-b[1])<0:
+                raise ValueError('task basis backtracking')
+        for name in ('mapper_boot','mapper_instance','clock_epoch'):_source_uuid(getattr(message,name))
     elif name=='MissionExecution':_mission(message)
     elif name=='MissionGrant':
         _positive(message,'control_generation','issued_pi_us')
@@ -351,6 +380,50 @@ def _validate_one(message):
     elif name=='DirectionGateRef':
         if message.state>4 or message.requested_direction not in (-1,0,1):raise ValueError('direction gate enum')
         if message.state and (not message.gate_revision or not message.stop_command_sequence):raise ValueError('direction gate provenance')
+    elif name=='GuestClockReceipt':
+        _positive(message,'probe_sequence','guest_receive_us')
+    elif name=='ClockProbe' and message.HasField('receipt'):
+        if (message.receipt.probe_sequence>=message.sequence
+                or message.receipt.guest_receive_us>message.guest_send_us):
+            raise ValueError('clock receipt order')
+    elif name=='DirectionGateWitness':
+        _positive(message,'control_generation','vehicle_sequence','valid_until_pi_us')
+        _positive(message.gate,'gate_revision')
+        _source_uuid(message.pi_session);_source_uuid(message.device_session)
+        if message.segment_index>=3 or message.cusp_index>=512:
+            raise ValueError('direction gate transition range')
+        if message.producer_role==1:
+            _positive(message,'calculation_sequence','plan_revision','phase_revision','mission_revision','grant_revision')
+            if (not message.gate.requested_direction or message.mission_id==NIL_UUID or message.driver_session!=NIL_UUID
+                    or message.driver_action_seq or message.driver_state_seq):
+                raise ValueError('AUTO direction gate source')
+        elif message.producer_role==2:
+            if (message.mission_id!=NIL_UUID or message.mission_revision or message.grant_revision
+                    or message.plan_revision or message.phase_revision or message.segment_index or message.cusp_index
+                    or message.driver_session==NIL_UUID or not message.driver_state_seq):
+                raise ValueError('MANUAL direction gate source')
+        else:raise ValueError('direction gate producer role')
+    elif name=='ClockReply':
+        if message.HasField('guest_clock_valid_until_pi_us') and message.guest_clock_valid_until_pi_us<=message.pi_receive_us:
+            raise ValueError('guest clock original expiry')
+        if message.HasField('accepted_receipt') and not message.HasField('guest_clock_valid_until_pi_us'):
+            raise ValueError('acknowledged clock requires explicit original expiry')
+        if message.HasField('accepted_receipt') and (not message.probe.HasField('receipt')
+                or message.accepted_receipt!=message.probe.receipt):
+            raise ValueError('clock receipt acknowledgement')
+        if message.HasField('direction_gate'):
+            proof=message.direction_gate;vehicle=message.vehicle
+            if proof.gate.state and (proof.vehicle_sequence>vehicle.sequence
+                    or proof.device_session!=vehicle.device_session or not vehicle.HasField('pi_session')
+                    or proof.pi_session!=vehicle.pi_session or vehicle.host_boot!=message.host_boot
+                    or not vehicle.HasField('gateway_instance') or vehicle.gateway_instance!=message.gateway_instance):
+                raise ValueError('direction gate current device source')
+            if proof.gate.state==4 and proof.producer_role==1:
+                if not message.HasField('current_mission'):raise ValueError('direction gate current mission required')
+                mission=message.current_mission
+                if (proof.mission_id!=mission.mission_id or proof.mission_revision!=mission.mission_revision
+                        or proof.grant_revision!=mission.grant_revision or proof.control_generation!=mission.control_generation):
+                    raise ValueError('direction gate current mission')
     elif name=='GearSegment':
         if message.signed_direction not in (-1,1) or not message.first_index<message.last_index<512:
             raise ValueError('gear segment range/direction')

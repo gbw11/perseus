@@ -34,6 +34,16 @@ xenova.drive.DriveState.path max_count:512
 xenova.drive.DriveState.message_id max_size:37
 xenova.drive.DriveState.calibration max_size:65
 xenova.drive.DriveState.map_epoch max_size:37
+xenova.drive.TaskReferenceState.basis_prefix max_count:64
+xenova.drive.TaskReferenceState.vehicle max_size:65
+xenova.drive.TaskReferenceState.mapper_boot max_size:37
+xenova.drive.TaskReferenceState.mapper_instance max_size:37
+xenova.drive.TaskReferenceState.clock_epoch max_size:37
+xenova.drive.GuestClockReceipt.reply_sha256 max_size:32
+xenova.drive.DirectionGateWitness.mission_id max_size:16
+xenova.drive.DirectionGateWitness.driver_session max_size:16
+xenova.drive.DirectionGateWitness.pi_session max_size:37
+xenova.drive.DirectionGateWitness.device_session max_size:37
 xenova.drive.ClockProbe.vm max_size:37
 xenova.drive.ClockProbe.execution max_size:37
 xenova.drive.ClockProbe.app_instance max_size:37

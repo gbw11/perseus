@@ -121,6 +121,22 @@ message DriveState {
   optional MissionExecution mission = 30;
   repeated GearSegment segments = 31;
   optional DirectionGateRef direction_gate = 32;
+  // State feature8 binds the original lane intent and basis to this path snapshot.
+  optional TaskReferenceState task_reference = 33;
+}
+// Presence means both native intent.active and basis.bound. Parent reference/source
+// fields retain their existing meanings; basis_revision is the original prefix's.
+message TaskReferenceState {
+  required fixed32 home_lane_id = 1;
+  required fixed32 from_lane_id = 2;
+  required fixed32 selected_lane_id = 3;
+  required bool changing = 4;
+  required uint64 basis_revision = 5;
+  repeated Point basis_prefix = 6;
+  required string vehicle = 7;
+  required string mapper_boot = 8;
+  required string mapper_instance = 9;
+  required string clock_epoch = 10;
 }
 // Separate Pi state connection. These bounded management/state messages are
 // not part of the small command/control JSON socket or the Jetson map client.
@@ -130,6 +146,13 @@ message ClockProbe {
   required string app_instance = 3;
   required uint64 sequence = 4;
   required uint64 guest_send_us = 5;
+  optional GuestClockReceipt receipt = 6;
+}
+// Receipt of one exact original stamped Reply; arrival does not renew its lease.
+message GuestClockReceipt {
+  required uint64 probe_sequence = 1;
+  required bytes reply_sha256 = 2;
+  required uint64 guest_receive_us = 3;
 }
 message WorldTrust {
   required string vehicle = 1;
@@ -156,6 +179,12 @@ message ClockReply {
   optional WorldTrust trust = 6;
   required VehicleSample vehicle = 7;
   optional MissionGrant current_mission = 8;
+  optional DirectionGateWitness direction_gate = 9;
+  // Set only after Pi validates its original emitted Reply/P4 receipt. The Probe
+  // echo is not an acknowledgement. VM promotes that prior clock, not this Reply.
+  optional GuestClockReceipt accepted_receipt = 10;
+  // Pi-owned expiry fixed before enqueue; send stamp/receipt/ACK never renew it.
+  optional uint64 guest_clock_valid_until_pi_us = 11;
 }
 message AcceptedState {
   required string host_boot = 1;
@@ -311,6 +340,29 @@ message DirectionGateRef {
   required uint64 stop_command_sequence = 2;
   required uint32 state = 3;
   required sint32 requested_direction = 4;
+}
+// Pi-owned STOP/APPLIED + stationary/steering result, never a copied State gate.
+// Parent Reply binds the exact VM/execution/app and Pi host/Gateway. The A7 key
+// names the original pending transition; serial STOP and VM calculation differ.
+message DirectionGateWitness {
+  required DirectionGateRef gate = 1;
+  required uint32 control_generation = 2;
+  required uint32 producer_role = 3; // 1AUTO,2MANUAL
+  required uint64 calculation_sequence = 4; // original VM STOP; 0 only Pi/K MANUAL STOP
+  required uint64 plan_revision = 5;
+  required uint64 phase_revision = 6;
+  required uint32 segment_index = 7;
+  required uint32 cusp_index = 8;
+  required bytes mission_id = 9;
+  required uint64 mission_revision = 10;
+  required uint64 grant_revision = 11;
+  required bytes driver_session = 12;
+  required uint64 driver_action_seq = 13;
+  required uint64 driver_state_seq = 14;
+  required uint64 vehicle_sequence = 15;
+  required uint64 valid_until_pi_us = 16;
+  required string pi_session = 17;
+  required string device_session = 18;
 }
 message MissionGrant {
   required uint32 major = 1;
