@@ -42,10 +42,12 @@ def open_sink(settings: GatewaySettings) -> Sink:
     return LimitedSink(sink,limits,__import__('time').monotonic()) if limits else sink
 
 
-def _release_lease(lease,sink,ipc,link=None):
+def _release_lease(lease,sink,ipc,link=None,uplink=None):
     """A live device/I/O owner retains the process lease until process exit."""
     if any(getattr(owner,'thread',None) is not None and owner.thread.is_alive() for owner in (sink,ipc,link)):
         raise AuthorityError('Gateway owner termination unconfirmed; lease retained')
+    if uplink is not None and uplink.process is not None and uplink.process.is_alive():
+        raise AuthorityError('Gateway J process termination unconfirmed; lease retained')
     lease.close()
 
 
@@ -65,7 +67,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     for signum in (signal.SIGTERM, signal.SIGINT):
         signal.signal(signum, lambda *_: stop.set())
     diagnostics=GatewayDiagnostics(log)
-    lease=None;client=None;monitor=None;runner=None;sink=None;ipc=None;link=None;failure=None;world_failure=None;cleanup_errors=[];runner_started=False
+    lease=None;client=None;monitor=None;runner=None;sink=None;ipc=None;link=None;uplink=None;failure=None;world_failure=None;cleanup_errors=[];runner_started=False
     try:
         from xenova_mqtt import Identity,XenovaClient
         from xenova_mqtt.drive_binding import BindingFile
@@ -120,6 +122,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                 runner.drive_link=DriveLinkProvider(runner,link,trust,client.identity.agent_instance_id)
                 runner.drive_link.world_failure=world_failure
                 link.start()
+                if settings.mapper_uplink_profile:
+                    try:
+                        from .mapper_uplink import GatewayMapperUplink,UplinkProfile
+                        j_profile=UplinkProfile.load(settings.mapper_uplink_profile)
+                        uplink=GatewayMapperUplink(j_profile,host,client.identity.agent_instance_id).start()
+                        runner.mapper_uplink=uplink
+                    except (OSError,ValueError) as error:
+                        # J 미설정/실패는 실제 clock trust를 만들지 않는다. 로컬 MANUAL/STOP은 유지한다.
+                        world_failure=error
+                        runner.drive_link.world_failure=error
+                        runner.drive_link.trust=None
+                        log.warning('Mapper uplink unavailable: %s; AUTO mapper clock disabled',type(error).__name__)
         log.info('Gateway profile=%s sink=%s',settings.profile,settings.sink)
         runner_started=True
         runner.run(stop)
@@ -132,8 +146,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         for finish in (ipc.close if ipc else None,link.close if link else None,client.stop if client else None,
                        runner.shutdown if runner and not runner_started else None,
                        sink.close if sink and runner is None else None,
+                       uplink.close if uplink else None,
                        (lambda:monitor.join(timeout=1)) if monitor else None,
-                       (lambda:_release_lease(lease,sink,ipc,link)) if lease else None,diagnostics.close):
+                       (lambda:_release_lease(lease,sink,ipc,link,uplink)) if lease else None,diagnostics.close):
             if finish is not None:
                 try:finish()
                 except Exception as error:cleanup_errors.append(error)

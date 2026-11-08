@@ -35,6 +35,7 @@ class VerifiedGatewayRunner(GatewayRunner):
         from .provider import GatewayProvider
         self.provider=GatewayProvider(self)
         self.drive_link=None
+        self.mapper_uplink=None
         self._pending_stop = None
         self._deferred_drive=None;self.serial_deferred=0
         self._manual_activation=None;self.manual_withheld=0;self._manual_stop_try=0.
@@ -441,6 +442,7 @@ class VerifiedGatewayRunner(GatewayRunner):
     def run_once(self,timeout_s=.005):
         self._finish_stop()
         if self.drive_link is not None:self.drive_link.tick()
+        if self.mapper_uplink is not None:self.mapper_uplink.tick(self.drive_link)
         import queue
         try:first=self._queue.get(timeout=timeout_s) if timeout_s>0 else self._queue.get_nowait()
         except queue.Empty:first=None
@@ -462,6 +464,14 @@ class VerifiedGatewayRunner(GatewayRunner):
         except AuthorityError:
             self.machine.output_permitted=False;self.machine._authorized=False
             self._submit(ForwardStop(self.machine.generation))
+
+    def submit_mapper_tof(self,raw):
+        """실제 센서 owner의 원 bytes용 유한 입력. source/clock 승인은 actor 회차에서 한다."""
+        return False if self.mapper_uplink is None else self.mapper_uplink.submit_tof(raw)
+
+    def publish_mapper_scene_after_commit(self,raw):
+        """내구 scene owner의 완료 뒤 actor에서 호출한다. 여기서 scene 권한을 발급하지 않는다."""
+        return False if self.mapper_uplink is None else self.mapper_uplink.publish_scene_after_commit(raw)
 
     def run(self,stop,*,connect_wait_s=5):
         try:

@@ -49,6 +49,8 @@ def library(tmp_path_factory):
     lib.engine_track.argtypes=[C.c_void_p,C.c_uint64,C.POINTER(C.c_float)]
     lib.engine_apply.argtypes=[C.c_void_p,C.c_char_p,C.c_size_t,C.c_uint64]
     lib.engine_state.argtypes=[C.c_void_p,C.c_void_p,C.c_size_t]
+    lib.engine_grant.argtypes=[C.c_void_p,C.c_char_p,C.c_size_t,C.c_uint64]
+    lib.engine_track_grant.argtypes=[C.c_void_p,C.c_char_p,C.c_size_t,C.c_uint64,C.POINTER(C.c_float)]
     return lib
 
 class Product:
