@@ -26,14 +26,17 @@ def until(predicate):
 
 @pytest.fixture
 def broker(tmp_path):
+    native=os.environ.get('XENOVA_TEST_BROKER_BINARY')
     root=os.environ.get('XENOVA_TEST_BROKER_ROOT');qemu=os.environ.get('XENOVA_TEST_QEMU')
-    if not root or not qemu:pytest.skip('fixed broker/root/qemu not supplied')
+    if not native and (not root or not qemu):pytest.skip('explicit native broker or fixed broker/root/qemu not supplied')
     with socket.socket() as port_socket:
         port_socket.bind(('127.0.0.1',0));port=port_socket.getsockname()[1]
     conf=tmp_path/'mosquitto.conf'
     conf.write_text(f'listener {port} 127.0.0.1\nallow_anonymous true\npersistence false\nlog_type error\n')
     with (tmp_path/'mosquitto.log').open('wb') as log:
-        proc=subprocess.Popen([qemu,'-L',root,str(Path(root)/'usr/sbin/mosquitto'),'-c',str(conf)],stdout=log,stderr=log)
+        command=([native,'-c',str(conf)] if native else
+            [qemu,'-L',root,str(Path(root)/'usr/sbin/mosquitto'),'-c',str(conf)])
+        proc=subprocess.Popen(command,stdout=log,stderr=log)
         try:
             def ready():
                 if proc.poll() is not None:raise AssertionError((tmp_path/'mosquitto.log').read_text())

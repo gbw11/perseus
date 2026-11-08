@@ -1,0 +1,266 @@
+{
+  "date": "2026-11-07",
+  "status": "incomplete",
+  "candidate_commit": "28b37de",
+  "latest_platform_inspected": "91733c2",
+  "apply": {
+    "applied": true,
+    "api_restart_exit": 0,
+    "files_match_candidate": true
+  },
+  "api_before": {
+    "api": {
+      "ActiveState": "activating",
+      "SubState": "start",
+      "MainPID": "608116"
+    },
+    "responses": [
+      {
+        "path": "/healthz",
+        "error_type": "URLError"
+      },
+      {
+        "path": "/api/v1/vms",
+        "error_type": "URLError"
+      }
+    ],
+    "shared": {
+      "epoch": "8d4caa10-d66e-4e54-ab3d-4f43fa168fae",
+      "status": "unavailable",
+      "age_ms": 34758
+    }
+  },
+  "api_ready": {
+    "api": {
+      "ActiveState": "active",
+      "SubState": "running",
+      "MainPID": "608116"
+    },
+    "responses": [
+      {
+        "path": "/healthz",
+        "status": 200
+      },
+      {
+        "path": "/api/v1/vms",
+        "status": 200,
+        "vms": [
+          {
+            "vm_id": "17cad3c4-b3cd-4b29-8740-e679d0eaebd4",
+            "state": "running"
+          },
+          {
+            "vm_id": "de113a23-d80e-4333-94b8-788babe0e41e",
+            "state": "running"
+          },
+          {
+            "vm_id": "5002a22d-63d6-4f7a-9106-193b14499898",
+            "state": "running"
+          }
+        ]
+      }
+    ],
+    "shared": {
+      "epoch": "92e43da0-9c4b-4ab3-a70c-631d591afb9c",
+      "status": "ok",
+      "age_ms": 2437
+    }
+  },
+  "capture": {
+    "duration_s": 137.9529999999795,
+    "sample_span_s": 137.76500000001397,
+    "samples": 181,
+    "http": {
+      "200": 181
+    },
+    "errors": {},
+    "additional_board_requests": 0,
+    "source_status_per_response": {
+      "fresh": 159,
+      "stale": 14,
+      "disconnected": 8
+    },
+    "per_vm": {
+      "de113a23-d80e-4333-94b8-788babe0e41e": {
+        "fresh": 159,
+        "stale": 14,
+        "disconnected": 8
+      },
+      "5002a22d-63d6-4f7a-9106-193b14499898": {
+        "fresh": 159,
+        "stale": 14,
+        "disconnected": 8
+      },
+      "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": {
+        "fresh": 159,
+        "stale": 14,
+        "disconnected": 8
+      }
+    },
+    "expired_vm_with_current_app": 0,
+    "mqtt_connected_samples": 181,
+    "subscription_sets": [
+      [
+        "granted"
+      ]
+    ],
+    "feed_epochs": [
+      "9f146caf-76f8-491a-af24-7f64b1bd4c45"
+    ],
+    "drive_modes": {
+      "SAFE_STOP": 181
+    },
+    "drive_sources": {
+      "fresh": 181
+    },
+    "decisions": {
+      "de113a23-d80e-4333-94b8-788babe0e41e": {
+        "app_preparing": 155,
+        "stale": 22,
+        "app_waiting": 4
+      },
+      "5002a22d-63d6-4f7a-9106-193b14499898": {
+        "app_preparing": 156,
+        "stale": 22,
+        "app_waiting": 3
+      },
+      "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": {
+        "app_waiting": 159,
+        "stale": 22
+      }
+    },
+    "roundtrip_ms": {
+      "median": 484,
+      "p95": 766,
+      "max": 1453
+    },
+    "continuous_freshness_pass": false
+  },
+  "final_shared": {
+    "status": "ok",
+    "age_ms": 4187,
+    "epoch": "92e43da0-9c4b-4ab3-a70c-631d591afb9c"
+  },
+  "cpu_unchanged": true,
+  "other_service_pids_unchanged": true,
+  "final_services": [
+    {
+      "Id": "xenova-dom0-manager.service",
+      "ActiveState": "active",
+      "MainPID": "608116"
+    },
+    {
+      "Id": "xenova-display-feed.service",
+      "ActiveState": "active",
+      "MainPID": "591163"
+    },
+    {
+      "Id": "mosquitto.service",
+      "ActiveState": "active",
+      "MainPID": "833"
+    },
+    {
+      "Id": "xenova-gateway.service",
+      "ActiveState": "active",
+      "MainPID": "591544"
+    },
+    {
+      "Id": "xenova-recovery-worker.service",
+      "ActiveState": "active",
+      "MainPID": "592142"
+    },
+    {
+      "Id": "xenova-runtime-log-collector.service",
+      "ActiveState": "active",
+      "MainPID": "591166"
+    },
+    {
+      "Id": "tailscaled.service",
+      "ActiveState": "active",
+      "MainPID": "599"
+    }
+  ],
+  "final_hashes": {
+    "xenova_execution.py": "bbea069f52df5049e7eb1a67efb3240ecb78c16c55328d9e7c5ce28abec0203d",
+    "xenova_management.py": "6ae93b5aa407a64eb798cd5cd38fe78817510ee89edf3f6459422ad09edb85a4"
+  },
+  "ssh_restored": {
+    "ssh_original_hash_restored": true,
+    "temporary_port_removed": true,
+    "sshd_config_test": true
+  },
+  "post_diagnostic": {
+    "query_failure_classes": {
+      "InvalidState": 9
+    },
+    "samples": [
+      {
+        "ok": true,
+        "elapsed_s": 2.787854939000681,
+        "code": null,
+        "views": 3
+      },
+      {
+        "ok": true,
+        "elapsed_s": 2.8495521410004585,
+        "code": null,
+        "views": 3
+      },
+      {
+        "ok": false,
+        "elapsed_s": 2.7824002229972393,
+        "code": "TARGET_CHANGED",
+        "views": 0
+      }
+    ]
+  },
+  "isolated_comparison": {
+    "instrumentation_scope": "isolated read process only; comparison logic unchanged; keys only, no record values",
+    "samples": [
+      {
+        "ok": true,
+        "elapsed_s": 1.4738543280036538,
+        "code": null,
+        "events": []
+      },
+      {
+        "ok": true,
+        "elapsed_s": 2.9829631639950094,
+        "code": null,
+        "events": []
+      },
+      {
+        "ok": true,
+        "elapsed_s": 3.5017160439965664,
+        "code": null,
+        "events": []
+      },
+      {
+        "ok": true,
+        "elapsed_s": 1.3509190480035613,
+        "code": null,
+        "events": []
+      },
+      {
+        "ok": true,
+        "elapsed_s": 1.1766613700019661,
+        "code": null,
+        "events": []
+      },
+      {
+        "ok": true,
+        "elapsed_s": 1.469361845003732,
+        "code": null,
+        "events": []
+      }
+    ]
+  },
+  "artifacts": {
+    "preflight-result.json": "fc97d3062d34a2c324d1576694036db1e9c0de0fed3773052c91ead8d95b3533",
+    "apply-result.json": "d1473b855ba63acc22120e079616df3df1bd246b090ca362228ed92e23bb5a9c",
+    "ready_after-result.json": "1f20471b25227641897744ddc2afe4b3535c78cc3391d747c8f11c496af5a472",
+    "passive-two-pages-result.json": "44ae7e73b15327deab59c4f55bd4de5c69f535e987671e323e1767cc8be3ce2b",
+    "restore_viewer_ssh-result.json": "5315127309281cfac188ccc7012a81a198ef89ce425aa4a40a12954c6f862e52",
+    "final_state-result.json": "17100694065e06539dbf4805cb6cff0e7372db4b3b78269b3b3124512c292622"
+  }
+}

@@ -422,6 +422,245 @@ class RecoveryReconciliationTest(unittest.TestCase):
         self.assertEqual(self.path(spec).read_bytes(), before)
         self.assertEqual(self.physical(), commands)
 
+    def expired_owned_launch(self, *, uncertain=False):
+        """실제 원 수락/run을 남기고 systemd·Xen 실행만 기존 외부 경계로 대역한다."""
+        import xenova_guest_process as guest
+        if uncertain:
+            self.f.start();spec = self.f.spec()
+            def failed(phase, value):
+                if phase == 'launch-prepared':raise vm.PlatformError('synthetic create helper timeout')
+            self.p.execution_checkpoint = failed
+            self.f.fails(self.f.recover(spec), 'RECONCILE_REQUIRED')
+            self.p.execution_checkpoint = lambda *args:None
+            self.f.ticks += 100
+        else:spec = self.cut('launch-prepared')
+        self.p.process_isolation = True
+        run_path = self.p.runtime/'executions'/(self.r['uuid']+'.json')
+        run = self.p.execution().run_record(self.r)
+        self.assertEqual(run['owner'], {'kind':'recovery','recovery_attempt_id':spec['recovery_attempt_id']})
+        run['process_scope'] = guest.scope_name(self.r['uuid'], run['execution_id'])
+        self.p.execution().write(run_path, run)
+        scope = {'state':'not-found'}
+        command = self.p.command
+        def external(args, **kw):
+            if args[:2] == ['systemctl','show']:
+                self.f.xen.calls.append(args)
+                prop = args[args.index('-p')+1]
+                return {'LoadState':scope['state'], 'ActiveState':'active',
+                        'Before':'xenova-vm-shutdown.service'}[prop]
+            if args[:2] == ['systemd-run','--scope']:
+                # helper 실행은 대역이나 scope 인자 구성과 이후 bind/관측은 제품 경로다.
+                self.assertIn('--unit='+guest.scope_name(self.r['uuid'],
+                    self.p.execution().run_record(self.r)['execution_id']), args)
+                return command(['xl','create',str(self.p.runtime/(self.r['id']+'.cfg'))], **kw)
+            return command(args, **kw)
+        patcher = patch.object(self.p, 'command', side_effect=external)
+        patcher.start();self.addCleanup(patcher.stop)
+        return spec, run_path, run, scope
+
+    def test_T07_expired_owned_launch_closes_without_effects_and_next_request_progresses(self):
+        spec, run_path, run, _ = self.expired_owned_launch(uncertain=True)
+        original_bytes = self.path(spec).read_bytes()
+        original = json.loads(original_bytes)
+        self.assertEqual(original['phase'], 'uncertain')
+        self.assertEqual(original['error']['details']['failed_phase'], 'launching')
+        original_run, commands = run_path.read_bytes(), self.physical()
+        plan = self.f.ok(self.reconcile(spec))
+        self.assertEqual(plan['reconciliation']['outcome'], 'stopped_without_replacement')
+        self.assertEqual(self.path(spec).read_bytes(), original_bytes)
+        self.assertEqual(run_path.read_bytes(), original_run)
+        observe, write, saves = execution.Execution.observe, execution.atomic_write, []
+        def save(path, text, *args):
+            value = json.loads(text)
+            if Path(path) in (run_path, self.path(spec)):
+                saves.append(value['phase'])
+            return write(path, text, *args)
+        with patch.object(execution.Execution, 'observe', autospec=True, side_effect=observe) as observations, \
+             patch.object(execution, 'atomic_write', side_effect=save):
+            done = self.f.ok(self.reconcile(spec, True))
+        self.assertEqual(observations.call_count, 2)
+        self.assertEqual(saves, ['uncertain','failed','stopped'])
+        self.assertEqual(done['attempt']['phase'], 'failed')
+        self.assertEqual(done['attempt']['error']['code'], 'DEADLINE_EXCEEDED')
+        self.assertEqual(done['attempt']['reconciliation']['original_error'], original['error'])
+        for key in ('operation_id','request','request_hash','accepted_monotonic_ms'):
+            self.assertEqual(done['attempt'][key], original[key])
+        closed = json.loads(run_path.read_text())
+        self.assertEqual(closed['phase'], 'stopped')
+        self.assertEqual(closed['execution_id'], run['execution_id'])
+        self.assertEqual(closed['recovery_reconciliation'], {
+            'operation_id':original['operation_id'], 'recovery_attempt_id':spec['recovery_attempt_id'],
+            'deadline_monotonic_ms':spec['deadline_monotonic_ms']})
+        self.assertNotIn('launch_aborted_before_submit', closed)
+        self.f.fails(self.f.recover(spec), 'DEADLINE_EXCEEDED')
+        self.f.ok(self.reconcile(spec, True))
+        self.assertEqual(self.physical(), commands)
+        fresh = self.f.spec('start-if-absent')
+        self.assertNotEqual(fresh['recovery_attempt_id'], spec['recovery_attempt_id'])
+        self.assertEqual(self.f.ok(self.f.recover(fresh))['attempt']['phase'], 'completed')
+        self.assertEqual(len(self.physical()), len(commands)+1)
+        newer = run_path.read_bytes()
+        old = self.f.ok(self.reconcile(spec, True))
+        self.assertEqual(old['attempt']['phase'], 'failed')
+        self.assertEqual(run_path.read_bytes(), newer)
+
+    def test_T07_owned_launch_missing_expiry_scope_or_absence_is_not_disposed(self):
+        for kind in ('unexpired','unisolated','missing-scope','different-execution-scope','different-owner','live','unknown'):
+            with self.subTest(kind=kind):
+                other = RecoveryReconciliationTest('runTest');other.setUp()
+                try:
+                    spec, run_path, run, _ = other.expired_owned_launch()
+                    if kind == 'unexpired':other.f.ticks = spec['deadline_monotonic_ms']/1000-1
+                    elif kind == 'unisolated':other.p.process_isolation = False
+                    elif kind == 'missing-scope':run.pop('process_scope')
+                    elif kind == 'different-execution-scope':
+                        import xenova_guest_process as guest
+                        run['process_scope'] = guest.scope_name(other.r['uuid'], uuid4())
+                    elif kind == 'different-owner':run['owner'] = {'kind':'recovery','recovery_attempt_id':uuid4()}
+                    elif kind == 'live':
+                        other.f.xen.rows.append(foundation.domain(other.r,
+                            other.p.data/'instances'/other.r['id']/'root.raw'))
+                    other.p.execution().write(run_path, run)
+                    before, saved_run, commands = other.path(spec).read_bytes(), run_path.read_bytes(), other.physical()
+                    if kind == 'unknown':
+                        with patch.object(other.p, 'domains', side_effect=vm.PlatformError('synthetic observation failure')):
+                            other.f.fails(other.reconcile(spec, True), 'OBSERVATION_UNAVAILABLE')
+                    else:other.f.fails(other.reconcile(spec, True), 'RECONCILE_REQUIRED')
+                    self.assertEqual(other.path(spec).read_bytes(), before)
+                    self.assertEqual(run_path.read_bytes(), saved_run)
+                    self.assertEqual(other.physical(), commands)
+                finally:other.doCleanups()
+
+    def test_T07_active_owned_launch_scope_blocks_then_natural_quiescence_recovers(self):
+        spec, run_path, _, scope = self.expired_owned_launch()
+        scope['state'] = 'loaded'
+        before, commands = self.path(spec).read_bytes(), self.physical()
+        self.f.fails(self.reconcile(spec, True, timeout_ms=25), 'DEADLINE_EXCEEDED')
+        self.assertEqual(self.path(spec).read_bytes(), before)
+        self.assertEqual(json.loads(run_path.read_text())['phase'], 'launching')
+        self.assertFalse(any(c[:2] == ['systemctl','kill'] for c in self.f.xen.calls))
+        scope['state'] = 'not-found'
+        self.f.ok(self.reconcile(spec, True))
+        self.assertEqual(json.loads(run_path.read_text())['phase'], 'stopped')
+        self.assertEqual(self.physical(), commands)
+
+    def test_T08_disposal_final_guard_preserves_new_host_intent_run_and_attempt(self):
+        for kind in ('host','intent','run','attempt','cpu','live'):
+            with self.subTest(kind=kind):
+                other = RecoveryReconciliationTest('runTest');other.setUp()
+                try:
+                    spec, run_path, _, _ = other.expired_owned_launch()
+                    commands = other.physical();after = {}
+                    def change(phase, op):
+                        if phase != 'recovery-reconcile-before-guard':return
+                        if kind == 'host':other.f.host = foundation.HOST_B
+                        elif kind == 'intent':
+                            path = other.p.data/'control'/(other.r['uuid']+'.json')
+                            value = json.loads(path.read_text());value['intent_revision'] += 1
+                            other.p.execution().write(path, value)
+                        elif kind == 'run':
+                            value = json.loads(run_path.read_text());value['execution_id'] = uuid4()
+                            other.p.execution().write(run_path, value)
+                        elif kind == 'attempt':
+                            value = json.loads(other.path(spec).read_text());value['error'] = {'code':'ORIGINAL_CHANGED'}
+                            other.p.execution().write(other.path(spec), value)
+                        elif kind == 'live':
+                            other.f.xen.rows.append(foundation.domain(other.r,
+                                other.p.data/'instances'/other.r['id']/'root.raw'))
+                        else:
+                            patcher = patch.object(type(other.p.cpu()), 'context', return_value={'configured':True})
+                            patcher.start();other.addCleanup(patcher.stop)
+                        after.update(attempt=other.path(spec).read_bytes(), run=run_path.read_bytes())
+                    other.p.execution_checkpoint = change
+                    other.f.fails(other.reconcile(spec, True), 'TARGET_CHANGED')
+                    self.assertEqual(other.path(spec).read_bytes(), after['attempt'])
+                    self.assertEqual(run_path.read_bytes(), after['run'])
+                    self.assertEqual(other.physical(), commands)
+                finally:other.doCleanups()
+
+    def test_T09_disposal_each_required_write_failure_and_replace_loss_resumes_same_attempt(self):
+        for stage in ('marker','attempt','stopped'):
+            for replaced in (False, True):
+                with self.subTest(stage=stage, replaced=replaced):
+                    other = RecoveryReconciliationTest('runTest');other.setUp()
+                    try:
+                        spec, run_path, run, _ = other.expired_owned_launch()
+                        original = json.loads(other.path(spec).read_text());commands = other.physical()
+                        write, fired = execution.atomic_write, []
+                        def fail(path, text, *args):
+                            value = json.loads(text)
+                            current = ('attempt' if Path(path) == other.path(spec) and value.get('phase') == 'failed'
+                                else 'marker' if Path(path) == run_path and value.get('phase') == 'uncertain'
+                                    and value.get('recovery_reconciliation') else
+                                'stopped' if Path(path) == run_path and value.get('phase') == 'stopped' else None)
+                            if current != stage or fired:return write(path, text, *args)
+                            fired.append(current)
+                            if replaced:
+                                replace = os.replace
+                                def lose(src, dst):
+                                    replace(src, dst)
+                                    if Path(dst) == Path(path):raise OSError(errno.EIO, 'synthetic post-replace response loss')
+                                with patch.object(os, 'replace', side_effect=lose):return write(path, text, *args)
+                            raise OSError(errno.EIO, 'synthetic required write failure')
+                        with patch.object(execution, 'atomic_write', side_effect=fail):
+                            other.f.fails(other.reconcile(spec, True), 'RECONCILE_REQUIRED')
+                        self.assertEqual(fired, [stage])
+                        self.assertEqual(other.physical(), commands)
+                        # 부재만 보고 새 start를 허용하지 않고 원 종결 확인을 먼저 회수한다.
+                        other.f.fails(other.f.recover(other.f.spec('start-if-absent')), 'RECONCILE_REQUIRED')
+                        done = other.f.ok(other.reconcile(spec, True))['attempt']
+                        self.assertEqual(done['phase'], 'failed')
+                        self.assertEqual(done['request'], spec)
+                        self.assertEqual(done['operation_id'], original['operation_id'])
+                        self.assertEqual(done['reconciliation']['original_error'], original['error'])
+                        self.assertEqual(json.loads(run_path.read_text())['execution_id'], run['execution_id'])
+                        self.assertEqual(json.loads(run_path.read_text())['phase'], 'stopped')
+                        self.assertEqual(other.physical(), commands)
+                    finally:other.doCleanups()
+
+    def test_T09_disposal_cut_after_terminal_attempt_resumes_runtime_without_new_effects(self):
+        spec, run_path, run, _ = self.expired_owned_launch()
+        commands = self.physical()
+        def interrupted(phase, value):
+            if phase == 'recovery-failed':raise foundation.Interrupted()
+        self.p.execution_checkpoint = interrupted
+        with self.assertRaises(foundation.Interrupted):self.reconcile(spec, True)
+        self.assertEqual(json.loads(self.path(spec).read_text())['phase'], 'failed')
+        self.assertEqual(json.loads(run_path.read_text())['phase'], 'uncertain')
+        self.p.execution_checkpoint = lambda *args:None
+        self.f.ok(self.reconcile(spec, True))
+        closed = json.loads(run_path.read_text())
+        self.assertEqual(closed['phase'], 'stopped')
+        self.assertEqual(closed['execution_id'], run['execution_id'])
+        self.assertEqual(self.physical(), commands)
+
+    def test_T09_disposal_rollback_failure_preserves_first_storage_error_then_recovers(self):
+        spec, run_path, _, _ = self.expired_owned_launch()
+        write, replaced = execution.atomic_write, []
+        commands = self.physical()
+        def failed(path, text, *args):
+            value = json.loads(text)
+            if Path(path) != run_path:return write(path, text, *args)
+            if value.get('phase') == 'stopped' and not replaced:
+                replace = os.replace
+                def lose(src, dst):
+                    replace(src, dst)
+                    if Path(dst) == run_path:
+                        replaced.append(True)
+                        raise OSError(errno.EIO, 'synthetic stopped replace response lost')
+                with patch.object(os, 'replace', side_effect=lose):return write(path, text, *args)
+            if value.get('phase') == 'uncertain' and replaced:
+                raise OSError(errno.ENOSPC, 'synthetic rollback full')
+            return write(path, text, *args)
+        with patch.object(execution, 'atomic_write', side_effect=failed):
+            response = self.f.fails(self.reconcile(spec, True), 'RECONCILE_REQUIRED')
+        self.assertEqual(response['error']['details']['storage_errno'], errno.EIO)
+        self.assertEqual(response['error']['details']['rollback_error']['errno'], errno.ENOSPC)
+        self.assertEqual(self.physical(), commands)
+        self.assertEqual(self.f.ok(self.reconcile(spec, True))['attempt']['phase'], 'failed')
+        self.assertEqual(json.loads(run_path.read_text())['phase'], 'stopped')
+        self.assertEqual(self.physical(), commands)
+
     def test_T08_final_guard_detects_new_user_stop_intent(self):
         spec = self.cut('recovery-stop-returned')
         before, commands = self.path(spec).read_bytes(), self.physical()

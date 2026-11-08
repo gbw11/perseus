@@ -46,6 +46,11 @@ class GatewaySettings:
     odometry_config: str | None = None
     world_trust: str | None = None
     drive_link: bool = False
+    mapper_uplink_profile: str | None = None
+    operator_profile: str | None = None
+    feedback3_profile: str | None = None
+    operator_socket: str = "/run/xenova-gateway/operator.sock"
+    keyboard_socket: str = "/run/xenova-gateway/keyboard.sock"
 
 
 def _env(env: Mapping[str, str], name: str) -> str | None:
@@ -79,20 +84,29 @@ def parse(argv: Sequence[str] | None = None, env: Mapping[str, str] | None = Non
     p.add_argument("--authority-dir",default=_env(env,"AUTHORITY_DIR") or d.authority_dir)
     p.add_argument("--binding-file",default=_env(env,"BINDING_FILE") or d.binding_file)
     p.add_argument('--ipc-socket',default=_env(env,'IPC_SOCKET') or d.ipc_socket)
-    p.add_argument('--serial-profile',choices=('write-only','feedback-1','feedback-2'),default=_env(env,'SERIAL_PROFILE') or d.serial_profile)
+    p.add_argument('--serial-profile',choices=('write-only','feedback-1','feedback-2','feedback-3'),default=_env(env,'SERIAL_PROFILE') or d.serial_profile)
     p.add_argument('--odometry-config',default=_env(env,'ODOMETRY_CONFIG'))
     p.add_argument('--world-trust',default=_env(env,'WORLD_TRUST'),help='approved source/clock profile for binary lattice app input')
     p.add_argument('--drive-link',action='store_true',default=_env(env,'DRIVE_LINK')=='1',help='enable independent binary Pi vehicle/state input')
+    p.add_argument('--mapper-uplink-profile',default=_env(env,'MAPPER_UPLINK_PROFILE'),
+                   help='opt-in private J broker/approved mapper clock profile; requires warm feedback-2')
     p.add_argument('--feedback-timeout-ms',type=int,default=_env(env,'FEEDBACK_TIMEOUT_MS'))
+    p.add_argument('--operator-profile',default=_env(env,'OPERATOR_PROFILE'),help='opt-in exact operator2/manual/guest clock installed policy')
+    p.add_argument('--feedback3-profile',default=_env(env,'FEEDBACK3_PROFILE'),help='explicit firmware/timing/stationary feedback3 policy')
+    p.add_argument('--operator-socket',default=_env(env,'OPERATOR_SOCKET') or d.operator_socket)
+    p.add_argument('--keyboard-socket',default=_env(env,'KEYBOARD_SOCKET') or d.keyboard_socket)
     p.add_argument('--history-policy',default=_env(env,'HISTORY_POLICY'),help='approved private retry/retention policy JSON')
     p.add_argument("--initialize-control-state",action="store_true",help="확인한 최초 설치에서만 정지 상태 원본을 생성")
     a = p.parse_args(argv)
-    if a.serial_profile in ('feedback-1','feedback-2') and (a.sink!='serial' or a.profile!='warm' or
+    if a.serial_profile in ('feedback-1','feedback-2','feedback-3') and (a.sink!='serial' or a.profile!='warm' or
             type(a.feedback_timeout_ms) is not int or not 0<a.feedback_timeout_ms<=2**31-1):
         p.error('feedback-1 requires warm serial profile and an approved feedback timeout')
-    if a.serial_profile=='feedback-2' and not a.odometry_config:p.error('feedback-2 requires explicit odometry configuration')
-    if a.odometry_config and a.serial_profile!='feedback-2':p.error('odometry configuration requires feedback-2')
-    if (a.world_trust or a.drive_link) and (a.profile!='warm' or a.serial_profile!='feedback-2'):p.error('binary app input requires warm feedback-2')
+    if a.serial_profile in ('feedback-2','feedback-3') and not a.odometry_config:p.error('feedback-2 requires explicit odometry configuration')
+    if a.odometry_config and a.serial_profile not in ('feedback-2','feedback-3'):p.error('odometry configuration requires feedback-2')
+    if (a.world_trust or a.drive_link or a.mapper_uplink_profile) and (a.profile!='warm' or a.serial_profile not in ('feedback-2','feedback-3')):p.error('binary app input requires warm feedback-2')
+    if bool(a.feedback3_profile)!=(a.serial_profile=='feedback-3'):p.error('feedback-3 requires explicit --feedback3-profile and cannot be used by another serial profile')
+    if a.operator_profile and (a.profile!='warm' or a.serial_profile!='feedback-3'):p.error('operator2 requires warm feedback-3')
+    if a.world_trust and a.mapper_uplink_profile:p.error('static world trust and actual mapper clock owner are separate profiles')
     if a.sink=='serial' and not a.vehicle_limits:p.error('serial output requires --vehicle-limits')
     if a.profile in ("verified","warm") and not (a.vm_a and a.vm_b):p.error("verified/warm profile requires --vm-a and --vm-b")
     if a.profile=="legacy" and (a.vm_a or a.vm_b or a.initialize_control_state):p.error("legacy profile is for separate apps; no paired authority fallback")
@@ -119,5 +133,8 @@ def parse(argv: Sequence[str] | None = None, env: Mapping[str, str] | None = Non
         history_policy=a.history_policy,
         odometry_config=a.odometry_config,
         world_trust=a.world_trust,
-        drive_link=a.drive_link or a.world_trust is not None,
+        drive_link=a.drive_link or a.world_trust is not None or a.mapper_uplink_profile is not None or a.operator_profile is not None,
+        operator_profile=a.operator_profile,feedback3_profile=a.feedback3_profile,
+        operator_socket=a.operator_socket,keyboard_socket=a.keyboard_socket,
+        mapper_uplink_profile=a.mapper_uplink_profile,
     )

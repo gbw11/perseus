@@ -4,7 +4,7 @@
     "id": "lattice-lab-1",
     "vehicle": "rc-test-1",
     "calibration": "encoder-lab-1",
-    "assumptions": "Synthetic rear-axle Ackermann vehicle, static occupied cells, bounded clock/pose errors. Not measured operating limits.",
+    "assumptions": "Synthetic rear-axle Ackermann vehicle, static occupied cells, bounded clock/pose errors. Guest clock error1000us/drift100ppm and direction phase10s are explicit provisional software caps, not measured operating limits.",
     "resolution": 0.1,
     "wheelbase": 0.25,
     "front": 0.3,
@@ -48,14 +48,22 @@
     "clock_error_us": 20000,
     "clock_lease_us": 1000000,
     "planner_budget_us": 2000000,
-    "state_period_us": 500000
+    "state_period_us": 500000,
+    "direction_phase_us": 10000000,
+    "guest_timestamp_error_us": 1000,
+    "guest_drift_ppm": 100
   },
-  "profile_sha256": "1b87a1cf4e1f63d54e51d694adcd04e2c0049ff53b63f2c2906b282b6c29fd45",
-  "asset_sha256": "61531ae8ec6f59a55b981e504f3ea29a5bc1e4b98e8f3cd83e9354b143e1e1df",
-  "generator_sha256": "7f0b0dce5611261a811cab43261258ac7df657392aedfddcd511765dc4df85f4",
+  "profile_sha256": "296e72cbd858a4340e95f7258295156d445c5917343fc3ac5866d547862b5d55",
+  "asset_sha256": "8ec36bbd39f0e48a2653ac2f41607afd928aca7b5bec0d33ee556c36fcab79a4",
+  "generator_sha256": "6113bfb7963581e6f1a4088a392621b9b868e0843acb9ff950fd7e4fd04a43b6",
   "states": 81,
   "samples_per_primitive": 17,
-  "forward_only": true,
+  "forward_only": false,
+  "stored_geometry_forward": true,
+  "reverse_transform": "(-x,y,-yaw),same steering",
+  "maximum_segments": 3,
+  "maximum_cusps": 2,
+  "direction_phase_policy": "provisional software cap; original phase E is never renewed",
   "in_place_or_holonomic_controls": false,
   "root_targets": 9,
   "interior_target_indices": [
@@ -67,5 +75,5 @@
   ],
   "heading_bins": 32,
   "xy_bin_m": 0.1,
-  "primitive_source_sha256": "33e7ed7167ed5307288b683b89f670aa5109441e5c6295c18ead97c3d173d3d3"
+  "primitive_source_sha256": "2338cea8a4650db0c48d556217ddb9d37d74340b582a0007bdcd3cbb9628fbc9"
 }

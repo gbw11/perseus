@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from xenova_mqtt.envelope import EnvelopeError, validate
 
-from .config import DISPLAY_DRIVE_TOPIC, DISPLAY_DRIVE_TYPE, FeedSettings
+from .config import FeedSettings
 from .app_reports import report_app
 
 
@@ -35,16 +35,12 @@ class StateStore:
             "boot_id": None, "retired_boots": set(), "channels": {}, "retired_epochs": set(),
             "app_instances": {}, "retired_apps": set(), "app_sequences": {}, "pending_inventory": {},
         } for b in settings.bindings}
-        self.control = None
-        self.control_epoch = None
-        self.control_retired = set()
+        # Driving state has one source: the dom0 Gateway context (gateway.py).
         self.gateway_observation = None
         self.gateway_connected = False
         self.gateway_identity = None
 
     def gateway_success(self, value, *, observed_mono):
-        if self.settings.drive_transport != "gateway":
-            raise ValueError("Gateway drive source is not selected")
         with self.lock:
             identity = (value["authority"]["generation"],
                         value["authority"]["selected_vm_id"], value["authority"]["selected_mode"])
@@ -135,8 +131,6 @@ class StateStore:
         with self.lock:
             if not self.topic_available(topic):
                 return False
-            if topic == DISPLAY_DRIVE_TOPIC:
-                return self._control(env, retained)
             vm_id = env.get("vm_id")
             if not isinstance(vm_id, str) or env.get("source_id") is not None:
                 return False
@@ -329,37 +323,6 @@ class StateStore:
                  else "ready" if all(a["app_state"] == "ready" for a in rows) else "unknown")
         return source, state
 
-    def _control(self, env, retained):
-        if self.settings.drive_transport != "mqtt":
-            return False  # No fallback or competing source in explicit Gateway mode.
-        p = env["payload"]
-        # Old active_app semantics must not be used to infer a VM or a driving mode.
-        if (retained or env.get("source_id") != self.settings.control_source
-                or env.get("vm_id") is not None or env["type"] != DISPLAY_DRIVE_TYPE):
-            return False
-        if p.get("mode") not in ("AUTO", "MANUAL", "SAFE_STOP", "AUTO_READY"):
-            return False
-        if "active_vm_id" not in p:
-            return False
-        active = p["active_vm_id"]
-        if active is not None and (not isinstance(active, str) or active not in self.guests or self.guests[active]["binding"].role == "interaction"):
-            return False
-        epoch = (env["boot_id"], env["agent_instance_id"])
-        if epoch in self.control_retired:
-            return False
-        if self.control is not None:
-            if epoch == self.control_epoch and env["seq"] <= self.control["sequence"]:
-                return False
-            if epoch != self.control_epoch:
-                if len(self.control_retired) >= 128:
-                    return False
-                self.control_retired.add(self.control_epoch)
-        self.control_epoch = epoch
-        self.control = self.observation({"active_vm_id": active, "mode": p["mode"]},
-            observed_at=env["sent_at"], source_id=self.settings.control_source,
-            source_epoch=list(epoch), sequence=env["seq"], _mqtt_generation=self.mqtt_generation)
-        return True
-
     def snapshot(self):
         with self.lock:
             self.sequence += 1
@@ -394,16 +357,13 @@ class StateStore:
                         "inventory": self.mqtt_source(inv, 30,
                             f"xenova/v1/vms/{vm_id}/inventory", supported=b.agent_supported)},
                     "screen_source": {"kind": "status", "handle": None}})
-            control_source = self.mqtt_source(self.control, 3, DISPLAY_DRIVE_TOPIC)
-            drive = {"active_vm_id": None, "mode": "unknown", "ai_status": "unknown", "source": control_source}
-            if control_source["status"] == "fresh":
-                drive.update(self.control["value"])
-            if self.settings.drive_transport == "gateway":
-                source = self.source(self.gateway_observation, 3, connected=self.gateway_connected)
-                drive = {"active_vm_id": None, "mode": "unknown", "ai_status": "unknown",
-                         "source": source, "authority": None}
-                if source["status"] == "fresh":
-                    drive.update(deepcopy(self.gateway_observation["value"]))
+            # No Gateway read yet (e.g. no socket on a development PC), failure or
+            # expiry all stay unknown; there is no MQTT or retained fallback.
+            source = self.source(self.gateway_observation, 3, connected=self.gateway_connected)
+            drive = {"active_vm_id": None, "mode": "unknown", "ai_status": "unknown",
+                     "source": source, "authority": None}
+            if source["status"] == "fresh":
+                drive.update(deepcopy(self.gateway_observation["value"]))
             return {"schema_version": 1, "type": "display.state", "source_epoch": self.epoch,
                     "sequence": self.sequence, "generated_at": utc_now(),
                     "mqtt_connected": self.mqtt_connected, "binding_scope": self.settings.binding_scope,

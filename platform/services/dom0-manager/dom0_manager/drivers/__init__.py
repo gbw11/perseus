@@ -49,6 +49,7 @@ def build_driver(settings: Settings) -> Driver:
         _xl(settings, runner),
         xentop=_xentop(settings, runner),
         records_loader=load_records_loader(settings.platform_lib, manager),
+        read_timeout_ms=round(settings.platform_read_timeout_s * 1000),
     )
 
 

@@ -13,4 +13,4 @@ target_compile_definitions(app PRIVATE CONFIG_XENOVA_DRIVE_WARM=1
  CONFIG_XENOVA_MQTT_TX_BUF=1280 CONFIG_XENOVA_MQTT_MAX_SUBS=4
  CONFIG_XENOVA_MQTT_LATEST_SLOTS=4 CONFIG_XENOVA_MQTT_PUB_TOPICS=4)
 target_sources(app PRIVATE src/main.c ${MQTT}/src/xm_topic.c ${MQTT}/src/xm_policy.c
- ${MQTT}/src/xm_json.c ${MQTT}/src/xm_envelope.c ${MQTT}/src/xm_seq.c ${MQTT}/src/xm_payload.c)
+ ${MQTT}/src/xm_json.c ${MQTT}/src/xm_envelope.c ${MQTT}/src/xm_seq.c ${MQTT}/src/xm_payload.c ${MQTT}/src/xm_manual.c)

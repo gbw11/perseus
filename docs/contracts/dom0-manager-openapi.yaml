@@ -7,7 +7,10 @@ info:
     기준 문서는 docs/contracts/vm-api-contract-v1.md 이며, 이 파일은 HTTP 계약의 기계 판독용 원본이다.
     플랫폼 공통 Manager/CLI의 JSON envelope와 동일한 스키마가 아니다.
     생성·시작·등록 목록·예약 IP·수명주기 전달의 계층 경계는 기준 문서 1.4절과 13장을 따른다.
-    서비스는 보드의 Tailscale 주소에 바인딩하고 모든 엔드포인트에서 Bearer 서비스 토큰을 검사한다.
+    서비스는 보드의 Tailscale 주소에 바인딩하고 모든 엔드포인트에서 Bearer 서비스 토큰을 검사한다
+    (예외는 자체 소스 토큰을 쓰는 /api/v1/logs/ingest 하나).
+    API 문서 경로(/docs, /redoc, /openapi.json)는 기본으로 열지 않는다(404). 개발용 XENOVA_DOM0_API_DOCS=1 로만 켜며
+    켜도 서비스 토큰을 검사한다 (기준 문서 4장, 2026-11-06).
     Spring 이 발급한 vm_id 를 플랫폼 registry 와 Xen UUID의 영구 식별자로 사용한다.
     FastAPI 기본 422(HTTPValidationError)는 400 InvalidArgument 로 정규화하고, 생성 스키마에서
     422 응답과 HTTPValidationError 모델을 제거해야 이 파일과의 차이 검사가 통과한다.
@@ -190,7 +193,8 @@ paths:
       summary: Xen 에 존재하는 도메인 목록
       description: >-
         Xen 에 현재 존재하는 도메인만 반환한다. 종료된 VM 을 포함한 전체 목록은
-        Spring 이 자기 레코드와 조합해 만든다.
+        Spring 이 자기 레코드와 조합해 만든다. 조회 한도 5초(하위 list 에 timeout_ms 5000 명시,
+        요청 예산이 더 짧으면 그 값). 넘으면 504 DriverTimeout (기준 문서 4.1).
       x-driver-timeout-seconds: 5
       parameters:
         - $ref: '#/components/parameters/RequestBudget'
@@ -221,6 +225,8 @@ paths:
         다시 호출하는 것이며 별도 start 엔드포인트는 없다.
         Spring 불변조건: 같은 vm_id 에는 항상 같은 생성 명세를 보낸다.
         실행 도메인이 있으면 명세 비교 없이 409 VMExists 를 반환하며 Spring 이 자기 명세와 대조한다.
+        플랫폼 VM_NAME_CONFLICT(발급한 내부 이름·UUID 예약·MAC 이 다른 VM 과 겹침)는 409 VMNameConflict 이며
+        같은 VM 이 아니므로 생성 성공으로 바꾸지 않는다 (기준 문서 4.2·8.1).
         플랫폼 공통 create 는 정지 등록이므로 실제 도메인 시작은 별도 start 연결이 필요하다.
         Linux IP 는 플랫폼 전역 잠금 안에서 자동 할당한다.
       x-driver-timeout-seconds: 30
@@ -244,7 +250,13 @@ paths:
         '400':
           $ref: '#/components/responses/InvalidArgument'
         '409':
-          $ref: '#/components/responses/VMExists'
+          description: >-
+            VMExists — 같은 vm_id 의 VM 이 이미 있음(실행 중 또는 정지 등록에 다른 명세). VMNameConflict — 플랫폼
+            VM_NAME_CONFLICT, 다른 VM 과 내부 이름·UUID 예약·MAC 충돌(생성 성공 아님)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '507':
           $ref: '#/components/responses/InsufficientResources'
         '500':
@@ -262,6 +274,8 @@ paths:
       tags: [VMs]
       operationId: getVm
       summary: VM 단건 조회
+      description: >-
+        조회 한도 5초(하위 get 에 timeout_ms 5000 명시, 요청 예산이 더 짧으면 그 값). 넘으면 504 DriverTimeout (기준 문서 4.1).
       x-driver-timeout-seconds: 5
       parameters:
         - $ref: '#/components/parameters/RequestBudget'
@@ -1062,10 +1076,12 @@ components:
             드라이버·플랫폼 실패는 HTTP 상태와 1:1 이다: DriverError 500 / DriverTimeout 504 / PlatformUnavailable 503 /
             NotSupported 501. Spring 은 이 code 를 같은 상태로 전달해야 한다 (vm-api-contract-v1.md 8.2 변환표).
             Unauthorized 401 은 Bearer 서비스 토큰 없음·불일치이며 /healthz 를 포함한 모든 엔드포인트에서 난다.
+            VMExists 409 는 같은 VM 이 이미 있음, VMNameConflict 409 는 플랫폼 VM_NAME_CONFLICT(다른 VM 과 식별 충돌)이다.
           enum:
             - InvalidArgument
             - VMNotFound
             - VMExists
+            - VMNameConflict
             - InsufficientResources
             - InvalidState
             - DriverError
@@ -1451,7 +1467,9 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
     VMExists:
-      description: vm_id 충돌 (단일 의미). 표시 이름 중복은 Spring 이 판정한다
+      description: >-
+        vm_id 충돌(같은 VM 이 이미 있음). 표시 이름 중복은 Spring 이 판정한다. 플랫폼이 발급한 식별이 다른 VM 과 겹친 경우는
+        VMNameConflict 다
       content:
         application/json:
           schema:

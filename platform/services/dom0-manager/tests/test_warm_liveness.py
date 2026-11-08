@@ -1,6 +1,7 @@
 """Both app supervisors are required; fresh functional restrictions are not VM death."""
 from dataclasses import replace
 from uuid import uuid4
+import pytest
 from xenova_mqtt.lifecycle import parse
 from dom0_manager.recovery.model import HealthState
 from test_recovery_watcher import World,obs,ZEPHYR
@@ -57,3 +58,21 @@ def test_duplicate_check_does_not_refresh_and_xen_failure_still_wins():
     from dom0_manager.models import VmState
     result=w.tick(replace(o,xen_state=VmState.crashed))
     assert result and w.health(ZEPHYR).state is HealthState.UNHEALTHY
+
+
+@pytest.mark.parametrize('reason',['CALCULATION_FAILED','DEADLINE','RESOURCE_LIMIT'])
+def test_live_function_failure_and_error_heartbeat_do_not_become_vm_death(reason):
+    w,boot,ids,o=setup()
+    # Run beyond the fixture's app-heartbeat loss window with fresh, restricted
+    # functional evidence. A legacy error heartbeat cannot override supervision.
+    for n in range(1,201):
+        w.clock.now+=.1
+        report(w,boot,ids,'manual',n)
+        report(w,boot,ids,'autonomous',n,progress=n,phase='EXECUTING',state='NOT_READY',reason=reason)
+        w.apps.record(ZEPHYR,'autonomous','error',boot,n,w.clock.now,instance_id=ids['autonomous'])
+        assert not w.tick(o)
+        assert w.health(ZEPHYR).state is HealthState.OBSERVATION_UNAVAILABLE
+    w.clock.now+=.1
+    report(w,boot,ids,'manual',201)
+    report(w,boot,ids,'autonomous',201,progress=201,phase='EXECUTING',state='READY')
+    assert not w.tick(o) and w.health(ZEPHYR).state is HealthState.HEALTHY

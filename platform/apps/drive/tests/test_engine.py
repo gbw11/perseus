@@ -1,9 +1,39 @@
 """Real input -> core planner -> tracker -> full state application, no fake path."""
 import ctypes as C
 import math
+import struct
+from uuid import UUID
 import pytest
 from test_lattice import library,fixture,encode,obstacle
 from world_codec import schema,decode
+from test_world import modern_world as _modern_world
+
+def modern_world():
+    value=_modern_world();value.reference_vehicle_pose.y=1.2
+    return value
+
+def exported_state(lib,engine):
+    out=C.create_string_buffer(32768);n=lib.engine_state(engine,out,len(out));assert n>0
+    return decode(out.raw[:n],schema.DriveState)
+
+
+def lane_grant(*,revision=3):
+    """합성 Pi issuer receipt. 실제 Authority/장치 승인이나 운영 설정은 아니다."""
+    link=schema.DriveLink(major=2)
+    link.mission_grant.CopyFrom(schema.MissionGrant(major=1,vehicle='rc-test-1',
+        pi_host_boot=UUID(fixture.BOOT).bytes,gateway_instance=bytes.fromhex('b1'*16),
+        owner_vm=UUID('77777777-7777-4777-8777-777777777777').bytes,
+        owner_execution=UUID('88888888-8888-4888-8888-888888888888').bytes,
+        app_instance=UUID('99999999-9999-4999-8999-999999999999').bytes,control_generation=1,
+        mission_id=bytes.fromhex('a1'*16),mission_revision=2,grant_revision=revision,kind=1,strategy=0,
+        operator_request_nonce=bytes.fromhex('c1'*16),issued_pi_us=1000000,mission_deadline_pi_us=0,
+        cancel_fence_revision=4,scene_admission_id=bytes(16),scene_revision=0,configuration='lattice-lab-1',
+        calibration='encoder-lab-1',primitive=bytes.fromhex(fixture.PRIMITIVE),execution_deadline_pi_us=0,
+        correction_attempts_used=0,execution_travel_m=0,max_execution_travel_m=0,admitted=True,
+        search_deadline_pi_us=0,search_travel_m=0,max_search_travel_m=0))
+    return link
+
+
 
 
 def vehicle(seq=1,*,x=0.,at=1200000):
@@ -264,7 +294,7 @@ def test_merge_passage_survives_handoff_and_clipped_reference(library):
         assert state.merge_passed_reference_revision==1 and state.direction==original.direction
         assert state.merge_goal==original.merge_goal and state.maneuver_revision==original.maneuver_revision
         # Exercise the common binary envelope used by the real Gateway relay.
-        link=schema.DriveLink(major=1);link.accepted.host_boot=fixture.BOOT
+        link=schema.DriveLink(major=2);link.accepted.host_boot=fixture.BOOT
         link.accepted.gateway_instance=fixture.INSTANCE;link.accepted.state.CopyFrom(state)
         accepted=decode(encode(link),schema.DriveLink).accepted.state
         for engine,payload in ((target,accepted),(legacy,decode(encode(state),schema.DriveState))):
@@ -332,7 +362,7 @@ def test_passed_merge_survives_real_direction_change_and_binary_handoff(library)
         assert changed.merge_goal==passed.merge_goal
         assert changed.maneuver_revision>passed.maneuver_revision
         assert changed.merge_passed_reference_revision==1
-        link=schema.DriveLink(major=1);link.accepted.host_boot=fixture.BOOT
+        link=schema.DriveLink(major=2);link.accepted.host_boot=fixture.BOOT
         link.accepted.gateway_instance=fixture.INSTANCE;link.accepted.state.CopyFrom(changed)
         accepted=decode(encode(link),schema.DriveLink).accepted.state
         rolling_road(library,target,4,1400000,x+1.8,1.6,heading,
@@ -368,7 +398,7 @@ def test_road_policy_binary_handoff_and_policy_mismatch_preserve_current_executi
         assert library.engine_plan(source,1220000,4096)==0
         assert library.engine_track(source,1220000,out)==0 and out[0]>0
         state=exported_state(library,source);assert state.world_features==1
-        link=schema.DriveLink(major=1);link.accepted.host_boot=fixture.BOOT
+        link=schema.DriveLink(major=2);link.accepted.host_boot=fixture.BOOT
         link.accepted.gateway_instance=fixture.INSTANCE;link.accepted.state.CopyFrom(state)
         accepted=decode(encode(link),schema.DriveLink).accepted.state
         assert accepted.world_features==1
@@ -441,3 +471,85 @@ def test_real_owner_memory_search_failure_then_normal_progress(library):
         assert memory(2)[4]==failed[4] and memory(2)[3]>=failed[3]
     finally:
         library.engine_free(e)
+
+
+def test_state2_metadata_survives_actual_apply_and_next_export_without_minting_authority(library):
+    source=library.engine_new();target=library.engine_new();world=modern_world()
+    grant=lane_grant();grant_wire=encode(grant)
+    try:
+        for engine in (source,target):
+            load(library,engine,world);send_vehicle(library,engine,vehicle());send_vehicle(library,engine,vehicle(2,at=1220000))
+        assert library.engine_grant(source,grant_wire,len(grant_wire),1220000)==0
+        assert library.engine_plan(source,1220000,4096)==0
+        command=(C.c_float*4)()
+        assert library.engine_track_grant(source,grant_wire,len(grant_wire),1220000,command)==0
+        state=exported_state(library,source)
+        assert state.major==2 and state.state_features==15 and state.mission.kind==1
+        assert state.HasField("task_reference") and state.task_reference.selected_lane_id==1
+        assert state.mission.phase==10 and state.mission.grant_revision==3
+        assert state.mission.mission_id==grant.mission_grant.mission_id
+        assert len(state.segments)==1 and state.segments[0].signed_direction==1
+        # 합성 gate 진술의 보존만 확인한다. 실제 stationary/servo 사건을 만들지 않는다.
+        state.direction_gate.CopyFrom(schema.DirectionGateRef(gate_revision=5,stop_command_sequence=9,
+            state=2,requested_direction=1))
+        wire=encode(state)
+        assert library.engine_apply(target,wire,len(wire),1220000)==0
+        assert library.engine_track_grant(target,grant_wire,len(grant_wire),1220000,command)==0
+        copied=exported_state(library,target)
+        assert copied.mission==state.mission
+        assert copied.segments==state.segments
+        assert copied.direction_gate==state.direction_gate
+        changed=lane_grant(revision=4);changed_wire=encode(changed)
+        assert library.engine_track_grant(target,changed_wire,len(changed_wire),1220000,command)==9
+        assert command[0]==0
+        assert exported_state(library,target).mission==state.mission
+    finally:library.engine_free(source);library.engine_free(target)
+
+
+def test_new_world_whole_cell_permission_is_consumed_by_the_actual_collision_planner(library):
+    for allowed in (True,False):
+        engine=library.engine_new();world=modern_world()
+        if not allowed:world.drivable_permission=bytes(len(world.drivable_permission))
+        try:
+            send_vehicle(library,engine,vehicle());send_vehicle(library,engine,vehicle(2,at=1220000))
+            load(library,engine,world)
+            result=library.engine_plan(engine,1220000,4096)
+            assert (result==0)==allowed
+        finally:library.engine_free(engine)
+
+
+def test_localization_lease_expires_without_renewing_to_world_or_vehicle_deadline(library):
+    engine=library.engine_new();world=modern_world();world.localization.valid_for_us=200000
+    grant_wire=encode(lane_grant())
+    try:
+        send_vehicle(library,engine,vehicle());send_vehicle(library,engine,vehicle(2,at=1220000))
+        load(library,engine,world)
+        assert library.engine_grant(engine,grant_wire,len(grant_wire),1220000)==0
+        assert library.engine_plan(engine,1220000,4096)==0
+        command=(C.c_float*4)();assert library.engine_track_grant(engine,grant_wire,len(grant_wire),1220000,command)==0
+        send_vehicle(library,engine,vehicle(3,at=1320000))
+        assert library.engine_track_grant(engine,grant_wire,len(grant_wire),1320000,command)==7
+        assert command[0]==0
+    finally:library.engine_free(engine)
+
+
+def test_legacy_auto_profiles_keep_none_candidate_while_lane_profile_requires_original_grant(library):
+    from xenova_drive_world import mark_road
+    for feature in (0,1,11):
+        engine=library.engine_new();world=modern_world() if feature==11 else fixture.world()
+        if feature==1:
+            mark_road(world,[schema.Point(x=p.x,y=1.96) for p in world.reference],
+                            [schema.Point(x=p.x,y=1.24) for p in world.reference])
+        try:
+            send_vehicle(library,engine,vehicle());send_vehicle(library,engine,vehicle(2,at=1220000))
+            load(library,engine,world)
+            assert library.engine_plan(engine,1220000,4096)==0
+            command=(C.c_float*4)();result=library.engine_track(engine,1220000,command)
+            if feature==11:
+                assert result==9 and command[0]==0
+            else:
+                assert result==0 and command[0]>0
+                state=exported_state(library,engine)
+                assert state.major==2 and state.state_features==7 and state.mission.kind==0
+                assert state.mission.mission_id==bytes(16) and state.world_features==feature
+        finally:library.engine_free(engine)

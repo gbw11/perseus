@@ -1,26 +1,32 @@
 # 복구 시나리오 국소 마감: Authority 진단·출력 검증·조회 예산
 
-최신 후속: [2026-11-05 문서 현재화·작업 커밋](#branch-commit-closure-20261105). [다음 이미지 주행1.0.8 선택](#image-default108-20261105)과 실제 seed 검증을 포함한다. [RAM 최근 관측 계약](#ram-recent-observation-20261104)은 그대로 유지한다. [수동 버퍼·관리 RAM 제공자 후보](#manual-buffer-managed-ram-20261104)와 이전 보드·실패 근거는 날짜별 원문에 보존했다.
+최신 상태는 [R65 중단·준비 대기 의미와 적용 범위](#r65-pause-20261107)다. 후속: [R64 FW30 유지·통계](#clock-r64-retained30-20261107), [stop 요청 내 사전 검증](#stop-request-prevalidation-local-20261107), [netfront TX 회수·원 오류 보존](#netfront-tx-reap-r2-local-20261107), [R60–R61 수락 전 거절·국소 검증·복원](#clock-r60-r61-20261107), [R58–R59 전체 기록 검사](#clock-r58-r59-20261107), [R57 상세 계측 비용 대조](#clock-r57-20261107), [R56 TCP 구간 관측·정리](#clock-r56-20261107), [R55 broker 대조·복원과 TCP 후속 관측](#clock-r55-20261107), [R54 런처 검증 정정](#r54-launcher-guard-erratum), [11월 7일 R54 clock 구간·복원](#clock-r54-20261107), [17:55 보드 복원·중단과 재개 기록](#parallel-resume-20261106), [병렬 binding·feedback 구간 계측](#parallel-binding-feedback-20261106), [보드 예산 시험·등록/수습·연결 슬롯 보완](#budget-board-observations-20261106), [E4 안정 구간·VM 누적 예산](#worker-budget-closure-20261106). 이전 [Worker 반복 운영·상태 발행 보완](#worker-status-closure-20261105), [문서 현재화·작업 커밋](#branch-commit-closure-20261105), [다음 이미지1.0.8 선택](#image-default108-20261105), [RAM 최근 관측](#ram-recent-observation-20261104), [수동 버퍼·관리 RAM](#manual-buffer-managed-ram-20261104)은 당시 후보와 범위로 읽는다.
 
 <a id="현재-상태-요약"></a>
 ## 현재 작업 묶음과 확인 수준
 
-현재 작업은 `feat/platform/guest-clock-sync`의983fa12 이후 변경이다. 이전 단계의 설계·실패·수락을 보존하되,
-아래가 이번 브랜치의 최신 제공 범위다. 이 표의 소스 제공·로컬 검증·이전 보드 수락을 하나의 완료로 합치지 않는다.
+이 표는 기존 `feat/platform/guest-clock-sync`의983fa12 이후 제공물과 후속 보완을 모은 것이다.
+이번 후속 작업의 검토 시작점은 `5d05101e`와 당시 미커밋 diff였다. 현재 소스 인계는
+`feat/platform/recovery-drive-runtime-hardening`의 작업별 커밋이며, [R65 중단 상태와 적용 범위](#r65-pause-20261107)를 우선 읽는다.
+이전 단계의 설계·실패·수락을 보존하며 소스 제공·로컬 검증·이전 보드 수락을 하나의 완료로 합치지 않는다.
 
 | 작업 묶음 | 현재 제공 | 수락 수준·남은 경계 |
 |---|---|---|
 | 연속 Linux reboot·원 stop 수습 | 신원/디스크를 검증한 새 실행 결합, 원 key 재조회, 직접 후속 force의 부재 근거로 옛 stop 실패 종결 | 로컬 회귀·이전 보드 근거. 신원 불명/잔존 소유 자원은 계속 보류 |
-| create 게시·실행 binding | 원 기한 안의 게시 잠금 대기, identity-only 관측·제한된 재확인·동일 실행 공급 | 기존 복사1회/원 소유·기한 유지. 보드 병렬 binding 지연의 모든 원인은 미확정 |
+| create 게시·실행 binding | 원 기한 안의 게시 잠금 대기, identity-only 관측·제한된 재확인·동일 실행 공급, 관측 안의 중복 검증 재사용·A/B 조회 예산 분리 | 기존 복사1회/원 소유·기한 유지. [후속 계측](#parallel-binding-feedback-20261106)의 국소 수정과 로컬 회귀를 제공하나 전체 병렬 조건의 binding·지도 진행은 미수락 |
 | Worker/Gateway 설정 공급 | 기존 MQTT 자격 재사용, factory UUID별 설정·최초 mock 초기화, client 의존성과 heartbeat 선언 호환 | 실제 차량 출력 승인과 별개. 실제 Worker·A/B·장치 종단은 미수락 항목을 유지 |
+| Worker 반복·부가 상태 | 기본 판정 원문 큐 제거·닫힌 ID 정리, 부가 sink의 유한 실행자·원 표본 시각 보존, 상태 파일2의 host boot 검증 | 집중174·Manager 전체1022 로컬 통과, 고정 ARM Python/QEMU 실행 확인. 전체 게스트 부팅·운영 설치는 별도 |
+| E4 반복 복구 | 명시 프로필의 연속 안정·VM별 누적 논리 시도·공동 저장. 원 replay 추가 차감0, 과거 예산 미확인 보호 | 소유 Debian의 실제 Xen/Agent/Worker/Store에서 반복 장애·원 결과 회수·재시작·소진·안정 갱신 뒤 정상 복구 통과. 운영 수치와 기존 설치본/주행 종단 수락은 별도 |
 | XenStore 거래 회복 | 늦은 응답 회수·고아 거래만 abort, 원 commit 재전송 금지 | native/ASan·UBSan·보드 후보 근거 |
 | Gateway STOP | 단일 원 제출의 pending/완료 회수·출력 우선·기존10ms 직접 호출 보호·장치 참조 보존 | PTY·보드 후보 확인. 실제 장치/물리 정지나 모든 부하의 기한 보장은 아님 |
-| 앱 메모리·Telemetry2.1 | AUTO4+MANUAL4 실제 owner, 고정 예약/점유/최고값·원 시각·결과 보관 구분, 유한 공정 발행 | native·ARM/QEMU·8-region 로컬 MQTT. 실보드 지도 채택→실계산→점유 변화는 미완료 |
+| 앱 메모리·Telemetry2.1 | AUTO4+MANUAL4 실제 owner, 고정 예약/점유/최고값·원 시각·결과 보관 구분, 유한 공정 발행 | native·ARM/QEMU·8-region 로컬 MQTT와 실보드 지도·검색·경로 점유 증가 확인. READY·실제 PTY 주행·입력 만료 뒤 전체 반환은 미수락 |
 | RAM 최근 관측 | 같은 봉투의 total−page-free, 6초 원 lease·최초 오류·역전/퇴역 boot 보호 | 계약·참조 소비자 제공. Spring/화면 후보는 별도, 스택 화면은 보류 |
-| 펌웨어·다음 이미지 | 공통 주행1.0.8의 실제 bin/manifest, 기본 lock·factory A/B·조립 예시 일치 | 로컬 ARM·실제 seed 수락. 전체 이미지/RPM 재빌드·운영 설치는 별도 |
+| 펌웨어·다음 이미지 | 기본 lock·factory A/B의1.0.8 선택 유지. 후속 진단·통계·TX 회수 후보를 불변 산출물로 분리하고 시험 B에는1.0.30 유지 | [R65](#r65-pause-20261107)의 원 통신·Worker 복구 확인. 부하용1.0.31은 로컬 ARM 포장만 완료. 전체 READY·PTY 주행·입력 만료 후 반환·세 압력 조건과 전체 이미지/RPM 수락은 별도 |
 | 문서 현재화 | 예산 헤더·조건부 fork·key stop200/202·원 key 조회의 실제 제공을 반영 | 과거 설치본/미연결 설명은 이력으로 보존. 실제 배포값은 재조회하지 않음 |
 
-기본 선택은 Linux1.0.4/주행1.0.8, 마지막 보드 메모리 후보는1.0.7이다. 세 버전은 서로 다른 수준이다.
+기본 선택은 Linux1.0.4/주행1.0.8이다. 과거 보드 메모리 후보1.0.7과 이번 소유 시험 B의1.0.9는
+별도 후보이며 기본 이미지 선택 변경을 뜻하지 않는다. 진단1.0.28의 시험 뒤 원1.0.8로 복원한 이력을 보존한다.
+R64/R65 이후에는 TX 회수를 보완한1.0.30을 시험 B에 유지하고 원 통신 설정을 별도로 복구했다.
 이전 표본의 시간·source hash·operation과 실패 기록을 최신 후보가 이미 다시 수락한 것으로 확대하지 않는다.
 
 ## 기존 단계별 기준선과 후속 연결
@@ -3949,3 +3955,1343 @@ first-install/common 경로 누락·변경 없는 Spring DTO 누락·Mosquitto P
 
 systemd259를 갖춘 고정 target/정규 패키지·전체 이미지 검증, 실보드 지도 채택/실제 계산·MANUAL heartbeat 화면,
 운영 Worker/Gateway 및 장치 종단은 각 기존 수락의 미완료 범위다. 이번 커밋과 로컬 성공 횟수로 완료를 대신하지 않는다.
+
+<a id="worker-status-closure-20261105"></a>
+## 2026-11-05 Worker 반복 운영·상태 발행·boot 문맥 국소 보완
+
+후보는 `feat/platform/integration-followup`의 HEAD `5d05101efd39c457cb78a05b473952bc38e7a317`와
+이 절에 연결한 미커밋 diff다. 기존 검토 원자료는 `Documents/Codex/2026-11-05/platform-review/`에,
+이번 source manifest·명령·전체 로그·해시는 같은 날짜의 `worker-status-fix/`에 둔다.
+`verification.json`에 최종 파일/시험 사본의 바이트 대조와 각 실행 명령·종료 코드·로그 hash를 모았고,
+`final-candidate.json`과 `candidate.patch`로 HEAD 이후 실제 변경을 식별한다.
+실보드·운영 서비스·실데이터·배포·commit/push는 수행하지 않았다.
+
+### 변경과 유지한 책임
+
+| 변경 묶음 | 확인한 문제 → 수정 | 유지한 보호·추가 상태 |
+|---|---|---|
+| 판단 사본·중복 로그 ID | 기본 무제한 `judgments` 큐는 사용하지 않아도 쌓였다. 기본은 누계만 세고 Engine에 직접 전달한다. 명시한 유한 진단 큐만 `put_nowait`하며 포화 손실을 센다. `policy=none`의 `_skipped` ID는 기존 닫힌 record 정리 때 같이 해제한다 | `run_once()`의 이번 판단 목록, Engine의 필수 수락·저장, pending event·살아 있는 보호의 보존 조건과 `KEEP_CLOSED=20` 유지. 새 복구 큐·DB 없음 |
+| 부가 상태 발행 | 감시 스레드의 상태 파일 쓰기·상태 로그·Gateway 진단 조회를 전용 실행자에 넘겼다. Watcher/Engine metadata는 owner에서 작은 표본으로 만들며 실행자에서 재조회하지 않는다 | in-flight 1개+최신 pending 1개, 실행자 1개. 원 표본 시각/lease 유지. 교체·실패·잔존 계수와 최초/마지막 예외·최초 내부 결함을 유한하게 보존. 필수 저장을 best effort로 바꾸지 않음 |
+| boot 문맥 | 단조 나이만으로는 다른 부팅의 비슷한 uptime을 구분하지 못했다. 상태 파일 버전2에 `host_boot_id`를 넣고 reader가 현재 boot 확인 뒤에만 나이를 계산한다 | 다른 boot는 STALE, 과거 버전1·손상·boot 확인 불가는 UNAVAILABLE. 다음 정상 표본으로 자연 회복. 원 journal/hash/기한이나 운영 기록을 변환하지 않음 |
+
+상태 파일2는 MQTT2.1·firmware 버전·복구 journal 버전과 별개다. 일반 호출자가 버전을 선택하지 않는다.
+`StatusReporter.report()`는 실행자 시작 전 동기 단건 진단에 남기고, 실제 Worker는 `submit()`을 쓴다.
+`sink_snapshot()`의 계수는 프로세스 내 부가 진단이며 새 필수 원장이 아니다. 원 출력·credential·stack을
+상태 파일에 복제하지 않는다. `close()`는 최대0.25초만 기다리고 False이면 실행자가 남았음을 나타낸다.
+커널 I/O를 강제 취소하거나 성공 drain으로 꾸미지 않는다. 기존 일반 로그의 공유 handler와 모든 CPU/I/O
+간섭까지 제거했다는 보장은 아니다. HTTP 상태 route는 이번에 추가하지 않았다.
+
+### 실패와 회복 assertion
+
+이전 검토의 실제 50회 표본은 닫힌 Engine 기록20개와 별개로 원문 큐50개(maxsize0)·`_skipped`50개가 남았다.
+원자료는 `platform-review/retention-probes-confirmed.log`다. 아래 새 회귀는60회로, 서로 다른 표본 수의
+지연 배수나 운영 상한을 비교하는 시험은 아니다.
+
+- 실제 Worker/Watcher/Engine으로 crash→명시 stopped를60회 반복했다. 필수 닫힌 기록은20개,
+  `_skipped`도20개이며 기본 진단 원문 큐는 없다. 명시한 용량1 사본 큐는1개·손실59개로 제한되고,
+  Engine에는60개 판단이 전달된다. 그 뒤 신선한 정상 신호가 HEALTHY로 처리된다.
+- 실제 상태 파일 교체, Gateway 진단 조회, 상태 logger를 각각 막았다. 막힌 동안26 tick이 진행하며
+  in-flight1/pending1·교체24로 제한된다. 원 객체를 바꿔도 제출 표본은 바뀌지 않는다.
+  해제 후 기록이 끝나도 원 표본이20초 지났으면 STALE이며, 새 정상 표본에서 OPERABLE로 돌아온다.
+- ENOSPC와 내부 TypeError를 따로 주입해 최초 원 cause·오류 종류·한 번의 상세 기록을 보존하고 정상 쓰기로 회복했다.
+  ENOSPC 뒤 다른 TypeError·KeyError도 각각 원 cause와 stack을 남기며, 정상 발행 뒤 같은 결함이 다시 발생하면
+  다시 기록한다. 최초 I/O 실패가 후속 내부 결함을 숨기지 않고 연속된 같은 내부 결함의 중복 출력만 억제한다.
+  부가 sink 실패와 필수 RecoveryStore 실패를 함께 주입하면 실제 복구 호출은0이다.
+  필수 저장을 복구하고 기존5초 재시도 대기를 지킨 뒤에만 정상 호출1회가 진행한다.
+- 다른 boot의 uptime이 기존 표본보다1초 큰 경우도 STALE이며, 서로 다른 단조 시각의 나이를 만들지 않는다.
+  새 writer의 정상 표본, 버전1 뒤 정상 표본, boot 읽기 오류 뒤 회복을 확인했다.
+  유효하지 않은 host UUID·null·bool은 정상 근거로 쓰지 않는다.
+- 느린 sink에서 `close()==False`와 실행자 잔존을 확인하고, sink 해제 뒤 실제 종료·추가 제출 거절을 확인했다.
+
+### 검증·포장 수준
+
+| 같은 제품 후보의 확인 | 결과·대체 경계 |
+|---|---|
+| Worker/상태/Engine 집중 회귀 |174PASS. 첫 회차172PASS/1FAIL은 새 회복 시험이 기존5초 backoff 전에 성공을 기대한 오류였다. 시험 시계만 진행시켜 수정했고 제품 예산/보호는 완화하지 않았다 |
+| dom0-manager 전체 |1022PASS·9subtests,207.89초(집중174 포함, 포장 회귀와 병렬 실행). 원 key·HTTP·소유/저장·Gateway 보호·재합류 회귀 포함. 기존 라이브러리 deprecation warning1건 유지 |
+| 하위 Recovery/stop·배포 payload/Gateway 포장 |70PASS·35subtests,85.49초(Manager 회귀와 병렬 실행). 고정 ARM systemd259 loader를 QEMU user-mode로 실행해 정상 graph와 cycle 음성 대조 확인. 실제 PID1/service 기동이나 운영 지연 상한은 아님 |
+| 실제 ARM Python/QEMU |고정 CPython3.14.7/AArch64로 현재 수정 모듈을 실행. sink 정지 중26 tick·pending1·교체24, 정상 쓰기2회·실행자 종료, boot ID 주입 변경 뒤 정상 발행 PASS. socket connect/bind를 audit hook으로 금지 |
+| 설치·의존성 |현재 recipe의 기존 Python RDEPENDS closure75개를 캐시 RPM에서 별도 임시 root에 추출. 새 패키지 의존성/모듈/설치 경로를 추가하지 않았다. 현재 recipe의 기존 `.py` 설치 규칙과 unit 대조. 새 RPM/전체 이미지 빌드는 아님 |
+
+ARM 시험은 처음에 Gateway용 과거 설치 root만 사용해 `zoneinfo` 경로, 이어 불완전한 의존성 closure의
+`concurrent`가 누락됐다. 현재 Manager recipe의 Python 의존성 전체와 실제 stdlib/site-packages 경로를
+공급한 뒤 통과했다. 제품 import를 대역으로 바꾸거나 새 버전을 설치하지 않았다. 원 오류는 first/second ARM 로그에 보존했다.
+
+QEMU의 확인 수준은 구분한다. 앞선 검토의 QEMU는 ARM systemd loader 검사였고,
+이번에는 실제 변경 Python 모듈의 ARM user-mode 실행을 추가했다. Zephyr 전체 게스트 부팅,
+Gateway 고정 broker/QEMU 전송5개, 새로운 firmware/운영 설치·물리 정지 수락까지 수행한 것은 아니다.
+Spring stop 원 key 연결과 episode 간 안정 구간/누적 복구 예산은 앞선 검토의 별도 미연결 범위로 남긴다.
+
+<a id="worker-budget-closure-20261106"></a>
+## 2026-11-06 E4 안정 구간·VM별 누적 복구 예산 국소 구현
+
+후보는 `feat/platform/integration-followup` / HEAD `5d05101efd39c457cb78a05b473952bc38e7a317`와
+현재 diff·새 `recovery/budget.py`, `tests/test_recovery_budget.py`다. 전날 Worker 사본·상태 sink·boot 보완을
+보존했다. 착수 전 diff/해시는 `Documents/Codex/2026-11-06/e4-budget/before.patch`·`before.json`에,
+이번 명령·로그·소스 대조는 같은 폴더에 둔다. 프롬프트 자체를 완료 증거로 쓰지 않는다.
+이 로컬 구현 단계에서는 실보드·운영 env/unit·서비스·원장·commit/push를 변경하지 않았다.
+이후 승인된 소유 fixture의 보드 실행과 Worker 일시 정지는 [보드 후속](#budget-board-observations-20261106)에 분리한다.
+
+### 실제 달라진 계약과 구현 기준
+
+| 변경 | 위치·기준 | 보존한 것·실제 제공 범위 |
+|---|---|---|
+| 선택적 명시 프로필 | `RecoveryPolicy.stable_s/vm_max_attempts`, 대응 env 두 개를 함께 검증. 운영 기본값 없음. 상한은 기존 episode 상한 이상 | 미설정은 기존 동작. 숫자는 시험 파일의 명시 PROFILE에서만 공급. 기존 backoff·기한·force 승인 유지 |
+| VM별 누적 | `RecoveryEngine._task_attempt`, `RecoveryStore.vm_budget_used`. 새 논리 attempt와 계수를 같은 원자 저장으로 확인 후 호출 | 원 replay/조회/응답 유실/Worker 재시작의 추가 차감0. 새 episode·실행·사유·사용자 stop은 계수를 초기화하지 않음. 실제 재부팅 횟수와 구분 |
+| 연속 안정 | `Watcher.stability_samples` → `StableRun` → `Engine._update_stability`. 이번 관측의 의도·domid/실행·앱 binding·원 수신 시각만 사용 | 캐시 재조회는 진행0. source 만료·건강 lease 밖 공백·관측 실패·문맥 변경은 연결을 끊음. Worker 재시작 때 누계는 복원하고 안정 시간은 다시 확인 |
+| 정상 대기·회복 | warm `WAITING/QUALIFIED`의 두 앱 감독 진행으로 확인. 실제 계산은 실행 중일 때 기존 Watcher 기준으로 확인 | 가짜 heartbeat/계산0. 준비·입력 부재를 VM 재시작 사유로 만들지 않음. Xen-only starter는 Xen 관측 범위. 원 COMPLETED·현재 건강·안정·재합류·출력 허가 분리 |
+| 소진·저장 실패 | 새 시도만 보류하고 원 오류와 별도로 UNKNOWN/EXHAUSTED/CONTEXT_UNAVAILABLE을 표시. 안정 갱신 저장 실패는 계수를 되돌림 | 원 결과·pending 사건·Gateway 보호/정산 유지. 시간만으로 자동 재개0. 충분한 실제 안정과 저장 확인 뒤 새 장애의 정상 복구 진행 |
+| 유한 상태·비용 | VM당 계수 하나, 필요한 VM당 진행 중 안정 표본 하나. 기존 저장에 결합. 연속 건강26회에서 갱신 fsync1을 계수 | 매 tick 추가 fsync·전체 원장 재검색·대용량 복사·새 전역 잠금/daemon 없음. 닫힌 기록20 정리와 별개. 명시 등록 부재/영구 제거 응답에서만 계수 정리 |
+
+동작값은 Worker 공통 정책이고 사용량/보류는 VM별이다. `engine.budget_status(vm_id)`는 소유 프로세스·시험의
+내부 조회이며 새 HTTP/MQTT endpoint가 아니다. 상태 파일의 세 보류 사유와 전이 로그에 원 recovery·VM·사용량/상한을
+연결한다. 기존 오류 code/사유·원 예외를 합치거나 없애지 않았다.
+
+새 attempt의 계수는 이미 있던 필수 저장에 합치므로 별도 fsync를 추가하지 않는다. 안정 예산 갱신은 새로운 필수 전이여서
+동기 저장1회를 추가한다. 기존 Engine 잠금/필수 파일 I/O 경계는 유지했으며, 필수 저장장치가 멈춰도 감시 지연이 없다는
+보장은 아니다. 느린 부가 status sink와 필수 정책 저장을 구분한다. 이 대기와 실제 부하의 시간 예산은 다음 보드 시험에서 측정한다.
+
+마감 정적 점검에서는 재발행 주기와 실제 건강 lease를 구분해 정상 스케줄링 지터를 수락했고, 판정 직전 confirm에서 바뀐
+의도/실행 관측을 그 health와 같은 owner 표본으로 보존했다. 이전 관측의 문맥을 안정 근거로 붙이지 않는 회귀를 추가했다.
+
+### 저장 호환과 재시작
+
+기존 내부 저장1은 계속 읽는다. E4 추적을 시작한 저장2는 `vm_budget`을 기존 recoveries/pending과 함께 쓴다.
+과거1의 남은 닫힌 기록20개만 세어 전체 사용량을 추측하지 않는다. 그 상태는 UNKNOWN으로 새 자동 시도만 보류하고,
+유효한 원 attempt는 동일 spec/ID/기한으로 회수한다. 충분한 정상 관측을 얻으면 기준0을 내구 기록한다.
+저장2를 읽은 새 코드가 제한을 비활성화해도 기존 계수를 버리거나1로 downgrade하지 않는다.
+일반 호출자에게 저장 버전 선택/변환을 요구하지 않으며, Engine/state/policy/budget/Watcher/Worker의 내부 설치본은
+같은 후보로 교체해야 한다. 구형 writer의 저장2 호환은 주장하지 않는다. 손상/중복 JSON key/형식 오류는 기존 history-lost 보호로 차단한다.
+
+기본 `/run`은 같은 host 부팅의 Worker 재시작 범위다. 보드 재부팅까지 보존하는 운영 경로 변경은 하지 않았다.
+별도 영속 fixture에서는 boot가 바뀌어도 시간 없는 계수는 보존하고, 안정 시간은 새 부팅/관측에서 다시 확인했다.
+Worker 중단 구간·다른 host의 단조 시각을 안정 시간에 더하지 않는다. 새 기록 부재와 과거1의 정보 부족은 다르게 처리한다.
+
+### 로컬 정상·실패·회복 수락
+
+제품 경로는 실제 Worker/Watcher/Engine/RecoveryStore/EventLog다. 외부 Xen/Manager 통신 결과만 기존 fixture로 대체했다.
+원 논리 attempt의 수락 저장과 실제 호출 사이에서 저장 파일의 계수/원 spec을 확인한다.
+
+- episode 세 개 뒤 소진·단순100초 경과의 보류·다른 VM 정상 복구·연속 안정 뒤 새 요청 진행을 확인한다. 값은 시험 프로필이다.
+- 응답 유실·동일 attempt 조회·Worker 재시작 뒤 원 ID/spec/deadline/사용량 유지, 별도 Python 프로세스에서 실제 Worker를 기동해 계수 복원을 확인한다.
+- 닫힌 기록20개를 넘어선24회 사용량을 기록 정리/재시작 뒤에도 유지한다. 복구 중·미확정인 원 시도에는 안정 환급을 하지 않는다.
+- 캐시 heartbeat·관측 실패·의도/실행/host 변경·상태 sink 지연 중에도 제한/정상 회복을 확인한다.
+- 새 attempt 저장 실패의 실제 호출0·차감0, 안정 갱신 저장 실패의 거짓 회복0, 정상 저장 뒤 다음 복구 진행을 확인한다.
+- 과거1의 원 결과 회수와 미확인 예산·충분한 안정 뒤 회복, 저장2 손상 원본 보존·자동 실행 차단을 확인한다.
+- 정상 warm Standby 두 앱의 작업 progress0·실제 앱 heartbeat 미생성 상태에서 감독 진행만으로 안정 회복한다. 기존 AUTO/MANUAL 독립성과 Gateway 보호는 기존 회귀에 연결한다.
+
+최종 실행 명령/종료 코드/로그 hash·제품 파일 대조는 이 폴더의 `verification.json`에 모은다.
+ARM/QEMU는 기존 고정 CPython3.14.7·캐시 의존성에서 실제 변경 모듈을 실행하는 수준이며 전체 Zephyr 부팅·새 RPM/이미지·운영 배포가 아니다.
+
+| 최종 후보 검증 | 실제 결과·범위 |
+|---|---|
+| 집중 회귀 |259PASS,14.22초. E4 신규40건과 기존 Store/Engine/Worker/상태/warm 회귀 포함 |
+| Manager 전체 |1062PASS·9subtests,371.98초. 집중259 포함. 기존 라이브러리 deprecation warning1건이며 의존성 변경 없음 |
+| Recovery/stop·recipe payload·Gateway 포장 |70PASS·35subtests,114.51초. 전체 회귀와 병렬 실행. 고정 ARM systemd259 loader의 정상/cycle 음성 대조 포함. 실제 PID1/service 기동은 아님 |
+| ARM/QEMU 실제 모듈 |AArch64 CPython3.14.7에서 실제 Worker/Watcher/Engine/RecoveryStore 실행. 응답 유실·재시작 원 spec 유지·상한3에서 추가 호출0·안정 회복 후 다음 호출1 확인. 값5초/3회/episode2회는 명시 fixture뿐이며 Xen/통신 port는 대역 |
+| 부분 설치·의존성 |실제 recipe의 `.py` 설치 규칙으로 새 `dom0_manager/recovery/budget.py` 포함 바이트/0644 모드를 임시 root에서 대조. 기존 target Python 의존성 closure75개를 캐시 RPM으로 공급해 ARM 실행. 개발 source 경로 import이며 새 정규 RPM/전체 이미지 QA·운영 설치로 확대하지 않음 |
+
+모든 시험은 소유 임시 fixture에서 수행했다. 최종 소스·시험 사본을 파일별 SHA256으로 대조하며,
+새 파일까지 담은 `candidate-with-new-files.patch`와 `changes.tar`는 검토용 원자료이고 정규 패키지가 아니다.
+관측·배포 환경이 다른 로컬 실행 시간을 운영 deadline이나 상대 성능 배수로 해석하지 않는다.
+
+<a id="budget-board-followup-20261106"></a>
+### 실보드 예산 조정 입력표와 진행 근거
+
+사용자 결정: 이번 운영 수치는 확정하지 않고, 구현 마감 뒤 실보드에서 기존 미측정 예산과 함께 조정한다.
+아래 표는 시험 시작 전의 입력표다. 2026-11-06에 실제 시험을 시작했으며, 확인한 결과는 아래 후속 절에 분리한다.
+이전 보드 성공·실패는 당시 후보의 근거로 보존하고,
+이미 고친 증상을 미해결로 다시 등록하지 않는다. 기간 단위 전역 복구 상한(DO2)은 이번 VM별 E4와 별도다.
+
+| 묶음·원본 | 다음에 실제로 측정할 것 | 유지할 수락 기준·미완료 구분 |
+|---|---|---|
+| E4 / `recovery/policy.py`, `budget.py`, `engine.py` | 원 신호 주기/지연·안정 후 재발 분포·재시작/재합류 비용, 짧은 정상과 지속 정상. 같은 키/Worker 재시작/부하 병행 | 안정 시간과 VM 상한은 측정·운영 승인으로 선정. 원 시도/예산 보존, 소진 후 정상 회복, B 독립 진행. `/run`의 host 재부팅 보존 범위 별도 |
+| Worker 신호·유예 / `recovery/config.py`, `watcher.py` | cold/warm 부팅의 첫 유효 Agent/App·현재 binding, 감시 지터·손실/동료 신선도 창·공통 경로 단절/회복 | 기존 최초 미수신/공통 경로 보류 유지. 입력/Standby 대기를 장애로 만들지 않음. 현재 기본값이 실보드 승인값이라는 주장은 하지 않음 |
+| 복구 호출 / `recovery/policy.py`, `protection.py` | graceful 종료·강제 수습·새 실행 확인·재관측·Gateway 보호의 각 구간과 원 기한 소모 | 같은 attempt 회수·실행 신원·현재 intent·force 승인 유지. 정상 종료 지연을 즉시 실패/force로 합치지 않음. 숫자는 정상/실패와 병렬 표본으로 검토 |
+| Linux 생성 / `creation-policy.json`, `xenova_creation.py`, 배포 준비 문서 | 지원 템플릿과 실제 SD의 준비/검증 복사/게시 구간·호출 예산 | 예제 null을 활성 정책으로 쓰지 않음. create 승인 예산만 확정하며 원 완료 조회·stop에 전역 gate를 추가하지 않음 |
+| Gateway / `verified_runner.py:_submit`, `sink.py`, feedback 계약 | 접수→actor→writer→시리얼 제출/feedback 각 구간, 정상·병렬 부하·느린 로그/장치의 지연 | 기존 초기 STOP 미확정 진단/수정 근거 보존. 원 제출 회수·명령 만료·STOP 보호 유지. PTY 계약 증거와 실제 장치 적용/물리 정지는 구분 |
+| Zephyr 네트워크 / `xen-runtime/src/netfront.c`·ring 시험 | 일시 backend 조회 실패·packet 경합·부족 버퍼·복귀 중 TX/RX/MQTT 진행과 최대 대기 | 이미 보완한 일시 실패/종료 보호를 재사용. 신원·ring/grant·실제 backend 종료는 완화하지 않고 현재 설치 펌웨어와 부하에서 재수락 |
+| 주행/계측 / `apps/drive/zephyr/src/workers.c`, Diagnostics·Telemetry2.1, 앞선 보드 보고 | 지도 채택→실제 계산/완료·pool 점유/반환, deadline/cancel·감독 신선도·수집/직렬화/발행 비용. AUTO/MANUAL·통신 동시 부하 | 현재 작은 tick 측정의0을 비용0으로 해석하지 않음. native/합성 지도 성공을 실제 보드 입력 채택으로 대체하지 않음. 운영 자원·기한은 승인 프로필에서 확인 |
+
+시험 전에 설치 파일/firmware·현재 적용 프로필·신호/정책 원천을 후보와 대조하고, 대상 VM·필수 원 기록·설정 백업/복원·
+실제 출력 차단/장치 대역 경계와 정리 책임을 정한다. 아래 시험은 새 소유 VM·private 정책·별도 broker·가상 장치를 사용하며
+운영 정책 확정·기존 VM 교체·재무장·차량 종단 수락과 구분한다.
+
+<a id="budget-board-observations-20261106"></a>
+### 2026-11-06 보드 후속 — 등록 경합 수정과 예산 시험 중간 근거
+
+기준은 `5d05101efd39c457cb78a05b473952bc38e7a317`와 현재 미커밋 변경이다. 소스 수정·시험은 계속 진행 중이며
+아래 결과로 일곱 묶음 전체 마감이나 운영 정책 승인을 주장하지 않는다. 비밀 없는 로컬 원자료는
+`C:/Users/SSAFY/Documents/Codex/2026-11-06/board-budget`, 로컬 회귀는 같은 날짜의 `e4-budget`에 보존한다.
+보드 시험 소스는 `/run/xenova-budget-20261106-227jfxlm/source`에만 공급했다. 운영 설치 모듈은 교체하지 않았다.
+
+#### Zephyr 등록의 초기 intent 경합
+
+확인된 실패는 firmware 준비·DHCP 반영 뒤 `Execution.initialize()`가 admission 잠금을 즉시 얻지 못해
+원 create가 `RECOVERY_REQUIRED`로 남는 것이었다. VM 실행 전이라는 사실은 준비 자산도 없다는 뜻이 아니다.
+첫 원 요청은 기존 replay로 완료됐지만, 두 번째 요청에서는 같은 경합이 반복됐다.
+
+`xenova_management.py:_finish/_complete_registration`을 국소 수정했다. 기존 no-wait 초기화가 admission 경합을
+반환하면 `PendingRegistration`으로 현재 원 작업과 등록 상태를 전달한다. 호출자의 기존 응답 기한 안에서
+**공통 잠금 밖**에서 기다린 후 재진입하고, 원 op·host·tombstone·instance·기존 대상 lease를 재확인한다.
+현재 guard가 달라지면 거절한다. 기다리는 동안 원 요청·UUID·명세·생성 기한을 새로 발급하거나 복사하지 않는다.
+`xenova_execution.py`의 API·원장 형식과 no-wait admission 원칙 자체는 변경하지 않았다.
+
+| 검증 | 직접 확인한 assertion·결과 | 한계 |
+|---|---|---|
+| 실제 보드의 같은 Zephyr 원 key | 독립 프로세스가 초기 intent 직전에 실제 admission flock을 보유. 같은 operation `e2e04697-48a0-4ea2-910b-ca75b02f025a`가 `RECOVERY_REQUIRED → SUCCEEDED`; 원 신원·명세 보존; helper가 대기 중 공통 잠금 획득 성공. 호출 4.5666초, 계측한 admission 대기 17.764ms | 운영 설치 교체 없음. 이 표본의 wall time은 운영 상한이 아님 |
+| 로컬 등록·회복 기반 | `local_checks.py registration-admission-r4 platform/tests/test_xenova_management.py platform/tests/test_xenova_recovery_foundation.py`: 116 passed | 고정 systemd259 검사 환경 재사용 |
+| 생성·동시성·수습·조회·기본값·기존 HTTP 호환 | `registration-guard-final-r2`: 158 passed. 명시된 여섯 파일은 동명 JSON/log에 보존 | 실제 HTTP 서버·Spring 종단을 실행한 결과가 아님 |
+| 중단/문맥 변경 | 원 기한 내 실패 후 같은 key 재개, 검증 복사1; host/op/lifecycle/config 변경은 거절; 원 오류 유지 | publish·`_save_tomb` 등 다른 admission 경계를 전부 대기로 바꾼 것은 아님 |
+
+최종 Manager 바이트 SHA256은 `0501b25d97964bf9bf8f4c73c64b806c255f59215e687dc615fd8ece2d57a3b8`다.
+`registration-fixed.out/json`에 호출·trace 원자료가 있다. 앞선 `published` checkpoint 주입은 `_save_tomb`에서
+먼저 거절되어 초기 intent 시험에 도달하지 못했다. 실제 `_save_tomb` 완료 뒤 주입하도록 시험을 고쳤고,
+이 시험 배치 오류와 제품 결함의 수정 결과를 구별한다.
+
+#### 기존 binding 관측·발행의 중복 작업
+
+실제 보드에서 기존 실행의 `observe → receipt refresh → observe`가 Xen 관측을 두 번 수행하는 것을 확인했다.
+`rejoin.py:_work`는 이미 결합된 receipt를 먼저 읽고 새 관측 한 번으로 같은 실행인지 확인한다.
+새 실행 공급은 기존 전후 관측을 유지한다. receipt 오류도 현재 실행을 확인한 뒤 원 오류로 전달하며
+다른 실행·새 intent·중단 신호를 옛 receipt로 덮지 않는다.
+
+`pump`의 100ms idle tick은 같은 binding 파일을 다시 쓰지 않는다. 실제 future 완료 또는 행 변경 때 게시한다.
+같은 `stopped/absent`라도 **새 관측 완료**가 있어야 lease를 갱신하고, 새 관측 없이 3.1초가 지나면 만료한다.
+관련 `test_drive_rejoin.py`, warm liveness·하위 binding 회귀 25건이 통과했다.
+변경 전후 보드 소표본에서는 기존 실행 관측이 2회→1회, 30초 binding 쓰기가 160→6회였다.
+negative-row 갱신 보완 전의 측정이므로 최종 후보의 전체 성능 수락으로 합치지 않는다.
+동일 부하에서 binding 만료도 여전히 관측됐다. TTL 연장이나 guard 생략으로 덮지 않았으며 남은 지연을 별도로 진단한다.
+
+#### 일곱 예산 묶음의 중간 결과
+
+| 묶음 | 확인한 결과 | 아직 완료로 볼 수 없는 범위 |
+|---|---|---|
+| E4 | 새 Debian 소유 fixture의 실제 Xen/Manager/Agent MQTT/Worker/Store 사용. 응답 유실·새 Worker 프로세스에서도 같은 attempt와 누계1 보존. 세 원 attempt 뒤 네 번째 장애는 새 attempt 없이 누계3으로 보류. 원 Agent의 연속 진행 뒤 3→0 내구 갱신. 갱신 후 실패도 차감에 포함하고 명시 수습 뒤 다음 정상 복구 완료 | `e4-status14.out`: passed=true, 장애5, 원 attempt5, used2/limit3, outstanding=false. `stable_s=60`, `vm_max_attempts=3`은 시험값. 새 시도의 기존 상한120초 비교에서117초 성공으로 여유 약3초뿐이며 운영값 확정 근거가 아님. 실패한 원110초 기한은 불변 |
+| 신호·관측 | 75초 실제 수신에서 기존 Linux Agent 약5초, Zephyr heartbeat 약2초. 입력 없는 AUTO/MANUAL은 실제 lifecycle 대기·progress0을 유지 | 수신 빈도와 현재 binding 적격성은 다름. 관측 경합이 있어 전달 판정까지 완료로 표시하지 않음 |
+| 원 제어 수습 | 새 시험 B의 start가 관측 잠금 만료로 미확정. 원 key 재호출로 같은 operation·domid·execution을 유지하며 완료 | 후속 provisioning과 앱 적용은 별도. 재시작으로 우회하지 않음 |
+| Linux create | 첫 private 600초 프로필은 검증 복사 중 만료, 원 실패 보존 후 `discard-private`로 종결·예약 반환. 다음 private 900초 프로필은 575.755초에 생성 완료 | 표본/부하가 달라 예산 확대 효과나 운영 승인값으로 해석하지 않음. 운영 creation-policy 파일 생성 안 함 |
+| Gateway | 실제 AArch64 OutputOwner/serial codec/PTY에서 STOP 제출·미응답·장치 reboot 검사. 별도 process의 UDS→actor→Authority에서 동등 replay·취소·partial client/병렬 조회 정상 진행 | PTY·가상 feedback은 물리 정지 증거가 아님. 운영 Gateway는 mock/DISARMED 유지 |
+| 네트워크 | 새 소유 B의 실제 shell에서 netfront connected/stopping=false, Store unavailable28/recoveries27, packet lock timeout0·최고 hold1322µs·최고 poll gap20331µs. 실제 MQTT v2 계속 수신. native·ASan/UBSan의 실제 ring/grant/종료/Store 회귀 3 passed | 보드 표본의 모든 실패 조건을 의도적으로 주입한 것은 아님. packet 경합·버퍼 고갈의 보드 수락은 별도. 계수 reset은 해당 guest boot |
+| 지도·계측 | 별도 인증 broker·실제 B firmware·제품 Gateway·PTY 사용. 연결 슬롯 수정 뒤 v1 AUTO/MANUAL 이벤트와 여덟 app_memory region 실제 수신. 정상0과 collection_failed/null 구분 | `world-r6/r8`에서 병렬 부하의 binding·장치 적용/odom 현재성 보호로 지도 공급이 시작되지 못함. 실제 planner·이동·점유 증가/반환은 미통과. 아래 실패/부하 진단에 원자료 연결 |
+
+Gateway PTY 표본의 serial 확인은 4.09~37.31ms, feedback 관측은 18~70ms였다. 비동기 ticket 제출을 재사용했고
+10ms 한도를 올리지 않았다. 이 수치는 polling·스케줄링을 포함하며 write 자체의 실행 시간이나 실차 보장이 아니다.
+UDS 표본은 partial header3개·병렬 조회12개에서 정상 조회 138.7~265.9ms, 동시 연결 최고6,
+만료3, 종료0을 기록했다. `gateway-pty.*`, `gateway-ipc-r2.*`에 경계·입력·결과를 남겼다.
+
+#### 만료한 미결합 Linux launch의 명시 종결
+
+안정 갱신 뒤 원 attempt `cb42ab93-eea0-44d7-b7df-b5d57cd13c5c`는 110초 중 남은 약45초의
+`systemd-run/xl create` 구간에서 만료됐다. 새 domain11은 paused·CPU0이고 libxl 상세 UUID가 아직 없었다.
+원 scope에는 xl fork 자식과 QEMU가 남아 있었다. PID 명령행에서 VM UUID만 검색한 초기 확인은 이 자식을
+놓쳤으며, 실제 cgroup membership으로 정정했다. 이 시점의 `RECONCILE_REQUIRED`와 소유 유지가 맞다.
+
+소유 fixture만 대상으로 native unique ID·XenStore VM UUID/name·host·원 run을 재확인해 domain을 명시 정리했다.
+기존 observe-only 수습이 살아 있는 scope를 거절하는 것도 확인했고, domain 부재 뒤 같은 원 scope의 QEMU만
+명시 정리한 후 무잔존을 다시 확인했다. 이 수동 시험 정리와 아래 제품 `recovery-reconcile`을 구별한다.
+원 기한 만료만으로 정리하거나 운영 VM을 정지하지 않았다.
+
+`xenova_recovery.py:Recovery.reconcile`은 같은 owner의 만료한 launching/uncertain 실행에 대해
+두 번의 현재 부재·정확한 VM/execution scope의 observe-only 무잔존·원 host/intent/op/run/CPU 정책을 확인한 경우,
+기존 `stopped_without_replacement` 실패 종결을 지원하도록 보완했다. 현재 domain·활성 scope·관측 실패·문맥 변경은
+계속 차단한다. 명시 수습은 종료 신호·새 create·force·기한 발급을 하지 않는다.
+
+필수 저장은 runtime uncertain+원 attempt 참조 → 원 attempt failed → runtime stopped 순서다.
+중간 중단은 같은 원 key로 재검증하며 `launch_aborted_before_submit`를 위조하지 않는다.
+단일 저장 오류의 replace 후 응답 유실은 같은 실행의 uncertain 표지로 복원하고 원 storage errno를 보존한다.
+마지막 replace와 rollback 저장이 모두 실패하면 stopped가 남을 수도 있어 **항상 uncertain gate가 유지된다는 보장**은 하지 않는다.
+그 경우도 성공으로 반환하지 않고 최초 EIO·보조 ENOSPC를 나눈 `RECONCILE_REQUIRED`로 원 기록 재확인을 요구한다.
+새 효과 전에는 기존의 현재 실행·의도·소유 guard가 그대로 필요하다.
+
+| 근거 | 결과 |
+|---|---|
+| `test_xenova_reconciliation.py` / `board-reconcile-final04` | 40 passed. 새 helper+7시험, 기존 assertion 완화0. 다음 정상 복구·새 실행에 대한 과거 결과 replay·live/unknown/활성 scope/문맥 변경 거절·필수3저장 전후 EIO·응답 유실·중단·회복 |
+| 복구 기반·review·reconciliation·stop / `board-recovery-boundaries-final` | 164 passed / 118.74초. 실제 제품 저장·판정 경로, 외부 Xen/systemd 경계는 fixture |
+| 실제 보드 `partial-reconciled.out/json` | 진단 confirmable→같은 원 attempt uncertain→failed, runtime stopped. 원 명세/hash/신원/기한 보존·신규 attempt0·물리 명령0. 원 RECONCILE_REQUIRED를 reconciliation에 보존하고 최종 DEADLINE_EXCEEDED로 실패 종결. 두 호출 합계24.34초이며 각 조회 예산은15초 |
+| `package-reconcile-final-summary.json` | 기존 고정 QEMU/AArch64 CPython3.14.7에서 현재131파일의 byte/mode·130개 Python 구문·17모듈 import 통과. 소스/recipe drift0 |
+
+현재 하위 recovery 모듈 SHA는 `53ecb6e7d3a711b1346c71171c1d6f76b511fed8340f7cf02ce1420dd0fc734d`다.
+기존 recipe의 명시 SRC_URI/0644 설치 대상에 이미 포함되어 포장 규칙·의존성을 추가하지 않았다.
+이는 작은 모듈 설치 fixture와 실제 ARM import 수준이며 새 BitBake/RPM/이미지·운영 설치 완료가 아니다.
+
+#### 지도 시험의 현재 연결 진단
+
+`world-run`의 첫 실패는 시험용 과거 Authority 경로를 로그 디렉터리와 겹치게 둔 fixture 설정 오류였다.
+제품의 incomplete Authority 거절은 유지하고 별도의 미사용 private 경로로 바로잡았다.
+`world-r2`에서는 실제 B binding 관측이 2065ms로 기존2초 예산을 넘었다.
+`world-r3`는 시험만3초 관측으로 비교했고 초기 SAFE_STOP/DISARMED·실제 v2 메모리 수신까지 진행했으나,
+지속 binding 만료와 주 v1 제어/앱 이벤트 미연결이 남았다. TTL3000ms·운영 기본값·유효성 검사를 늘리거나 생략하지 않았다.
+원 장치·관측이 부족한 동안 양수 구동은0이었고, 종료 시 SAFE_STOP 게시와 잔존 thread0을 확인했다.
+
+실제 수신값은 JSON64 규약의 문자열 수치다. `drive_maps`에서 reserved81224/used0/capacity80472 bytes,
+`manual_pending`에서 reserved2360/used0/capacity2360 bytes를 `ok`로 확인했고,
+`collection_failed`의 null도 별도로 존재했다. 이를 유효0이나 지도 점유 증가/반환 증거로 바꾸지 않는다.
+실패 당시 ARM 설정은 NET_MAX_CONN4·NET_MAX_CONTEXTS6·MQTT_MAX_SUBS4였다.
+실제 shell의 `net conn`에서 TCP 세 개와 DHCP UDP68 직접 handler 한 개가 네 슬롯을 채웠고,
+v1 제어 연결은 없었다. 따라서 구독/앱 readiness 문제가 아니라 네 번째 연결을 만들기 전 자원 부족이 먼저 있었다.
+[Zephyr 공식 네트워크 설정 원칙](https://docs.zephyrproject.org/latest/services/connectivity/networking/net_config_guide.html)은
+TCP/수신 UDP 및 DHCP/DNS도 connection endpoint를 사용함을 설명하지만 최신 문서의 수치를 운영값으로 복사하지 않는다.
+
+보드에서 실행한1.0.8의 실제 bin SHA는 `3a06fe95af4c8c30635e91583b3d70e7fe981a0722bd5e91ac9ded642af5a77d`,
+firmware revision 디렉터리는 `45e646878094c15cca0ae269923eb2f712ca3e2efdf7339b5ee0636f4a159749`다.
+디렉터리 revision을 bin hash로 적지 않는다. 이전 불변 제공물1.0.8의 `05274f0b…`와 다른 빌드이므로
+버전 문자열만으로 동일 firmware·동일 소스/설정을 수락하지 않는다. 실제 build receipt 대조가 남는다.
+
+#### lattice 연결 슬롯과 정식 firmware CLI 출력 보완
+
+고정 Zephyr `684c9e8f32e4373a21098559f748f06915f950c9`의 `connection.c`, TCP 종료 경로와 DHCP 초기화를
+직접 대조했다. `NET_MAX_CONN`은 TCP/UDP handler의 공통 한도이며 DHCP는 `net_context`와 별도로
+UDP68 handler를 점유한다. 정상 TCP 네 개뿐 아니라 기존 context 여섯 개와 비동기 종료 수명도 고려해,
+**lattice profile만** `NET_MAX_CONTEXTS6 + DHCP1 = NET_MAX_CONN7`로 맞췄다.
+새 연결 프레임워크·VM RAM·CPU·네트워크/출력 timeout·packet/ring/grant 한도는 바꾸지 않았다.
+`zephyr/CMakeLists.txt`는 이 프로필의 최소 관계를 빌드 때 검사한다.
+
+| 직접 검증 | 결과와 경계 |
+|---|---|
+| `platform/tests/apps/xenova-network-capacity` | 같은 고정 SDK의 실제 DHCP 초기화·`net_conn_register/unregister`를 사용. pool4/5/7 각각20회 포화·거절·반환·재충전 통과. pool4는 DHCP1+TCP3 뒤 네 번째 TCP가 -ENOENT. MQTT handshake·FIN/TIME_WAIT·실보드 실행을 대신하는 시험은 아님 |
+| ARM 최소값 검사 | NET_MAX_CONN4 강제 설정은 CMake가 최소7을 요구하며 rc1로 정확히 거절. NET_MAX_CONN7 실제 ARM 빌드는45.44초에 성공하고 stack audit·포장 통과 |
+| 같은 소스/도구의 단일 원인 비교 | 두 변경 파일만 전후로 비교한 `conn7-isolated-arm-delta.json`: conns256→448B(+192), text−8/data+8/BSS변화0. 전체 ELF RAM 증감이나 실제 stack 최고값으로 확대하지 않음 |
+| 새 불변 제공물 | 1.0.9 bin `cc5e845843f53dff552614e3553e03d411871121fb955e13ce8a7b8621303708`, manifest `3c2a657fddb6b4a9136cf0408dea742f5e9d21f0fbb6164ed8659b7b464baefe`, source `6d8a3558538d12cde776d9cff2bd2a5eff0edd65c037004a8f87a59735954b01` |
+| 소유 시험 B만 교체/기동 | `conn7-trial-installed-r3`, `drive-b-start-r4`: UUID 보존, 정지 상태 교체, start44.81초·CPU 검증 complete·drive/telemetry receipt applied. 새 execution `e10da029-b6de-4926-a1e4-06dab30c89aa`, domid15. 원래 보드 A/B는 교체/재시작하지 않음 |
+| 실제 연결 | `console-r4.log`: TCP 네 개 모두 ESTABLISHED, DHCP까지 handler5. netfront connected/nonstopping, packet lock timeout0. 네 번째 연결 부재는 해소됐지만 지도/계산/출력 적격성은 별도 검사 |
+
+tar `data_filter`가 extraction 중 추가한 owner-write 때문에 처음 bundle 계획 검증이 거절됐다.
+archive 원 bytes/hash와 모드를 대조해 원0444로 되돌린 뒤 검증했으며 read-only guard를 완화하지 않았다.
+다음 설치 시도의 admission 경합도 원자료에 보존한다. 운영 Worker를 일시 정지한 뒤 소유 B만 교체했다.
+기본 lock·factory A/B·조립 예시의 **1.0.8 선택은 그대로**다. 새 RPM/전체 이미지 빌드나 운영 firmware 교체는 아니다.
+
+별도로 `Platform.replace_firmware`의 JSON이 `diagnostic as print`를 거쳐 `request_output`에 흡수되는 결함을
+수정했다. 이제 구조화된 결과를 반환하고 기존 `management_cli`가 대상 lease·공통 잠금·진단 문맥 해제 뒤
+정식 stdout으로 출력한다. 필드·exit 의미·`--json` 지원 범위는 바꾸지 않았다.
+`test_xenova_cross_boundaries.py` 11 passed: 실제 plan/execute의 JSON·UUID·무기동·revision 적용과,
+stdout을 막은 동안 같은 대상 lease/공통 잠금의 다른 호출 획득을 확인했다. 상세 진단을 전부 끄거나
+프로세스 전역 stdout/FD를 바꾸지 않았다. 최종 VM 모듈 SHA는 `eaff3566e8955510d45335b180fa4575b8fe57edec6689f3613e539c1438b1b2`다.
+
+최종 Python 포장은 `package-budget-final-summary.json`에서 새 CLI까지 포함해 다시 확인했다.
+기존 recipe의131파일 byte/mode·130구문·17모듈 ARM/QEMU import와 설치된 CLI 직접 import를 통과했고,
+소스/네 recipe drift는0이다. 모듈 설치 fixture 수준이며 새 BitBake package QA·RPM·전체 이미지 수락은 아니다.
+
+#### 새 연결 뒤 지도·병렬 부하 결과와 예산 판단
+
+`world-r4`는 초기 B 관측이3074ms에 만료됐고, `world-r5`는2492ms의 관측 중 적격 r/b 표본을 확인하지 못했다.
+다음 시험은 **준비 단계에서만 최대3회 새 관측**을 시도했다. 같은 오래된 관측을 연장하지 않고 원 실패를
+모두 남겼으며 background failure는 계속 binding을 무효화한다. trial의 개별 관측3초·binding TTL3초를
+제품 기본2초나 운영 승인값으로 바꾸지 않았다.
+
+`binding-stages-b-r4`의 네 단독 표본은1595~2536ms였다. 실제 admission wait는5~45ms였지만,
+등록 정보 읽기112~385ms, admission hold182~729ms, 각각의 xl/native helper 비용이 누적됐다.
+한 건은 Xen의 `------` 재표본도 수행했다. 전체 지연을 잠금 대기 하나로 단정하지 않는다.
+전후 등록부·lifecycle/intent/run·Xen unique 검사는 수명이 달라 임의 cache로 생략하지 않았다.
+같은 회차 publication의 메타데이터 재검증 재사용과 scan 기한 전파는 별도 개선 후보이며 이번에 구현하지 않았다.
+
+| 시험 | 실제 결과 | 해석 |
+|---|---|---|
+| `world-r6`, 관측 thread | 64.683초. v1 AUTO921/MANUAL345 events, v2 metrics243, 가상 명령382·양수 DRIVE0. actor 최근512회 중앙29.09/p95 122.47/최대287.54ms. DEVICE_APPLY_TIMEOUT, 오래된 odom과 LINK_BINDING 거절. maps_sent0 | 연결은 살아났지만 최신 장치/실행 근거를 유지하지 못함. planner 실행이나 정상0 메모리로 해석하지 않음 |
+| `world-r7`, 별도 관측 process | 가상 장치 준비 중20초 한도 만료. marker가 통합 시험 모듈 import에서 멈춤 | 제품 장치 ACK 실패와 다른 시험 시작 비용. 이전 실행도 해당 import만13.17초 걸림 |
+| `world-r8`, 별도 관측 process·가벼운 장치 시작 | 기존 `Vehicle` 클래스 AST와 실제 제품 codec을 그대로 사용하고 불필요한 통합 모듈 import만 제외. 60.281초. v1 AUTO788/MANUAL291 events·v2 metrics216, 여덟 memory region·가상 명령319·양수 DRIVE0. maps_sent0·잔존 trial thread0·observer 정상 종료. actor432회 중앙39.98/p95 190.03/최대697.80ms | mapper166회 모두 최신 vehicle 부재로 거절. 시작 비용을 줄여도 병렬 부하의 현재성 조건에서 실제 지도 계산은 통과하지 못함. planner나 메모리 계측 결함이라고 단정하지 않음 |
+
+`world-r6/r8` 종료 시 device fault가 남아 phase=DISARMED의 정상 보호 종결을 수락하지 못했다.
+이 조건의 `safe_stop=null`을 성공으로 바꾸지 않는다. 출력 허가는 false였고 가상 장치만 사용했으며,
+이후 소유 B 정상 stop과 임시 broker 종료로 시험 연결을 닫았다. 운영 Gateway는 별도 mock/DISARMED 상태다.
+
+E4의60초 안정/VM상한3과 create의600/900초는 명시 시험 프로필이며 운영 파일에 공급하지 않았다.
+새 recovery120초에서117초 성공은 기존110초의 부족 가능성을 보여주지만 약3초 여유뿐이고 표본도 적다.
+원 요청을 연장하거나120초 상한을 더 늘리지 않았다. 관측2초/TTL3초, odom clock20ms·age200ms,
+가상 feedback500ms·명령 만료100ms도 부하에서 유효한지 추가 수락이 필요하다. 보드 지연의 최대 표본을
+새 운영 상한으로 복사하지 않는다. 이번 결과는 새 E4/기존 예산의 **실측 입력 확보와 보호 확인**이며,
+전체 일곱 묶음의 정상 진행·운영 수치 선정 완료는 아니다.
+
+#### 시험 정리·최종 후보 보존
+
+소유 B1.0.9의 정상 stop은 원 operation `846000cd-cf7f-4809-a77f-926feb5422bb`로19.57초에 완료했다.
+네 소유 등록 VM은 기존 Manager의 `retire → purge` 여덟 호출로 정리했고 create 원본 불변을 확인했다.
+첫 retire admission 경합은 같은 key·operation `bdcaadf1-bfd1-479e-aa3c-8b6efb920e0d`로 회수했다.
+새 잠금·기한 발급이나 raw 자산/원장 삭제로 통과시키지 않았다. 정리 helper의 무효 budget 옵션 거절도 원자료에
+남겼으며 이는 제품 실행 실패와 구분한다. 실패 Linux pilot의 앞선 `discard-private` 종결·예약 반환도 보존한다.
+
+임시 broker PID91183만 종료하고 listener18885/18886의 부재와 private 자격 사본6개 제거를 확인했다.
+TIME_WAIT를 즉시 bind 가능 여부로 검사한 첫 fixture 오류는 실제 LISTEN 상태 검사로 정정했다.
+운영 broker·원 자격은 바꾸지 않았다. 두 번째 Worker 정지도 `worker-restored2.out`에서 원 active 상태로 복구했다.
+`inventory-final.out`과 최초 inventory 대조에서 host·원 세 VM의 domid/UUID/RAM/vCPU/kernel 경로·설치 모듈 hash가
+동일했다. Gateway PID1504·generation1·SAFE_STOP/DISARMED·output_permitted=false, Manager·Worker·broker active,
+실제 serial 장치0, 운영 creation-policy 부재도 확인했다. 새 E4 환경값은 운영 프로세스에 공급하지 않았다.
+
+비밀 없는 보드 원자료69개만 `board-nonsecret-evidence-final.tar.gz`(176742B,
+SHA256 `7514c4170233a4f1944e91feae0adaa684dadb93097ea9392d889534c723193f`)로 회수했고 private 파일은0개다.
+로컬 `final-board-summary.json`, `board-final-evidence/`에 E4 성공·지도 실패·정리/복구와 source/설치 수준을
+분리했다. 최종 commit/push·운영 설치·실차 출력은 수행하지 않았다.
+
+<a id="parallel-binding-feedback-20261106"></a>
+### 병렬 binding·장치 피드백의 구간 계측 후속 — 로컬 보완·실보드 미수락
+
+앞 절의 정리는 이전 시험 후보의 결과다. 후속 공유 CPU 시험은 새 소유 A/B 등록을 사용하고 새 B만1.0.9를
+실행했다. 이후 별도 승인으로 원 B의 전용 CPU2에서도1.0.9를 시험한 뒤 원1.0.8과 등록 구성을 복원했다.
+A·Debian은 재기동하지 않았고 이 작업이 운영 Python 설치 파일을 교체하지 않았다. 실제 지도 계산·메모리
+점유 증가/임시 반환은 아직 수락하지 않았다. 최종 보드 복원 상태는 [재개 기록](#parallel-resume-20261106)을 따른다.
+
+| 확인한 문제 | 국소 변경과 유지한 조건 | 현재 근거 |
+|---|---|---|
+| read보다 앞선 poll 시각을 묶음 전체에 적용해 늦은 ACK도 통과할 수 있음 | `FeedbackSerialSink.poll`이 비차단 read 완료 시각을 그 read에서 완성한 frame의 수신 상한으로 고정. partial은 완성 read 시각 사용. 이후 decode 지연으로 시각 재발급0. 길이·CRC·원 command 참조·만료 유지 | `baseline-light-1`의 실제 동일 sequence 184쌍과 보드 처리 구간 계측으로 초기 오분류 확인. 새 PTY 회귀는 read 지연의 만료 거절·decode 지연 전 기한 내 수신 사실·현재 age 만료 null·partial 완성 기한을 각각 검사 |
+| serial RX가 도착해도 owner의 주기 대기까지 기다림 | 실제 POSIX serial FD와 유한 wake pipe 두 FD를 기존 owner가 함께 기다림. STOP/명령 만료 우선, writer·thread 추가0. HUP 뒤에는 기존 유한 시간 대기로 복귀하고 종료 후 FD 반환 | 실제 PTY RX·STOP wake, 단절 뒤 spin 방지·종료·watchdog 경합 시험. 옛 lock 없는 종료를 메모리에 대입하면 EBADF 재현, 수정 뒤 통과 |
+| 명령 적용 미확정이 독립 encoder 수집까지 영구 중단 | `DEVICE_APPLY_TIMEOUT`의 원 사유·DRIVE 차단·applied/physical_stop=null 유지. 동일 session의 유효 encoder만 기존 clock/품질/순서/age 검사로 제공. 이후 restart·capability·FAULT·REJECTED·link 상실은 별도 센서 차단 사유를 보존하고 HELLO/표본으로 해제하지 않음 | 실제 codec·PTY에서 만료→센서 정상 관측, 후속 오류→관측 차단, link 회복에도 차단 유지. 센서 수신을 출력 허가로 바꾸지 않음 |
+| binding 관측이 같은 회차 publication에서 전체 lifecycle을 다시 검색하고 전체 검색 동안 admission 점유 | 기존 `ReadContext`의 검증 자료를 그 관측 안에서만 재사용. 전체 registry/lifecycle 전후 두 회차는 잠금 밖에서 유지하고 짧은 admission에서 대상·원 create·intent/run·host를 재검증. `validate_one`이 그 호출에서 읽은 자료를 반환해 같은 admission 안의 중복 파일 읽기 시도8개 제거. 실제 Xen 검증 시각을 반환하며 후처리 시각으로 갱신하지 않음 | 전체 검색이 admission 밖임을 실제 잠금 재획득으로 확인. 두 회차 유지·세 번째 lifecycle 검색0·문맥 변경/strict 숫자 타입 변경/새 probe 오류/host 변경 거절. 필수 gate·원 create 검증 횟수 보존 |
+| 공유 Platform의 임시 response_deadline 변경/복원이 A/B 병렬 조회와 다음 회차에 간섭 | 얕은 요청 사본에만 min(호출자 원 기한, 이번 조회 기한)을 적용 | 실제 `_observe`를 끝까지 실행한 뒤 A/B 반환 순서를 교차. 기존 wrapper는 2건 실패, 수정은 원 deadline 부재/기존값 보존과 다음 회차 정상 관측 모두 통과 |
+| owner가 지연되면 이전 vehicle/receipt snapshot이 현재도 유효한 것처럼 보임 | `OutputOwner.device_view`가 복사한 snapshot의 원 표본 시각과 기존 age 한도를 현재 시각으로 재검사. owner lock·새 관측·시각 갱신 없이 만료 필드만 null로 투영 | 실제 PTY owner poll을 붙잡은 회귀에서 기존 본문은 오래된 vehicle/STOP 적용값을 반환. 수정 후 만료 null, 정상 새 관측 회복 확인 |
+| UTC one-shot이 요청 부재·이미 응답한 nonce에도 실행을 다시 관측하고 응답을 반복 작성 | 작은 Store 요청/응답을 먼저 확인하고 미응답만 기존 binding 관측·원 transaction·현재 run/intent/host/gate 검사로 처리. 키 순서·공백은 의미 비교하며 nonce/실행 변경은 거절 | clock 제품 경로 42 passed. 정상 idle/동일 응답은 추가 Xen read·UTC sample·write 0, 새 nonce는 원 검증과 쓰기 수행. 손상·Store 오류를 정상 부재로 숨기지 않음 |
+
+원자료는 로컬 `2026-11-06/parallel-load/`의 `ack-segments-before.out`, `after-fix-detail-1.out` 및
+시험별 `segments-parent/observer/device.json`에 연결한다. 첫 cProfile 시험은 다른 thread의 CPU 시계를 섞은
+불가능한 값이 나와 CPU 분석에서 제외했다. 이후 bounded method probe의 wall/thread CPU만 사용하며,
+보존 창의 통계와 전체 실행 누계를 구분한다. local 최대값을 운영 상한이나 hard realtime 보장으로 쓰지 않는다.
+
+`baseline-light-1`과 중간 `after-fix-segmented-1`은 각각 maps_sent=0이었다. 중간 후보의 owner poll 최대는
+632→336ms였지만 같은 실행 전체의 단일 원인 비교나 최종 정상 진행 수락은 아니다. 늦은 ACK 거절이 강화된
+뒤에도 `DEVICE_APPLY_TIMEOUT`, binding 만료와 vehicle 부재가 남았다. 이를 planner 성공·정상 메모리 0으로
+해석하지 않는다. 후속 보드 후보들도 아직 전체 정상 진행을 통과하지 못했으며 아래처럼 원인을 분리한다.
+
+`after-fix-segmented-6`까지 병렬 시험에서 장치 RTT/연속성 오류와 binding 만료가 남았다. 실제 read 이후 시각과
+현재 age를 검사하므로 늦은 자료를 최신 자료로 통과시키지 않는다. Dom0의 네 vCPU는 실제 pCPU0,3에만
+허용되어 있고 소유 시험 B도 같은 pCPU를 공유한다. 원 A/B의 전용 코어 조건과 다른 명시 부하 프로필이다.
+2.113초 schedstat 표본에서 owner run0.129초/실행 대기0.409초, MQTT run0.322초/대기0.558초를 관측했다.
+이는 실행 대기가 존재한다는 근거이며 한 서비스가 모든 지연의 원인이라는 증거는 아니다. CPU 정책은 바꾸지 않았다.
+
+선택 UTC timer만 유한 비교 동안 멈춘 `clock-comparison-1`은 maps_sent1이었지만
+`CONTROL_PUBLISH_UNCONFIRMED`로 끝나 실제 계산·점유 반환을 수락하지 못했다. timer는 자동 복구를 확인했다.
+현재 UTC 후보의 첫 비교 `candidate-clock-1`은 10개 job 중9개가 기존8초 한도에 도달했다. 완료 계수가 남은
+두 회차는 registry1/Xen read0으로 실패해, 이를 Xen 조회 비용으로 집계하지 않는다.
+
+추가로 `bytecode-cost-01`에서 운영 캐시4개는 유효했지만 시험 사본의 Manager 캐시는 최근 소스와 불일치했다.
+동일 보드 Python으로 시험 사본만 checked-hash 캐시를 준비한 단일 표본에서 Manager 추가 import는
+wall2.494/CPU1.648초→wall0.373/CPU0.171초였다. 이는 시험 조건의 컴파일 차이이며 제품 최적화 실적으로
+세지 않는다. 이어 시험 소스103개/1,270,435바이트를 같은 방식으로 준비했다. recipe의 원래 순수 `.py` 설치와
+운영 최초 import는 별도이며, 설치 recipe 누락 결함으로 단정하지 않는다. 기존 수치·시간 한도는 바꾸지 않았다.
+
+`observe`의 개별 기한을 만든 뒤 수행하던 첫 Manager/ReadContext import는 binding 모듈 로드로 옮겼다.
+새 프로세스의 binding-first/management-first/vm-first 세 순서와 가상 cold 비용을 실제 sleep 없이 주입해
+관측 성공·호출자 절대 기한 만료 거부를 검사했다. 이 회귀1건과 관련59건이 통과했다. 전체 process 시작 시간과
+service8초 한도는 늘리지 않았다. 유효한 캐시·이 후보를 사용한 `candidate-clock-2`도60.317초에 maps_sent0,
+지도 활성 대기에서 실패했다. ODOM_CLOCK_UNCERTAIN204/CONTINUITY_GAP12/PROBE_REFERENCE3,
+최종 output_permitted=false·잔존 trial thread0이며 원 UTC timer active 복구를 확인했다.
+이는 실제 지도 계산·pool 점유/반환 성공이 아니다. clock job도9건 중5건이8초 제한에 도달해 정상 수락하지 않는다.
+
+로컬 `parallel-lifetime-local-01`은 binding·장치·종료 38 passed, 후속 추가 실패 수명 시험은 7 passed다.
+`parallel-gateway-regression-03`은 전체 Gateway 275 passed/5 skipped다. 외부 broker/QEMU 등 선택 환경의
+skip은 실보드 수락으로 세지 않는다. UDS·PTY·Authority 제품 경로의 로컬 통과와 실제 장치 수락은 별개다.
+
+최종 read 완료 시각 보완 뒤 `parallel-receive-stamp-01`은29 passed,
+`parallel-gateway-regression-04`는277 passed/5 skipped다. `validate_one` 반환 재사용 후보는
+binding·동시 조회·query consistency·registration48건과 원 생성/수습/예산 guard13건을 추가로 통과했다.
+기한 내 수신한 APPLIED가 처리 중 원 command 기한을 지났다는 이유만으로 사라지는 계약은 아니다.
+그 사실의 현재 유효성은 수신 이후 age·최신 명령·fault로 제한하고 owner의 명령 만료 STOP은 독립 유지한다.
+
+현재 age 투영과 가상 차량 표본 시각 보완 뒤 `parallel-gateway-regression-05`는281 passed/5 skipped다.
+가상 차량은 실제 frame 수신·각 ODOM capture 시점에 기존 물리식을 진행하며 동일 microsecond에 가짜 새 표본을
+만들지 않는다. 별도 PTY 회귀2건으로 한 read의 두 probe도 검사했다. 제품 planner/odometry는 대역으로 바꾸지 않았다.
+
+`parallel-load/package-parallel-local-summary.json`은 같은 제품 후보의 recipe 선택 Python 138파일
+바이트·모드, 138구문과 AArch64 CPython3.14.7/QEMU의 20모듈 import를 확인했다. feedback/output_owner/
+odometry를 포함하며 source drift=0이다. 별도 ARM 익명 FD 시험에서 pipe2의 NONBLOCK/CLOEXEC와
+select/poll·read/write/close를 확인했다. 기존 포장 검증기가 빠뜨렸던 gateway world 4파일·예제 3파일은
+새 증거 스냅샷에 포함했다. 제품 recipe 변경이나 새 의존성 설치는 없으며 BitBake QA/RPM/이미지 수락은 아니다.
+
+중간 포장 이후 네 제품 파일의 최종 후보는 `package-parallel-final-summary.json`에 다시 고정했다.
+ARM138파일/20모듈·FD smoke·source drift0을 재확인했다. source manifest SHA256은
+`847ff0193ab56d1e748e2dc4e6272676b9b7d597c69984ea3d2d003d36a8e897`이다.
+
+그 뒤 UTC 의미 비교까지 포함한 `package-clock-semantic-summary.json`은138파일/21모듈 ARM import·FD smoke·
+source drift0을 확인했다. manifest `4997d8762de9201f9d549476315084109626caaf65ab3a6675c40937812a46c1`,
+tar `2e29a49ce187e197abf5c7d204fb208e81367047bf5466329e015ebde2741983`이다. 각 포장은 해당 시점의 후보이며
+이후 수정은 다시 대조해야 한다. 정규 RPM·이미지 또는 운영 설치 완료를 뜻하지 않는다.
+
+첫 import 경계까지 포함한 현재 포장은 `package-clock-eager-summary.json`의138파일/21모듈·ARM FD smoke·
+source drift0이다. manifest `41c1712122df091a99aa7915cf1b14471055e19f4ae8621e5b4a55711f6027bb`,
+tar `edb378bd1d8cdd7aae044e84ab7179af91d3f76ffc8d8eccb767bb2a2cf94c2f`다.
+
+`resource-core-20261106-144611/summary.json`에는 별도의 현재 C 제품 로컬 회귀를 연결한다.
+기존 pool 빌드 입력35개 raw bytes가 현재와 동일하며 native/ARM의 실제 pool wire에서
+used0→80472→0, peak80472·exhaustion1 유지와 busy/null을 확인했다. ARM MMU 페이지는
+실제8192바이트 감소/반환이며 내부 pool 반환과 다른 계수다. worker는 과거 입력과 `autonomous.c/.h`가 달라
+현재 소스로 native/ARM을 부분 재빌드했다. native independent/expired/coalesce/memory-manual은 통과했고,
+ARM memory-manual은 최초 fixture300ms 회수 실패1회 뒤 같은 ELF·같은 기한의 단독2회가 통과했다.
+최초 실패를 지우거나 무조건 ARM 수락으로 합치지 않는다. 현재 health C의 ASan/UBSan 및 실제 planner/pool
+pytest6건도 통과했다. 이는 실보드 MQTT 지도 계산·점유 증가/반환의 대체 근거가 아니다.
+
+자원 시나리오 B1/B2/BO1·C1/CO1/CO3은 먼저 같은 입력의 정상 지도 계산·binding·feedback을 확보한 뒤
+CPU 지연·필수 pool 부족·AUTO/MANUAL 독립성·합류를 짝지어 검사한다. CPU 사용률이나 선택 진단/후보 pool
+포화만으로 VM 실패를 만들지 않는다. 추가 부하·VM·firmware hook이 필요한 범위는 대상·상한·복원 절차를
+구체화해 승인받으며, 이번 소스 확인만으로 해당 실보드 시험을 완료로 표시하지 않는다.
+
+검토 보완용의 단계0~5 요청은 위 작업에 통합했으며 중복 실보드 실행을 새로 만들지 않았다.
+
+| 단계 | 현재 직접 확인한 범위 | 남은 실보드 수락 |
+|---|---|---|
+| 0 정상 기준선 | 실제 제품 앱·Gateway/Authority·격리 MQTT·PTY로 시험. 현재 candidate-clock-2까지 지도 발행 이전 실패 | 같은 firmware의 Active/Standby 준비·정상 계산과 메모리 점유 증가/반환 |
+| 1 CPU 경고 대조 | 실제 health C의 합성 CPU100%/heap0 경고 분류 통과 | 소유 Debian 실제 연산 부하 중 정상 deadline·불필요한 승계0 |
+| 2 실제 deadline 초과 | 실제 C planner bounded deadline/cancel과 native worker expired/coalesce 경계 통과 | 실제 CPU 압박→원 deadline 위반→준비 제한→준비된 B의 새 계산·출력 |
+| 3 선택 pool 부족 | 실제 native/ARM pool 고갈·반환·peak/실패 누계, busy/null. native AUTO/MANUAL 독립 경계 통과 | 진단/새 지도 후보 부족이 필수 주행 실패로 승격되지 않는 실제 경로 |
+| 4 필수 자원 실패 | 실제 pool 확보 실패와 별도 실제 health 분류기 입력 -ENOMEM 제한은 각각 로컬 통과 | 해당 planner 필수 pool 실패부터 공개 준비 보고·Gateway 승계/정지까지의 연결. 둘을 한 근거로 합치지 않음 |
+| 5 회복·대칭 | 실제 C planner 실패 후 새 지도→정상 계산/추종과 pool 반환 로컬 통과 | 부하 해제 후 재준비·Standby 재합류·A/B 대칭, 회복만으로 Active 탈취0 |
+
+현재 단계1~5를 위한 추가 실보드 자원 압박은 실행하지 않았다. SIGKILL·CPU% 상승·진단 결측을
+실제 필수 계산 실패나 자원압박 승계의 대체 수락으로 쓰지 않는다. 현재 시험용 Worker 정지와 소유 자산은
+후속 정상 기준선 시험 및 정리/원 active 복구 대상이며, 앞 절의 이전 후보 정리 완료와 구분한다.
+
+후속 읽기 전용 관측 중 운영 API/Gateway/display 프로세스가 재시작되고 설치 Gateway 소스 hash가
+변경된 것을 확인했다. 이 작업은 해당 운영 파일을 교체하지 않았다. 원 세 VM의 domid/UUID는 유지됐으며,
+병행 작업 여부 확인 전까지 새 실보드 실행을 보류하고 로컬 검토를 계속한다. 변경 전후를 같은 설치 후보의
+성능 비교로 합치지 않는다.
+
+<a id="parallel-resume-20261106"></a>
+### 17:55 보드 복원·중단과 다음 재개
+
+사용자의20분 뒤 중단 요청에 따라 시험을 끝내고 **2026-11-06 17:55:29 KST에 이 작업의 SSH master를
+종료**했다. 이후 작업은 로컬 기록·시험·포장만 수행한다. 아래 항목은 전체 자원 시나리오 완료가 아니라
+안전한 시험 종료와 재개 지점이다. commit/push·실제 차량 출력은 수행하지 않았다.
+
+#### 이번 추가 보완과 제공 수준
+
+| 항목 | 무엇을 어떤 기준으로 바꿨는가 | 검증과 남은 범위 |
+|---|---|---|
+| 성공 binding의 재조회 시점 | 이전에는 조회 완료 뒤1초를 더 기다렸다. 이제 성공 `observed`만 실제 dispatch+기존1초를 기준으로 다음 조회를 예약하고 늦어진 주기는 한 번으로 합친다. 실패/비관측은 기존 완료+1초 backoff, VM별 future1개·원 관측시각·TTL·원 예산 유지 | 최종 live `test_drive_rejoin.py`22 passed, fixture cadence2개·메모리 판정10개 통과. **새 cadence는 보드 미수행** |
+| 메모리 반환 수락 | idle snapshot을 저장한 뒤 무조건 성공하던 시험 판정을 제거했다. 정상 baseline·새 active·만료 뒤 새 표본과 status=ok를 요구한다. 지도/경로의 임시 슬롯이 실제 줄거나 이번 실행에서 높아진 high-water 뒤 반환된 근거가 있어야 통과 | 제품 `world.c/engine.c`는 current 지도/경로1슬롯과 마지막 search slice를 유지한다. 모든 값0·heap/page 반환을 요구하거나 주장하지 않는다. 이전 peak만으로 이번 반환 성공을 만들지 않음 |
+| 추가 원인 분리 | 운영 mock Gateway를 최대7분 내 유한하게 정지·자동 복구하는 비교를 승인받았다. 소유 공유 B와 원 전용 B를 구분했다 | 한도 변경0·운영 CPU 정책 변경0. 아래 정상 지도 기준선은 여전히 미통과 |
+
+최종 로컬 rejoin SHA256은 `e078dfcf15f0b561a5fb2ed054c764e546295fd3467ff0dbbc7c7433e9e298d8`이다.
+`binding-cadence-full-final-validation.json`과 `e4-budget/binding-release-cadence-full-final.log`에 실제 명령과
+22 passed/기존 Starlette 경고1개를 보존했다. 최초 WSL 시험 사본 덮어쓰기는 자동 검토가 거부했고,
+사본을 바꾸지 않는 live PYTHONPATH·`-B`·`-p no:cacheprovider`로 검증했다.
+새 `package-cadence-local-summary.json`은 ARM Python3.14.7의138파일 byte/mode·compile,
+21모듈 import·FD smoke·source drift0을 확인한다. manifest `dfe0d1c1178af183c82e3694893377042fc9cc1a4674a8e7bed597d44ab9e1be`,
+tar `70bafb2eba63dd51c54ebf23345ca320504133b38ee5df93ac6dad44fde88f73`다. 정규 RPM·이미지·보드 설치 수락은 아니다.
+
+#### 마지막 보드 시험과 확인한 한계
+
+| 시험 | 결과 | 판정 |
+|---|---|---|
+| `candidate-clock-single-gateway-1` | 메모리 판정용 제품 헤더를 임시 source에 준비하지 않아 시작 전 실패 | fixture 준비 오류. Gateway와 UTC timer active 자동 복구 확인. 헤더2개를 준비하고 실행 전 검사 추가 |
+| `candidate-clock-single-gateway-2` |40.448초, maps_sent0, ODOM_CLOCK_UNCERTAIN113/gap6/reference1, 나중에 fixture `systemctl is-active`의2초 호출도 만료 | 중복 Gateway 제거만으로 정상 진행을 수락하지 못함. 최종 원인은 하나로 확정하지 않음 |
+| `exclusive-b-baseline-1` | 원 B의 기존 전용 CPU2·16MiB/1vCPU·1.0.9,55.293초, maps_sent0. ODOM_CLOCK_UNCERTAIN235/gap12/reference4, DEVICE_APPLY_TIMEOUT. 남은 trial thread0 | 실제 지도/계산/메모리 증가·반환 미수락. observer는 종료 정리 중 강제 회수돼 최종 result가 없으므로 binding 오류0으로 해석하지 않음 |
+
+원 B의 시험 start는 물리 실행17·CPU 검증 complete 뒤 `read observation budget expired`로 미확정이었다.
+원 key의 operation `2f411f07-cca9-47b6-ade4-cbebcdbc2fd9`를 재호출해 같은 execution
+`5080d1db-1b6b-48a3-881e-292a603a9475`로 완료 회수했다. 추가 launch·원 기한 재발급0이며,
+별도의 기존 ProductionBootstrap 경로로 drive/telemetry receipt applied를 확인했다. 실패 당시 어느 내부
+관측이 먼저 예산을 소진했는지는 추가 계측 대상이다. 정상 부팅과 앱 준비·현재 출력은 구분한다.
+
+장치 시각은 현재 매 probe의 `ceil(RTT/2)`를 검사하므로20ms 한도에서 RTT40ms 초과를 거절한다.
+세션·순서·품질·age200ms와 gap 뒤 새 odom anchor 조건을 유지했다. 과거 offset을 그대로 적용할
+device drift/no-step 보증이 없어 임의의 오차 축약은 구현하지 않았다. 가상 장치의 고정+7초를 실장치
+시계 보증으로 확대하지 않는다.
+
+로컬 원자료 대조에서 전용 B의 vehicle 수신4건 중 한 건은 수신 후 원 표본 age144,725µs로 유효했으나,
+mapper가 처음 소비한 시점에는282,455µs였다. 추가137,730µs 동안 신선도 창을 잃었다. 해당 CRC
+`476417682`의 offer/publish/receive와 source age 순서를 대조했다. 기존100ms mapper polling과 GIL/CPU
+대기를 각각 얼마로 나눌지는 이 계측만으로 확정하지 않는다. 따라서 모든 표본이 처음부터 stale이었다거나
+planner가 계산에 실패했다고 단정하지 않는다.
+
+보드 종료 뒤 fixture만 Event1개로 깨우도록 보완했다. 최신 표본을 합치고 기존 최대10Hz를 유지하며,
+동일 host/device/Pi session·odom epoch 안에서만 sequence 증가를 비교한다. 원 표본 시각·200ms 한도와
+메모리 판정·새 binding cadence는 보존했다. encode 중 만료·입력 취소도 발행 전에 다시 검사한다.
+`test_board_mapper_wake.py`10건과 기존 메모리 판정10건, 전체 fixture 구문 검사를 통과했다.
+최종 fixture SHA256 `44e94c5770e6570a376ea3c8da3e883344cce4ca7b253869180e8b81170df2d5`,
+`mapper-wake-validation.json` SHA256 `eb48103e12bff64ad9b4b7a4f28d7c7d740a70553049fc94ac3f293c12bae444`다.
+기존 원자료·수정 전 소스는 그대로 보존했다. **이 fixture도 보드 미수행**이며 실제 MQTT 전달·planner 점유를
+새로 수락한 것은 아니다. 주행 중 odom epoch reset 뒤 고정 위치 offset은 실제 mapper 재localization 근거가 아니다.
+
+#### 복원·정리 결과
+
+- 원 B는 보존된1.0.8 manifest `45e646878094c15cca0ae269923eb2f712ca3e2efdf7339b5ee0636f4a159749`로
+  복원했다. 등록 객체가 시험 전 객체와 동일함을 검사하고 원 통신 설정으로 start 완료했다.
+  operation `a98bc691-afc9-46a5-9683-e0838a025939`, 새 execution `2e0f0957-d25b-437b-a6cd-a87374cfaf86`,
+  domid18·CPU 검증 complete·실제 hard affinity2다. 복원 첫 CLI 종료3의 사유 출력은 fixture가 보존하지 못했고,
+  당시 실제 부재·1.0.9 등록 유지 확인 뒤 지원 CLI 재시도로 복원했다. 원장/lock 삭제나 등록 raw 덮어쓰기는 하지 않았다.
+- Debian은 domid1, 원 A는 domid2·1.0.8·affinity1을 유지했다. dom0·Debian의 hard mask0,3과
+  RAM/vCPU·영구 UUID/비밀번호·운영 CPU 정책은 바꾸지 않았다. 원 B의 새 boot/execution은 승인된 재기동의 결과다.
+- 소유 A `de33263f-8b35-492b-a83a-29be898b2767`와 B `ff2b3080-6ed8-4052-9209-c6823836e64a`는
+  정지 후 기존 retire/purge 네 호출로 정리했다. 각 원 create journal의 불변도 확인했다.
+- 격리 broker PID132605만 종료하고18885/18886 listener 부재·정확히 지정한 private 비밀 사본8개 제거를
+  확인했다. 운영 broker·원 자격은 유지했다. 정상 firmware revision 이력과 필수 operation 기록은 삭제하지 않았다.
+- 최종 Manager·Gateway·Worker·운영 broker·collector·UTC timer active,
+  Gateway generation1/SAFE_STOP/DISARMED/output_permitted=false/storage_uncertain=false,
+  실제 serial 장치0·등록 VM3개·임시 비밀 사본0을 확인했다. active는 기능/차량 종단 수락이 아니다.
+
+`parallel-load/parallel-board-evidence-final.tar.gz`는 비밀 없는263파일/3,536,726바이트,
+SHA256 `bd649d99f76bd7e8d9dc06e020f7449d8e6c42140a9b02e9d6c8aba051ed03b9`다.
+private 디렉터리 파일은0개이며 `board-evidence-final/`과 `final-parallel-summary.json`에 로컬로 보존했다.
+실제 보드 최종 상태는 `evidence/final-board-state.json`, 복원은 `original-b-restoration.json`,
+정리는 `current-trial-retirement.json`·`current-broker-cleaned.json`·`current-worker-restored.json`을 따른다.
+
+#### 집에서 이어갈 순서와 미완료
+
+1. **현재 후보부터 재확인:** host boot·현재 VM UUID/execution·설치 모듈 hash·서비스·출력 차단을 읽기 전용으로
+   확인한다. 오늘 helper의 고정 host/execution/key를 새 실행에 맞춰 무조건 바꿔 재실행하지 않는다.
+   현재 원 B는1.0.8이며 오늘 시험용 private 자격·listener는 이미 정리됐다. 새 시험 범위를 준비해 다시 공급한다.
+2. **전달 지연 정상화:** 새 성공 probe cadence와 fixture의 fresh vehicle 전달/원 odom epoch 처리를 같은 후보로
+   검증한다.20ms clock error·200ms age·binding TTL·원 execution/intent·정리 보호는 유지한다.
+   복수 프로세스·probe·MQTT callback·mapper 소비의 시각을 CRC로 연결하고 CPU 실행/대기를 별도로 본다.
+3. **지도·메모리 기준선:** 먼저 출력 없는 DISARMED에서 실제 제품 planner/tracker 계산과 새 map/path/search
+   점유를 확인한다. 지도/경로 임시 슬롯의 실제 반환과 retained current/search checkpoint를 구분한다.
+   이후 이동·우회·복귀와 stateful 연속성은 별도 수락하며 가상 장치 결과를 실차 완료로 확대하지 않는다.
+4. **자원 단계0~5:** 정상 Active/Standby 기준선 뒤 소유 CPU 실제 연산·선택 pool 부족·필수 pool 확보 실패·
+   부하 해제/재합류·A/B 대칭을 연결한다. 아직 추가 자원 압박/승계 실보드 시험을 시작하지 않았다.
+   선택 점유 hook·새 대상이 승인 범위를 넘으면 후보·영향·상한·원복을 정해 그 범위만 확인한다.
+5. **사전 여유 경고:** 정상 유휴/정상 고부하/증가/실제 실패/회복의 원 표본과 필수 작업 결과를 짝지어
+   CPU·영역별 메모리의 진입·지속·해제·정상 유지시간을 정한다. 현재 운영값은 미확정이다.
+   [건강 계약의 현재 지원 표](../contracts/health-evidence-v1.md#자원별-사전-여유-경고의-현재-범위)와
+   [BO1/CO1/CO3](../platform/recovery-scenarios.md#2-정상-운영-중-상시-감시)를 재사용한다.
+   같은 원 표본 재평가·CPU100%·free0·과거 peak/고갈 누계만으로 승계/재시작하지 않는다.
+
+로컬 재개 진입점은 `C:/Users/SSAFY/Documents/Codex/2026-11-06/parallel-load/resume-20261106.md`다.
+이 기록은 기억/인계용이며 새 정책·새 실행 허가·완료 증거를 대신하지 않는다.
+
+
+<a id="clock-retry-submit-20261106"></a>
+## 2026-11-06 재부팅 후 제출 경계 보완 — 실보드 통합 검증 진행 중
+
+현재 후보는 `feat/platform/integration-followup`, HEAD `5d05101efd39c457cb78a05b473952bc38e7a317`와 미커밋 변경이다. 이전 E4·동시성·clock 보완과 실패 원문을 보존했다. **정상 지도 계산→점유 증가→임시 슬롯 반환은 아직 미수락이며, 그 선행조건을 요구한 세 부하·승계 조건도 미수행이다.** 아래 로컬 통과를 실보드 종단 완료로 확대하지 않는다.
+
+사용자 재부팅 뒤 host는 `754c8e16-131d-4929-a0cf-bda4134e318b`다. A는 `de113a23-d80e-4333-94b8-788babe0e41e`, Debian은 `17cad3c4-b3cd-4b29-8740-e679d0eaebd4`, 시험 B는 `5002a22d-63d6-4f7a-9106-193b14499898`다. 부팅 전후 monotonic·execution·key를 합치지 않았다. 이전 R10의 원 start `5b0334ce-1dbe-4ec7-bc70-2e09be21e6f2`와 stop `91894061-7ad2-48b0-ad49-7c697044b237`는 완료였지만 `/run`의 실제 진단 결과는 회수하지 못했다. 이를 성공 시험으로 소급하지 않았다. 새 boot에서는 B가 1.0.11 등록·stopped였고, 새 원 key와 새 시험 문맥으로 재개했다.
+
+### 실제 시험과 확인 범위
+
+| 시험 | 확인한 결과 | 해석·복구 |
+|---|---|---|
+| R11 진단형 | B start 완료. 콘솔 준비 파일이 부모의 20초 경계 직후 생겨 `CONSOLE_NOT_READY`. 지도 driver 미기동·최종 raw 0 | 제품 한도를 바꾸지 않고 fixture 기동 대기만 45초로 분리했다. 원 B 1.0.8·Worker 복구 완료 |
+| R12 진단형 1.0.11 | 52.821초·지도 local queue 4, map/search/path 각 8개 유효 표본의 used/peak 0. odom 링은 864B | clock 전체 raw 16(phase5 3/폭 거절 13), guard 확정 subset 7(2/5)을 구분. MAP raw 4, 확정 2 모두 clock gate EAGAIN. 원 B 1.0.8·domid6·execution `3c10daa8-37fc-49d2-abe7-fd63b5e3a0d2`, Worker·mock Gateway 복구 |
+| R13 기본형 1.0.10·콘솔 없음 | 45.074초·지도 queue 8, 필수 세 풀 각 6개 표본 used/peak 0. odom 링 432B. ODOM_CLOCK_UNCERTAIN 267/CONTINUITY_GAP 49 | 진단 콘솔만의 문제로 볼 수 없다. 원 B 1.0.8·domid8·execution `e1f5f838-0735-48a9-a52c-d2f4a78d361a`, Worker·mock Gateway 복구 |
+| R14 기본형·구간 계측 | 45.019초·지도 queue 0, ODOM_CLOCK_UNCERTAIN 272/CONTINUITY_GAP 34. 원인 직전 odom 기록은 cleanup 전에 보관을 멈춰 정리 지연과 분리 | 원 B 1.0.8·domid10·execution `53570d0a-f5fc-48e5-b16e-daf41eb307ff`, Worker·mock Gateway 복구. 새 제품 보완의 변경 전 근거 |
+| R15 | 같은 기본형 1.0.10에 검증한 세 Python 모듈 적용. 45.370초·지도 queue 3, 필수 세 풀 점유 미수락 | 첫 제출 RTT로 분리해도 수신 지연이 남았다. 원 B 1.0.8·domid12·Worker·mock Gateway 복구 |
+| R16 | 시험 parent에만 Python switch interval 1ms를 적용한 원인 분리. 45.570초·지도 queue 1, 기준선 실패 | 운영 Python 설정 변경 없음. 이것만으로 GIL을 단독 원인으로 확정하지 않았다. 원 B 1.0.8·domid14·Worker·mock Gateway 복구 |
+| R17 | 기본 interval/affinity, 제한된 원 command 내용 계측. 47.403초·지도 queue 4, 기준선 실패 | 현재 B 문맥의 833개 모두 v=0/steer=0, READY·이동 성공 아님. 원 B 1.0.8·domid16·Worker·mock Gateway 복구 |
+| R18 | 시험 parent와 그 thread만 Linux vCPU 한 개에 제한한 원인 분리. 46.601초·지도 queue 8, 기준선 실패 | Xen pCPU·운영 CPU 정책 변경 없음. 원 B 1.0.8·domid18·Worker·mock Gateway 복구. as-run의 affinity 미변경 주석은 실제 동작과 달라 이 행으로 정정 |
+| R19 | 1.0.12의 제한 exact-zero 시도 gate와 같은 Python 보완. 45.322초·지도 queue 6, 기준선 실패 | 현재 B 문맥 command 258개 모두 0. 반복 감소가 전체 지연 해결은 아님. 원 B 1.0.8·domid20·execution `7e77e8b8-355f-41d8-93a1-237c55ebba1c`, Worker·mock Gateway 복구 |
+| R20 | 같은 1.0.12에 native owner 단회 read 적용. 43.763초·지도 queue 1, 지도/탐색/경로 peak 0으로 기준선 실패. odom 링 peak 9,936B는 별도 실제 점유 | 원 B 1.0.8·domid22·execution `fc3daeed-db3d-4492-b4b4-19522138b197`·CPU 확인 complete. 복원 start의 첫 admission 경합은 미수락이었고 같은 key 재호출로 완료. Worker·mock Gateway 복구 |
+
+지도 queue 수락은 broker 전달·guest 수락·계산 성공이 아니다. R12의 raw `dec-g3`는 190~331µs였고, Pi 수정 후 `pi_send→publish 진입`은 중앙 0.150ms였다. C callback 이후 시각 오차와 Pi의 알려진 직렬화·mailbox 대기를 줄인 수정은 실제 동작했다. 그러나 raw만 있는 문맥 미확정 marker를 guard 확정 표본으로 승격하지 않는다. `r12-clock-map-analysis.json`은 prefix와 µs clock의 원점 차이, 원 lease와 로그 시점의 한계까지 구분한다.
+
+### 확인한 비용과 국소 수정
+
+1. `feedback.py`/`odometry.py`: 원 probe 생성 시각부터 serial 제출 전 packet 준비·대기를 RTT에 넣고 있었다. R14의 보관한 대응 표본에서 echo→OS write 진입은 중앙 3.477ms/p95 55.352ms였다. 원 echo는 그대로 두고 완성 frame의 **첫 제출 직전 시각**을 기존 최대 2개 pending 값에 한 번만 저장한다. RTT·Pi 중점은 첫 제출→실제 read 완료로 계산한다. 원 echo의 보존 기한도 mark/receive 양쪽에서 유지한다. 중복 mark·partial/EIO로 시각을 갱신하지 않는다. `ODOM_PROBE_EXPIRED`와 내부 `ODOM_PROBE_SUBMISSION`을 기존 실제 왕복의 `ODOM_CLOCK_UNCERTAIN`과 구분한다. prepared probe당 clock 읽기 1회와 최대 2개 작은 timestamp가 추가된다. ARM 실제 RAM 최고값 측정은 아니다.
+2. `drive_link.py`: R14의 선택 publish 8회는 원 probe와 유일하게 대응했다. publish 누적 wall/CPU는 227.039/29.430ms, queue→write 진입은 175.819/12.373ms였다. 중첩 비용은 합산하지 않는다. 고정 Paho 2.1.0의 [`_packet_queue`](https://github.com/eclipse-paho/paho.mqtt.python/blob/v2.1.0/src/paho/mqtt/client.py)는 같은 owner의 `loop()`에서도 socketpair wake를 한다. [공인 외부 event loop](https://eclipse.dev/paho/files/paho.mqtt.python/html/client.html#external-event-loop-support)의 socket/select·read/write/misc를 같은 owner에서 사용해 불필요한 자기 wake를 없앴다. 기존 2ms 대기는 유지한다. Paho `max_queued_messages=2`만으로는 QoS0의 정체 queue가 제한되지 않는 것을 실제 고정 Paho의 64 packet 재현으로 확인했다. 이제 `want_write()`가 남으면 새 latest 슬롯을 꺼내지 않아 기존 packet부터 처리한다. 정체 200회 뒤 정상 입력 회복도 로컬에서 검증했다.
+3. `controller.c/h`·`main.c`: WARM+LATTICE에서 같은 제한 사유의 exact-zero만 기존 lifecycle check당 한 번 시도한다. 첫 제한 STOP·제어/연결/앱 문맥 변경은 즉시 시도하고 정상 neutral·movement는 유지한다. 이는 수락/송신 ACK가 아닌 시도 이력이다. mailbox 거절·이후 TX 만료도 다음 check에서 재시도하며 새 타이머·기한 연장은 없다. 계산·progress·health·heartbeat·lifecycle의 기존 판정은 바꾸지 않았다. 앱별 metadata 합계 304B를 추가했다. 원 CTest ASan/UBSan 6개와 실제 main/JSON encoder 집중 시험 3개가 통과했고, 같은 60회 완료 fixture에서 제한 시도 40→10·정상 neutral 10→10·movement 10→10을 확인했다. fixture의 RTOS/작업/수송 대역은 실제 planner·실보드 성능 근거가 아니다.
+
+R14 장치 write 반환→Pi read 완료는 보관한 64개 표본에서 중앙 36.915ms/p95 147.161ms였다. syscall 뒤 deschedule로 음수 cross-process 구간도 있어 이를 순수 장치·커널·GIL 지연으로 단정하지 않는다. 두 국소 수정만으로 이 수신 지연까지 해결됐다고 주장하지 않는다. R13 task CPU의 36.089642714초는 tail/cleanup을 포함한 **수집 wall 창**이다. task와 process 합계는 겹치며 Linux CPU 값은 Xen pCPU 보장이나 GIL 대기 측정이 아니다.
+
+R19는 같은 pi/device session·echo의 수신 65개를 대응했고 source/sample·제품 수신 stamp가 일치했다. 첫 제출 RTT 중앙 66.887ms/p95 178.144ms, 장치 write 반환→Pi read 완료 중앙 34.817ms/p95 114.205ms다. 보존한 고유 Pi read 56회의 wall 중앙 16.734ms/CPU 중앙 0.512ms와 read 완료 뒤 제품 stamp 중앙 약 0.1ms를 구분했다. 나머지 보존 누락을 실패/0으로 채우지 않는다. `r19-timing-analysis.json`은 raw 구간·분모·원 실행·source hash와 계산을 보존한다. 이 경과 시간만으로 kernel/GIL/scheduler 비중을 확정하거나 clock 한도를 올리지 않았다. 기존 owner readiness 뒤 pyserial 내부의 추가 select/read 경계는 후속 R20 후보로 국소 보완했다. 실제 POSIX idle read와 HUP 모두 빈 bytes가 될 수 있어 readiness 근거 없는 raw-read 치환은 하지 않았다.
+
+R20의 같은 세션 수신 64개·고유 nonempty read 62개를 대조했다. 단회 read의 wall 중앙은 16.734→3.947ms, CPU 중앙은 0.512→0.200ms로 줄었으나 wall p95는 38.682→44.313ms로 tail 개선은 확인하지 못했다. 첫 제출 RTT 중앙 64.449ms/p95 149.614ms, 장치 write 반환→Pi read 완료 p95 128.308ms가 남았다. source/read identity는 새 helper 경계와 모두 일치한다. 직접 pyserial read와 새 owned read는 각각의 실제 호출 경계로 측정했으며, 중첩 비용은 합산하지 않는다. 활성 phase의 완전한 24개 CPU 창은 24.157초다. owner TID의 start/context switch는 대응했지만 kernel scheduler 설정이 꺼져 run-delay 차분은 unknown이다. 이를 지연 0이나 GIL/커널 단독 원인으로 보고하지 않는다. 자세한 분모·보관 누락·원시 구간은 `r20-timing-analysis.json`에 있다.
+
+### 같은 후보의 로컬·ARM 근거
+
+R15~R19에 사용한 Python source SHA256:
+
+- `drive_link.py`: `afc83178c00583437a5778353a412cfe7d16146eedcc5206afce28ef4969e265`
+- `feedback.py`: `acc5591100ea2ad43393a4505e08984e8e3c1758fc96d2a0df7ea220049798fd`
+- `odometry.py`: `cc38c4ca94eda13755a23cb484ea256737935cb5501936db76e793e1b08d6f3b`
+
+집중 시험은 MQTT 39개, odom/feedback 53개다. 이를 합산해 전체 개수라고 하지 않는다. 같은 최종 hash로 `python3 -B -m pytest tests -ra` 전체 Gateway **337 passed/1 skipped(76.03s)**, 전후 source hash 동일을 확인했다. skip은 기존 native state codec 실행 파일 미공급이다. WSL host Python 3.12/Paho와 기존 ARM Mosquitto 2.1.2/QEMU fixture 결과이며 ARM Gateway 네트워크 실행 완료가 아니다.
+
+기존 recipe 선택·설치 경로대로 새 격리 root에 42개 Python 파일/383,785B를 0644로 설치했다. payload SHA `6fb23ca6445f024290beb026d9a20c0c7e2ea42fb7a0664631ebd0045f65b86c`. 실제 ARM Python 3.14.7/QEMU·고정 protobuf/upb에서 hash·mode·import/compile·첫 제출·중복 mark 불변·원 probe 만료·Paho API 검사를 통과했다. audit hook으로 connect/bind/process/file-write를 막았다. 정규 RPM/전체 이미지/운영 설치 완료가 아니다. 기존 package 분할과 의존성을 재사용했고 새 runtime 의존성은 추가하지 않았다.
+
+후속 native owner 읽기 후보는 `feedback.py` SHA `18f79e69323f8703299534616c82eecd06865f87b584a25a8daa41e340a37e5f`, `output_owner.py` SHA `5e908fe4f9e1cab78070666128df6fd130122bc4df9a91170b09272b87f5ba2a`다. 같은 fixed pyserial 3.5의 실제 PTY로 idle/HUP의 빈 read 반례를 확인한 뒤, 기존 select의 readable 근거를 owner poll 한 회에만 전달한다. 첫 STOP·만료·종료가 우선하며 취소는 기존 owner wake다. 직접 public poll의 pyserial 취소와 실제 socket URL·기존 no-fd fallback은 유지한다. 원 `OSError`·첫 실패·partial/joined/oversize frame·read 완료 stamp·odom TTL을 포함한 집중 59개, 전체 Gateway **349 passed/1 skipped(76.37s)**를 통과했다. 기존 native state codec 미공급 skip과 외부 대역은 앞 시험과 같다. 추가 state는 기존 fd 참조·cached hook·소비하는 bool이며 새 lock/thread/select/retry loop는 없다.
+
+새 42개 모듈/386,105B의 ARM 설치 payload SHA는 `ea7627b4bbce316b9964c7b0883f0e4586bab097f3864071967b2259d16a78b9`다. 실제 ARM Python 3.14.7/QEMU의 import/compile·기존 codec 검사는 통과했다. 반면 QEMU에서 만든 PTY의 `ttyname`, host가 공급한 PTY의 `tcgetattr`는 각각 ioctl `ENOTTY`로 막혀 ARM PTY 실행 수락으로 세지 않았다. 이를 우회하려고 제품 termios 검증을 끄지 않았다. WSL host PTY 성공·ARM import 성공·실보드 성능은 별도다. 상세 원문은 `owned-read-local-validation.json`, `gateway-owned-read-full-tests.json`, `gateway-owned-read-arm-install.json`, `gateway-owned-read-arm-pty.*`, `gateway-owned-read-arm-hostpty.*`다. ARM source manifest의 supporting-evidence 항목 중 `feedback-owned-read-local-validation.json` 표기는 실제 `owned-read-local-validation.json`의 오기이며 runtime payload/hash에는 영향이 없다. 원 실행 기록을 보존하고 여기서 대응을 바로잡았다.
+
+C callback 수신 시각 보완은 별도 47개 로컬 회귀 및 실제 Zephyr ARM 빌드 두 후보로 확인했다. base 1.0.10은 manifest `9c1691a75ed544263e4edb82fa4dc44e2e80394f9509585fa267e99ba378313f`/bin `66a5dad8d6c5ab315d06cebd219b904c6a294544ffce4d197103c71f9faa3275`, 선택 진단형 1.0.11은 manifest `4bbd601b637cedef14134f4de688a213cdc7fb4e54311c8715500202bf6d2c13`/bin `c819de07fbc87aad8dbed7de0ea9eec32cff25971e78bda3e33523b6b195c2c9`다. 모두 16MiB/1vCPU, 보드 B의 기존 CPU2·UUID·비밀번호를 유지했다. 새 catalog·초기 설치 default나 운영 정책값으로 승격하지 않았다. build 뒤 문서만 보강한 이력은 runtime source hash와 구분한다.
+
+제한 명령 gate의 고정 Zephyr ARM 빌드는 39.890초에 통과했다. 1.0.12 manifest `c6960f1df498d30054ccfe6cde240bd60da310f006b0d24e018ae152b209ddab`, bin `c7bfaff8cd55c7c20b9ed676aa46495b964980506768ad7f7ee73c04ccc272e8`, bundle archive SHA `f88f27493b943b277f9a88c22987fd60b3ee581d4392b05107884b5e3e47d1a0`다. ELF 심볼의 gate BSS는 304B다. layout padding 때문에 전체 bss 순증이 0인 것을 RAM 비용 0으로 보고하지 않는다. 1.0.12의 R19 기동은 확인했으나 기준선이 미수락이므로 B는 1.0.8로 복원했다.
+
+### 원자료·담당 연결과 남은 수락
+
+로컬 원자료는 `C:/Users/SSAFY/Documents/Codex/2026-11-06/board-resume-evening/`에 있고, 사용자 요청 모음은 `C:/Users/SSAFY/Documents/xenova-test-docs/`다. 기존 61개 모음과 실패 원본은 유지한다. 상세 명령·설정·source manifest·표본·한계는 `resume-evening-working.md`, `gateway-submit-full-tests.json`, `gateway-submit-arm-install.json`, `drive-link-external-loop-validation.json`, `odometry-submit-boundary-local-validation.json`에 연결한다. 종료 R19 archive는 비밀 없는 176파일/9,786,859B, 압축 1,173,127B, 실제 비밀번호 값 누출 검사 0건, SHA `6e9beef859320729ca629329dbd4e64741756fa400a131405353d352a6ab1d3d`다. PC 회수 뒤 각 path·크기·hash를 전부 대조했다. raw journal·자격 원본은 보고서로 복제하지 않는다.
+
+ESP32 요청서와 정식 feedback-2 계약에는 probe 수신 뒤 실제 센서 표본 생성/래치 조건을 현재 본문에 명시했다. 가상 Vehicle은 그 순서로 계산하지만 실제 MCU·차량 수락은 별도다. 원 echo wire를 그대로 회신하며 새 field·framing을 요구하지 않는다. R15 이후 기존 echo 전체 구간과 실제 첫 제출 기준 RTT를 별도 계측했다. 보존한 원 시각·lease·신원·출력 권한·E4·오류 원인은 축소하지 않았다.
+
+정상 baseline이 통과하기 전에는 정상 고부하/A만 지연/양쪽 입력 한계의 승계 기준이나 운영 숫자를 확정하지 않는다. 실제 차량 출력·원 A 조작·보드 재부팅·운영 설치본 교체·commit/push는 이 재개 시험에서 수행하지 않았다. 사용자가 수행한 보드 재부팅과 그 뒤 새 문맥은 별도 경계다.
+
+R20 종료 후 소유 broker PID7656의 실행 시각·정확한 전용 설정·실행 파일을 확인하고 종료했다. private 자격 사본 5개와 password 파일 1개만 제거하고 18885/18886 listener 부재를 확인했다. 원 자격 4개 hash·등록 VM 객체·필수 원장/Authority는 보존했다. 마지막 읽기 확인은 A domid2/execution `b5a66d21-b853-4f66-b1c4-59f319e01d6a`, Debian domid1/execution `86cda91a-5065-43d3-96a9-ce68b89e3903` 유지, 원 B 1.0.8·domid22, Worker/Gateway/Manager/broker/display/collector active, Gateway generation1/SAFE_STOP/DISARMED/output=false/storage_uncertain=false다. 소유 시험 root를 참조한 잔존 프로세스와 실제 USB serial 장치는 0이었다. `r20-owned-cleanup.out`·`r20-final-readonly.out`이 근거다.
+
+종료 R20 archive는 199파일/11,658,640B, 압축 1,373,962B, SHA `2bfefdb44985ba36475d08ed9bc1e451ba032bb84c685f62e3db03ff80e3d5f0`다. 비밀 검사 0건과 PC 회수 후 전체 path/크기/hash를 확인했다. 이후 정리·최종 읽기 결과는 별도 원문으로 PC에 보존했다.
+
+dom0의 Linux vCPU 4개가 hard mask 0,3을 공유하는 영향을 분리하기 위해, 사용자 승인 뒤 R21에서 논리 CPU2/3만 한시 offline했다. Xen hard mask와 A·Debian은 바꾸지 않았다. 독립 복원 프로세스를 먼저 준비하고 원 boot·PID·nonce·기한을 확인한 뒤 offline했으며, 실제 offline 구간은 보수적으로 47.373초였다. 복원 프로세스의 오류 0·Linux online 0-3을 확인한 뒤 B·서비스를 복원했다. 새 guard의 로컬 10개, parent 8개 회귀와 실보드 already-online 상태의 명시 반환/EOF 복원도 별도로 통과했다. 가짜 sysfs 시험과 실제 CPU 대조는 구분한다.
+
+| 후속 시험 | 확인한 사실 | 해석·복원 |
+|---|---|---|
+| R21, fresh broker·논리 CPU 2개 | 38.510초·지도 local queue 58. map high-water 26,824B/used 0, search/path high-water 0, guest odom high-water 0 | map 슬롯은 decode 전에도 예약하므로 이 peak를 지도 수락이나 계산 성공으로 세지 않는다. CPU4 복원 뒤 B 1.0.8·domid24/execution `1eb95c15-d8d5-48f7-9298-9ac015f7ec4e`, Worker·mock Gateway 복원 |
+| R22, fresh broker·논리 CPU 4개 | 39.529초·지도 local queue 4, `CONTROL_APPLY_UNCONFIRMED`, 출력 불허. 정상 지도 계산 기준선 미수락 | B 1.0.8·domid26/execution `210ef404-59cb-4798-8f5f-bf6d293052d5`, Worker·mock Gateway 복원. 새 broker로 retained 차이를 줄였지만 각각 1회 표본이므로 CPU 단독 원인이나 운영 배치로 확정하지 않는다 |
+
+R21의 같은 session/echo 수신 62개에서 첫 제출 RTT 중앙은 35.305ms, p95는 165.611ms였다. 고유 nonempty read 79회의 wall 중앙은 0.124ms/p95 17.059ms다. R20보다 일부 중앙 지연은 줄었지만 꼬리 지연과 기준선 실패는 남았다. R20과는 fresh broker/retained 조건도 달라 변화 전부를 CPU 탓으로 돌리지 않는다. `r21-timing-analysis.json`, R22 원 자료와 후속 분석을 함께 읽는다.
+
+게스트의 실제 차량 관측 거절 사유를 확인하기 위해 기존 선택 진단 아래 `lattice_input.c`의 검사 순서를 유지한 단계별 계수를 추가했다. 차량 진단은 단계별 최초 1건·전체 16건, 실제 pending map 진단은 단계별 2건·전체 8건으로 제한한다. 미확인 값과 유효 0, 원 clock error와 mapping 폭을 더한 값을 구분한다. 진단 비활성 경로의 추가 조회·로그는 없고, 신원·나이·trylock·epoch reset·errno·READY·기한은 바꾸지 않았다. 기존 47개와 실제 C/nanopb 신규 45개 회귀가 통과했으며, invalid map도 peak를 높일 수 있다는 실제 engine 반례를 고정했다.
+
+고정 SDK의 기본형/진단형 ARM 부분 빌드를 통과했다. 진단형 1.0.13 manifest는 `b71563cfb585a703ab16eb22084f235d1038424eca2b986a47dca16d3da0fd20`, bin은 `c0d0607c97b4b2a794abf9368492e48c970f9439164f3cab0d403cb88b7a6f65`다. 같은 source의 선택 진단 전후 ELF `text/data/bss` 차이는 `+4674/-576/+4`B이며 layout·기존 진단을 포함한 전체 차분이다. 이 수치를 개별 metadata의 정확한 RAM 비용으로 간주하지 않는다. 운영 profile·catalog·초기 설치 선택은 바꾸지 않았고 16MiB/1vCPU 시험 bundle만 새로 포장했다. 이 시점에는 실보드 진단 결과와 세 부하 조건은 아직 미수락이다.
+
+종료 R22까지 비밀과 분리한 archive는 261파일/15,194,165B, 압축 1,759,770B, SHA `67d2e35d3806952c41f595f6eaa8f5a48dbf795b492fe2bde897bd81c8e0a2a3`다. 실제 비밀번호 값 누출 검사 0건이며 PC 회수 뒤 모든 경로·크기·hash를 대조했다. 원 Authority·journal·자격은 정리 대상으로 바꾸지 않았다.
+
+R23은 시험 압축 해제에서 파일 모드를 0600으로 잘못 지정해 `ARTIFACT_INVALID`로 거절됐다. driver는 시작되지 않았다. 원 포장의 0444만 복구했고 내용·검증기를 바꾸지 않았다. R24에서 같은 1.0.13의 실제 기동·콘솔 lease를 확인했으나 47.016초·지도 local queue 2에서 기준선은 다시 실패했다. 확정 clock 4건의 오차폭은 170488/48925/22907/82374µs로 원 20ms를 모두 넘었다. 차량 최초 marker는 phase2/rc−11(유효 clock 미준비)이며 ring 수락 증거가 아니다.
+
+R24의 원 콘솔 2627B는 실행/의도 재확인 실패 시점까지만 확정됐다. 어떤 public get 필드가 조건을 벗어났는지 원 기록에 없어 실제 신원 변경이라고 단정하지 않는다. 수집기는 정상적으로 중단·lease 반환·console process join했다. 새 파서 v1은 정상 Zephyr shell의 `ESC[8D ESC[J` prefix까지 printable 검사해 차량 marker를 놓쳤다. 원 raw를 보존하고, 실측한 prefix만 분리하는 v2로 재파싱해 같은 원 표본 seq2/clock error16794µs를 읽었다. 본문 제어문자·미확인 escape·위조 marker·미확정 raw는 계속 거절하며 mapped now의 `nv=0`은 unknown이다. 이는 시험 수집기 보완이며 제품 입력·clock 한도 변경이 아니다.
+
+R24 종료 뒤 B 1.0.8·domid29/execution `109bfec1-ab6a-4f5b-bcfe-23c630172bfd`·CPU 확인 complete, Worker·mock Gateway 복원을 확인했다. 종료 R24 archive는 297파일/16,968,959B, 압축 1,947,220B, SHA `f6752f091e7ec91781b98307d6a07a5e972791d03aaaaa00c70046b589c87e26`다. 실제 비밀값 검사 0건과 PC 전체 hash 대조를 마쳤다. `resume-evening-working.md`, `r24-console-reparsed-v2.json`, `r24-recovery-validation.json` 및 회수 원문을 사용자 시험 문서 모음에도 보존했다. 다음 대조 준비 중이며 정상 지도·메모리 기준선과 세 부하 조건은 아직 미수락이다.
+
+
+### R25~R28 후속 사실과 국소 보완 (2026-11-07)
+
+R25의 읽기 전용 콘솔 중단 원인은 `xen_state=unknown` 하나였다. 원 host/execution/domid/unique/intent는 유지됐다. 새 v3 수집기는 이 값만 읽기 전용 수집에서 미관측으로 기록하며, 신원·lease·무입력·명시 crashed/dying 거절을 유지한다. 제어/READY/Worker의 실행 허가를 넓히는 변경이 아니다. 실제 PTY/lease 60개 로컬 회귀가 통과했다.
+
+R26은 world 공급 17초 뒤 실제 map 26,824B/search 27,312B/path 10,512B 점유를 관측했다. 다만 원 시험이 준비 전 AUTO 적용 1초 기한을 먼저 소비해 `CONTROL_APPLY_UNCONFIRMED`로 끝났다. R27은 SAFE_STOP의 실제 state proof를 먼저 확인하도록 시험 순서만 고쳤다. 7.305초에 같은 세 풀 점유를 관측했지만 proof 대기에서 끝났으며 AUTO를 발급하지 않았다. 최종 격리 Authority는 SAFE_STOP/DISARMED/output=false/failure=null이었다. 풀의 writing 예약도 used에 포함되므로 이 점유만으로 유효 path·StateApplied·READY·메모리 반환 성공을 주장하지 않는다.
+
+차량 표본의 원 수명 안에서 새 probe가 일시 실패해도 아직 유효한 직전 표본을 즉시 폐기하던 경로를 수정했다. `odometry.py` SHA `fce59589712427ca3e3b26e2b5ebb1586a20a8f16182424e19727aa1ab45548a`는 새 probe 만료·과도한 오차폭·현재보다 과거인 미확인 echo에만 last-valid를 보존한다. 원 표본 시각/오차/seq/epoch/원 만료는 갱신하지 않는다. 역행 시각·장치/session/frame/quality/encoder/kinematic 결함의 기존 무효화와 오류는 유지한다. 같은 표본의 반복 publish도 만들지 않는다. 실제 PTY·binary MQTT 집중 54개, 전체 Gateway 370 passed/1 skipped(74.52초), 고정 ARM Python3.14.7/QEMU의 42파일 설치/import/무I/O smoke를 통과했다. skip은 기존 native state codec 실행 파일 미공급이다. payload SHA `a03a4a27f8184c8c12292f04259e2a42579261338cf553438b31069f4dad3b88`; 정규 RPM·ARM PTY·실보드 통합 통과와 구분한다.
+
+별도로 실제 runtime snapshot의 일시 `-EBUSY`를 빈 control 문맥으로 해석해 기존 clock을 무효화하던 경로를 보완했다. `xd_inputs_status()`는 현재 coordinator 회차의 원 snapshot rc만 제공한다. 이 정확한 `-EBUSY`일 때만 lattice context 재해석을 건너뛰며, 해당 회차 입력 clear·계산/출력 거절·원 clock 만료는 유지한다. 관측된 control.error=-EBUSY, 단절·신원 변경·다른 오류는 기존대로 무효화한다. actual main/clock 43개 ASAN/UBSAN 회귀와 native_sim 원 rc/clear/회복을 통과했다. 새 state는 int 4B이며 wire·큐·lock은 추가하지 않았다. 고정 ARM 기본형1.0.14/진단형1.0.15 빌드·불변 bundle 포장·0444/내용 검증까지 마쳤다. 1.0.15 manifest `044aefb9a8e277642c9ed29a5af386b717d93654c5df63d2fbc21f50da0f12c2`, bin `063d1a43e4cf7101228d98c4390f124c9585511a744d21424094cc99744dbbc9`; 아직 이 후보의 실보드 계산 수락은 아니다.
+
+R28은 동일 1.0.13에 Gateway 차량 표본 수명 보완만 대조하려 했으나 firmware-replace가 `OPERATION_IN_PROGRESS`, `retryable=true`, operation_id=null, details.lock=admission으로 거절됐다. 실제 계산 driver는 시작되지 않았다. B는 1.0.8·domid36/execution `8b859200-a725-4f22-8682-37b36556c3e8`로 복원했고 CPU0-3 online, Worker/Gateway/display/collector active를 확인했다. 이 시험의 결과를 last-valid 보완의 성공/실패 표본으로 세지 않는다. 다음 시험 도구는 이 완전한 미수락 envelope에만 최대5회(사이 0.5초) 재시도하고 다른 오류·수락 미확정·파싱 실패는 즉시 원 오류로 끝낸다. 제품 잠금·한도·저장 의미는 변경하지 않는다.
+
+R26 full archive SHA `331d4d856dfdbbc9e711a00626c8567b4a0bbc02d8e87435d50032ac21c0f2e8`(361파일/21,144,594B), R27 incremental SHA `d33f5af696efb983ccaa902834045e49eef01180cbe882a6d245c260e4560165`(32파일/2,085,966B), R28 incremental SHA `7ec8a013d92af5d745efa9742dbee3582dae88720057122411f39a704bf10662`(6파일/6,526B)를 PC로 회수하고 전 경로·크기·hash를 확인했다. 비밀값 누출 검사 0건이다. R27→R26, R28→R27 predecessor hash를 보존하며 이후 archive는 변경분만 담아 반복 전체 읽기/압축을 줄였다. 필수 Authority/journal·원 비밀은 삭제하지 않았다.
+
+
+### R29·R30 실제 준비 진행과 남은 적용 확인
+
+R29는 FW13 + 새 last-valid odometry만 비교했다. 25초 점유 확인 창에서 timeout, 전체65.675초/지도 queue109였다. 뒤쪽에는 map26,824/search27,312/path10,512B 및 pathHWM21,024B가 보였으나 이를 창 안의 준비 성공으로 바꾸지 않았다. 원 B1.0.8 dom38/execution36d46dbc-42d3-405a-b826-fff6340d1f41와 CPU4/Worker/mock Gateway를 복원했다. 필수 stop 수락 후 잠금 경합은 새 key가 아니라 원 operation을 재호출해 정상 종결했다.
+
+R30은 같은 Gateway/준비 순서/CPU2 대조에 snapshot 보완 FW15만 합쳤다. world 공급18998.389657278→세 풀 점유19005.219780029(6.830초)→rebuilt StateApplied 채택19006.436801383(8.047초)→AUTO 선택19006.691412863을 확인했다. proof는 현재 B execution8a0c0a92-dc04-4f87-b2f3-f4aa665b5204·boot22db90c5-239a-4283-b5b2-174ebb953b5e·app3ed7aa0a-e759-4d48-b428-dd3a49ea5cf3·intent116에 결합됐다. 이는 실제 제품 계산/상태 수락 단계의 진전이며 단일 대조를 일반 성능 보장으로 확대하지 않는다. 다음 ready_disarmed 대기는 CONTROL_APPLY_UNCONFIRMED로 끝났다. 전체28.472초/지도queue35, app.heartbeat7/drive.command69를 받았지만 최종 AUTO/FAILED/output=false였다. 전체 baseline·메모리 반환·세 부하 통과는 아니다.
+
+R30 active 원1초 CPU창13개에서 system_busy는0.9937~1.0이었다. driver process 중앙0.419코어/최대0.626, 자식/스레드는 겹치므로 더하지 않았다. actor 회차470개 중20ms초과216/100ms초과28, wall중앙17.887ms/p95 115.535ms/최대363.729ms였다. sched_schedstats 비활성이라 scheduling 대기는unknown이며 GIL·단일 서비스의 원인으로 확정하지 않는다. 종료 뒤 별도 CPU4/원서비스 상태의 /proc3회 관측은 원조건 성능 대조가 아니다. 이 넓은 진단 자체도0.31~0.34코어/scan437~619ms가 들어 주기 계측으로 추가하지 않았다. PID/cgroup만 읽어 Manager·Worker·Gateway 소유를 확인했고 서비스/CPU 정책을 새로 바꾸지 않았다. 다음 R31은 원 control1초·readiness300ms를 유지한 bounded 시각 계측이다.
+
+R30 종료 뒤 원 B1.0.8 dom40/executiond0a16574-5367-4164-aad0-9f406fc289bf, CPU0-3, Worker/mock Gateway 복원을 확인했다. R29 incremental31파일/2,914,771B SHAaa1b9a483ccda3dbe592ef6eff31460c43b8802c2669aab32b43399ea7c2fe8a, R30 incremental31파일/1,509,607B SHAd2375fcc422dd8e59561297eab91c7a1415f7de9d988be0f37975d8393b5d7c2를 회수하고 모든 경로/hash를 확인했다. 비밀값 검사0건이며 원 Authority/journal은 보존했다.
+
+현재 netfront 소스로 고정 Zephyr native_sim/native/64 packet kernel9사례를 다시 실행해 모두 통과했다(configure19.582s/build29.169s/run합계3.968s). 20ms packet경합·100ms/1s 소유 유지·해제 후 정상 진행, 종료/close만료의 grant보존·첫 오류, backendClosing/TXID손상/커널EIO 차단을 실제 제품netfront와 Zephyr mutex/timer로 검증했다. Xen/Store/device는 fixture다. 소스22개 전후hash동일, receipt netfront-current-20261107-dcaa84fd.json SHA7a34edd1d447dc338769009995568836a220a5b46e6470c6d8cbc28409824c1f. ring/grant/shutdown native+ASan/UBSan 최근3PASS는 같은 제품6파일hash를 대조해 재사용했다. 이를 실제 hypervisor grant고장·ARM/QEMU 전체fault 수락으로 확대하지 않는다.
+
+
+### R31·R32 원장 조회 보완과 clock-domain 결함 확인
+
+R31은 stop 수락 전 admission2초 예산 안의 complete control scan에서 DEADLINE_EXCEEDED로 거절됐다(operation_id=null/물리stop0). 이2초는 scan뿐 아니라 선행등록/자산검사도 포함한다. B8 dom40/exd0a16574-5367-4164-aad0-9f406fc289bf와 CPU4/Worker는 유지·복원됐다. 원 요청·원 key 파일은 보존했다.
+
+원장132개를 읽는 동안 parent plain과 file plain이 조상 resolve를 중복하는 것을 계측했다. 새 xenova_execution.py SHA cdfc7d33c24488bbda50d4dcfcddce4577bdcb0dd070a78d2b58d559a493227b는 read_record의 부모 검사만 제거하고 file 전체 canonical/regular/nlink 검사를 유지한다. read_requests의 전체 열거·원 reader hook·JSON/request hash·부재/손상/기한은 그대로며, 검증된 같은 non-null key의 여러 operation은 RECONCILE_REQUIRED로 차단한다. None key 여러 개는 기존대로다. 새 DB/index/cache/lock/추가 fsync/원장 삭제/timeout상향은 없다. pathname 교체를 원자적으로 고정하는 새 보장도 아니다.
+
+같은 보드·같은process·CPU4/원 서비스에서 warmed before/after를 교대로3회씩 측정했다. 모두132개 파일읽기/작은request hash132회를 완료했고 parent plain은133→1이었다. CPU thread 시간 중앙1.052→0.847초, wall중앙1.763→1.551초였지만 새 후보 wall최대1.953초는 이전최대1.810초보다 길었다. 중복 제거와 CPU 비용 감소는 확인했으나 꼬리 지연·무제한 이력 규모의 완료 보장으로 확대하지 않는다. cold 첫 import2.632초/기록읽기0의 원 실패는 별도로 보존하며 이 paired 비교에서 제외했다.
+
+최종 집중22PASS, 원 crash/restart2PASS와 force정책ext4의2PASS를 확인했다. 관련215PASS/1skip·guard108PASS 원 기록도 보존했다. 초기실패에는 DrvFS mode0777·자식 PYTHONPATH·고정 systemd 검증기 공급이 섞였고 이를 제품 보호 완화 없이 분리했다. systemd259/QEMU의 정상 unit그래프는 통과하지만 주입한 순환을 검출해야 한다는 후반assertion은 현재/b84 이전후보 모두 실패해 별도 미해결로 남긴다. 이 정적unit실패를 runtime 수정의 성공으로 지우거나 제품unit을 바꾸지 않았다. 검증원본은 control-scan-local-validation.json 및 before/current stdout에 있다.
+
+R32는 R31의 test-stop key를 정확히 재사용해 operation89d313fa-c015-4751-821f-cb3c9cccdf91을 한 번 수락·완료했다. same_key=true/prior_key_file_unchanged=true/prior_acceptance=false/same_execution_verified=true를 보존했다. 기존 원 실행 기한을 재발급한 것이 아니라, 미수락 요청의 조회·수락을 새 호출에서 마친 것이다. 이후 FW15 주행 기준선은 전체44.816초/지도queue54에서 미통과했고, 준비 선택의 fixture guard SAFE_STOP_BOOTSTRAP_CHANGED가 관측됐다. 마지막 snapshot만으로 어느 조건인지 확정하지 않고 그 RAM 조건의 제한 관측을 R33에 추가한다. B8 dom42/exeb44f5b9-8f1a-42f1-b3b3-40e513303860, CPU0-3/Worker/mock Gateway를 복원했다.
+
+추가 source검토에서 clock epoch 혼용을 확인했다. 고정 Zephyr timer의 raw counter와 kernel uptime은 같은zero가 보장되지 않으며 inventory도 same_epoch=false를 선언한다. R30 confirmed range와 기존 v3 strictprefix를 모두 통과한 CLOCK5행의 dec rawcounter−uptime logstamp는2,013,899~2,014,717µs였다(raw SHAe035333e468c49c8668eda23be991d521ec2f4177f21814a6d10e0f3e86b970b). 동일 LOG생성행의 두시각이라 MQTT/콘솔배출지연 비교가 아니다. 직전스케줄지연·1ms양자화가 있으므로 이값을 보정상수로 쓰지 않는다. r30-clock-domain-paired-evidence.json에 원byte범위5개를 보존했다. lattice의 rawcounter bound/input시각을 main/runtime uptime과 직접비교하던 publication 경계만 보수적으로 변환하도록 구현·시험 중이며 global clock·원시각·Prepared raw만료·TTL을 바꾸지 않는다. 아직 이새C보완의 실보드통과를 주장하지 않는다.
+
+### R33·R34 준비 단계 분리와 publication 시각 경계 보완
+
+R33은 준비 진단 FW1.0.17과 기존 1초 control 기한을 사용했다. world 공급 후 세 풀 점유는13.200초, 현재 실행의 StateApplied 채택은16.881초에 확인했다. 이후 AUTO의 원 issue→publish 등록16.273ms→PUBACK 관측150.809ms였고, 그때 원 기한은 약848.737ms 남았다. 실제 ready18회는 모두 false였다. progress0→1→5→9→14만으로 준비 완료를 만들지 않았으며, CONTEXT_CHANGED·OBSERVATION_EXPIRED·POSE_UNAVAILABLE·STATE_PREPARING 사유와 최종 CONTROL_APPLY_UNCONFIRMED/output=false를 보존했다. 전체33.762초/지도queue45였다. clock-domain 결함이 이 실패의 유일한 원인이라고 단정하지 않는다.
+
+실제 firmware의 PREP/APPLIED 진단은 앞선 seq1/path1의 큐 등록 및 publish rc0를 확인했고, 후속 seq5의 원 raw bound보다1,161µs 늦은 준비 결과는 applied=false로 거절했다. 각 seq/path·시각이 다른 증거를 하나의 READY로 합치지 않는다. 원 콘솔9,523B, guest 입력0, lease 반환·수집 프로세스 종료를 확인했다. logger drop 표시·무효3행·미확정1행·순번 공백도 남겨 전체 시도 수집으로 주장하지 않는다. B8 dom44/executionc191415e-f57f-457d-99fe-c3743b4f259f와 CPU4/Worker/mock Gateway를 복원했다.
+
+시각 보완은 adapter.h의 기존 padding에 private sample clock 구분을 두고 main.c의 publication 경계에서만 변환한다. counter 결과는 uptime-before→counter→uptime-after의 세 작은 관측으로 남은 기한을 보수적으로 uptime에 옮긴다. AUTO 원 입력 나이는 올림과 관측 사이 지연을 반영하고, MANUAL 원 입력 나이는 기존 uptime 의미를 유지한다. 원 sample·Prepared raw 만료·wire·TTL을 다시 쓰지 않는다. 정상 만료는 기존 -ETIME no-submit 경로로 끝내고 다음 정상 계산으로 회복한다. clock 실패·역행·overflow·알 수 없는 clock 구분의 최초 fatal 사유는 유지한다. generic uptime 경로에는 새 clock 조회가 없다.
+
+실제 main/clock/입력 C 회귀94PASS(121.63초)와 실제 Zephyr native 수동 pending/running/result 소유·점유·최고값·취소·모드 변경 회귀를 통과했다. 고정 ARM 기본형1.0.18/진단형1.0.19의 빌드·불변 bundle 포장·보드 임시 디렉터리의 hash/0444 대조까지 마쳤다. main 심볼은4,072→4,444B(+372B), automatic 경로는+8B이며 전체 ELF text의 순차이는 layout 영향을 포함하므로 코드 비용0으로 보고하지 않는다. ARM compile-only ABI 검사는 sample128B/input_sequence offset32B/job2,360B/completion2,592B를 유지했다. 새로운 전역 lock·cache·queue·범용 시간 서비스는 없다. sample-clock-boundary-local-validation.json, counter-domain-arm-state.json, counter-domain-arm-abi.json에 명령·source/ELF/config hash를 보존했다.
+
+R34는 이 FW19를 적용하기 전 원 B의 test-stop 조회가2.049초에 DEADLINE_EXCEEDED/control request scan budget expired로 끝났다(operation_id=null, 물리 동작0). B44와 원 firmware·CPU4/Worker는 유지·복원됐다. 따라서 R34는 새 시각 보완의 실보드 성공/실패 표본이 아니다. 추가 cProfile 계측에서도 기존2초 예산 안에서 전체 조회를 못 마쳤고, 파일마다 반복되는 canonical ancestor 확인 비용과 JSON/hash 비용을 분리했다. 계측 오버헤드를 포함하므로 이 표본을 무계측 요청 지연이나 하드 상한으로 쓰지 않는다. 전체 이력 검사·원 key 유일성을 유지한 국소 보완을 계속 검증한다.
+
+R33 incremental archive SHAa7cb6b9aabe21d823cb4b7cc1bb99d8254193f19f4c543ed6440baf86f366b82(31파일/1,818,086B), R34 SHA19d61cb16001b8b442d2f92963ae9b50726f56df584187d5d87bbdba24d40701(7파일/12,280B)를 로컬로 회수해 전 경로·크기·hash를 확인했다. 실제 비밀값 검사0건이며, 원 Authority/journal/자격은 보존했다. 전체 정상 지도 계산·메모리 반환 및 세 부하 조건은 아직 미수락이다.
+
+
+### R35·R36 재전달·기본형 대조 및 FD 조회의 실제 비용
+
+R35는 R34의 미수락 stop key 하나만 재사용해 정상 수락·종결했다. 원 key 파일 불변·미수락 확인·같은 실행 확인 후 진행했으며, 기존 원 operation의 기한을 재발급하지 않았다. FW19에서는 지도 공급 후 풀 점유12.690초·현재 StateApplied21.120초까지 진행했으나 원1초 내 AUTO READY는 얻지 못했다. 전체39.498초/지도queue59, 실제 ready10회 false였다. 명령67개는 모두0이며, callback 완료298회나 progress 증가를 실제 tracker 정상 명령으로 확대하지 않는다. map0→26,824B/HWM53,648B, search0→27,312B/HWM27,312B, path0→10,512B/HWM21,024B, odom0→2,592B/HWM3,024B는 관측했지만 마지막 표본까지 used가 유지돼 반환은 미관측이다. 고정 예약 RAM의 OS 반환도 아니다.
+
+원 tail 표본63건의 odometry first-submit RTT 중앙39.136ms/p95 155.100ms/최대466.910ms, device write-return→Pi read-end62건은 중앙17.633ms/p95 143.784ms/최대433.199ms였다. Pi read-end→odom 진입 중앙1.133ms/p95 9.741ms로, callback 뒤 처리만을 주원인으로 확정할 수 없다. 확인된 guest clock7행 중5행은 실제 폭25.128~116.207ms로 기존20ms guard가 거절했고, 성공2행은13.467/14.345ms였다. 별도 차량 거절1행은 clock 검사를 통과한 뒤 xd_context_get의 -EAGAIN이었다. loader 실패와 기존300ms 신선도 만료 중 어느 것인지는 아직 원 자료로 구분하지 못했다. stale 관측을 성공값으로 채우거나 한도를 올리지 않았다.
+
+R36은 같은 C 시각 보완의 진단 비활성 기본형 FW18을 사용했다. 실제 control 안전 정지와 MQTT world 발행63건은 진행했지만25초 안의 세 풀 점유 조건을 못 얻어 전체41.979초에 끝났다. AUTO 선택은 하지 않았고 SAFE_STOP/DISARMED/output=false를 유지했다. 따라서 로그만 끄면 해결된다는 근거가 아니다. R35와 달리 하위 FD reader도 바뀌었으므로 전체 시험을 엄밀한 단일변수 대조라고 부르지 않는다. B8은 R35 뒤 dom46/ex033e5330-97a4-4620-b181-e5624058dc29, R36 뒤 dom48/ex31d6f043-106c-4e9f-a013-8cf403c54f9e로 복원했으며 CPU4/Worker/mock Gateway를 확인했다. 원 A/Debian은 변경하지 않았다.
+
+원장 조회의 추가 보완은 한 번의 전체 scan 안에서만 디렉터리 FD를 고정한다. 시작/끝 canonical 경로·dev/ino를 대조하고, 각 파일은 openat O_NOFOLLOW/O_NONBLOCK과 fstat regular/nlink=1로 검사한 뒤 기존 JSON/schema/identity/hash/key 검증을 모두 수행한다. FIFO를 열다가 대기하지 않고, 열거 중 사라짐·부분 열거·부모 교체를 정상 부재로 만들지 않는다. root와 현재 파일의 FD는 유한 수명으로 닫는다. generic read_record와 module/class/subclass/instance/explicit reader hook, 나머지 Execution AST는 그대로다. 공개 응답·원 기한·저장·fsync·효과 직전 guard에는 변경이 없다. source SHA913d80e6178ff63eaf981f671fc3fef2563f422f0583cbc049f0d0628d39511f, 집중45PASS·관련74PASS 및 주입 fixture의 fd 입력 가정 정합화 뒤 budget19PASS를 보존했다. 최초 TypeError 로그도 삭제하지 않았다.
+
+보드의 같은144개 원 기록을 CPU4/원 서비스·동일process·같은2초 scan 예산에서 교대로3회씩 읽었다. 모두 전체 조회를 마쳤고 request hash144회는 유지했다. 파일별 조상 resolve144회는 scan 시작/끝2회와 FD별 regular/nlink 검사로 바뀌었다. thread CPU 중앙0.899→0.608초, wall 중앙1.593→1.399초였다. 새 후보 범위0.729~1.413초/이전1.520~1.721초의 소표본이며, 전역 cache/index·이력 삭제는 없고 전체 JSON/hash O(N)은 남는다. 무제한 기록 수나 운영 꼬리 지연의 하드 보장이 아니다. control-fd-board-comparison-analysis.json에 원 표본과 명령을 연결했다.
+
+동일 FD 후보를 recipe 선택36모듈/0644로 새 격리 설치한 실제 ARM Python3.14.7/QEMU에서도11사례를 통과했다. 실제 scandir(dirfd)/fdopen·정상 전체 조회·hash/key·손상 JSON/중복 key·symlink/FIFO·실패 후 FD 정리·후속25회 FD 증가0을 확인했다. errno/stat/os/io는 고정 target의 built-in/frozen 모듈이고 개발 소스 PYTHONPATH로 누락을 가리지 않았다. payload SHA433bb9fbce7793252509736bddab1630de8d3fc1fffddc2ec23b32fa9e3db782, evidence execution-fd-arm-validation.json SHAfe4a94bc8cb14016190c4817fafe95590afdedbb395984f20c116306971587ec. 정규 do_install/RPM QA/이미지 설치나 QEMU의 보드 지연 보장은 아니다.
+
+R35 archive SHAcd94d31b7e72b6bd38ce24cf632be66e6a585a7c104636c9acc0d47da0f4d7f0(31파일/2,051,625B), R36 SHA5cbf1896664802c493c0ab01d89ee28870dccc0518f327b2f3f3a1ae1a900546(31파일/2,004,046B)를 회수해 모든 경로/크기/hash를 확인했다. 비밀값 검사0건, 필수 journal/Authority/원 자격은 보존했다. 다음 대조는 승인된 두 부가 서비스의 한시 중지·자동 복구로 공유 지연을 분리하며, 전체 정상 계산·반환·세 부하 수락은 계속 미완료다.
+
+
+### 11/07 R37–R40: 미수락과 계측 경계
+
+이번 후속 시험은 `feat/platform/integration-followup`의 HEAD `5d05101efd39c457cb78a05b473952bc38e7a317`와 미커밋 후보를 사용했습니다. **정상 지도 계산→READY→실제 PTY 주행→메모리 반환 baseline과 세 부하 조건은 아직 미수락입니다.** R37 wrapper 실패, R38 부가 서비스 한시 중지 대조, R39 private NODELAY-only, R40 source-barrier/FW22 결과는 중간 원자료이며 완료 근거로 바꾸지 않습니다.
+
+| 구분 | 구현·관측과 기준 | 결과·한계 |
+|---|---|---|
+| source barrier | `lattice_input.c` SHA `a76a6b5596e1fcee97a77c864192f6aaa41cd88a191eb7eb3372a076fa343bf5`. 정확한 첫 context 조회 실패에만 이미 열린 소켓을 처리하고 새 연결·pending map/차량/상태 채택은 차단 | 실제 C 111개 통과. ARM22/23 ABI `128/32/2360/2592` 유지. base maps 직접 frame +48B, 대상 text +224B, bool +2B. 런타임 전체 stack 최고값·실차 수락 아님 |
+| R39 | FW18/FD913/fce/CPU2/full services 유지, private broker GLOBAL NODELAY만 변경 | 42.172초·지도 로컬 queue63개 뒤 점유 만료. 운영 broker 변경0. NODELAY를 해결책으로 확정하지 않음 |
+| R40 | a76/FW22 + 원 MQTT v2.1 loop_timing 수집 + motion 선택 | 41.154초·지도 로컬 queue60개 뒤 점유 만료, motion 진입0. 실제 계산·복귀·반환 성공으로 세지 않음 |
+| timing 수집 | 기존 fixture allowlist가 loop_timing을 버리던 점만 새 v2에서 보완. distribution/collection 원필드·VM/boot/execution 필터·512 tail 유지, 실제 C producer fixture7개 통과 | R40 205개 중 loop_timing28개(4종 각7개), status=no_sample/count0/null. 선택·소비된 작업 없음이며 0µs나 발행 미지원이 아님. Standby 모든 계산시간·순수 CPU·planner별 시간으로 확대하지 않음 |
+| 복원·보관 | R40 원 B1.0.8 dom56/ex597fcc06-0d50-420b-b251-20fc908ace5d, CPU4·Worker/mock Gateway 복원 | A/Debian·Xen pinning·운영 설치·실제 차량 출력·commit/push 변경0. R39/40 archive 31개씩 전수 경로·크기·hash 대조, 실제 비밀 검출0 |
+
+R39 archive SHA `2814c1043a519d0b770c8a5cdff802faf43fd4efb5d5e46778f5c14d5bc36e9d`, R40 SHA `517b0e5d2b590870dfa3fdadeb504a7b6a03857654dba2e6a5e16c79c764e0db`입니다. 실제 명령·raw/JSON·후보별 freeze와 `[resume-evening-working.md](C:/Users/SSAFY/Documents/Codex/2026-11-06/board-resume-evening/resume-evening-working.md)`를 연결합니다. 사용자 지정 `C:/Users/SSAFY/Documents/xenova-test-docs/2026-11-06-evening` v8 모음은 5,138개/224,235,291B로 전수 SHA 확인했고 기존61개·원본·사용자 변경 보호를 유지했습니다. 이후 진행 파일은 다음 checkpoint로 추가합니다.
+
+R40 시점에는 query v2의 16초 부모 제한이 실제 query 12초 앞의 cold API import까지 포함한 문제가 남아 있었습니다. 당시 원 오류·빈 결과·정리 미확정은 보존했습니다. 이후 준비/실제 query/정리를 분리한 v4의 실제 실행 결과는 아래 후속 절에 연결합니다. Store 정상 bootstrap 5왕복/호출50ms라는 소스 사실만으로 실보드 실패 원인을 확정하거나 값을 올리지 않습니다.
+
+### 11/07 R41–R43: 계산 발행과 적용 확인의 구분
+
+**이 시점에도 READY→PTY 주행→입력 만료 뒤 메모리 반환의 전체 기준선과 세 부하 조건은 미수락입니다.** 아래 표는 실제 진행한 단계와 남은 실패를 분리합니다. 모든 시험은 원 control 적용 기한 1초와 입력 신선도 검사를 유지했습니다.
+
+| 시험 | 실제 관측 | 판정·복원 |
+|---|---|---|
+| R41, FW23·상세 계측 on | 지도 공급→풀 점유 21.951초, 현재 실행의 StateApplied/AUTO 선택 30.189초. 원 문맥의 command 85개 중 8개가 nonzero였고 첫 값은 `v_mps=0.02`, `steer_rad=0.0002` | 실제 planner/tracker 계산과 발행 경계의 근거다. 원 1초 안 READY 18회는 모두 false, serial 534건은 모두 STOP이었다. `CONTROL_APPLY_UNCONFIRMED`, output=false. B1.0.8 dom58 복원 |
+| R42, 같은 FW23·상세 probe 미설치 | 점유 7.350초 후 StateApplied 대기 20초 만료. 전체 46.784초·지도 로컬 queue 81개 | 미수집 상세 자료는 0지연·0오류가 아니다. B1.0.8 dom60 복원 |
+| R43, R42 + 두 부가 서비스 한시 중지 | 점유 8.634초, StateApplied 24.673초. 전체 41.795초·지도 로컬 queue 119개, command 41개 모두 0 | 적용 확인 실패. 비교 도중 서비스 복원은 없었고 비교창 valid=true/passed=false. B1.0.8 dom62/execution `aacdfb6e-d287-40d9-a44a-736e5dc73a5d` 복원 |
+
+R41에서 원 AUTO issue→첫 nonzero 원문 관측은 264.339ms였습니다. 그러나 첫 g2 lifecycle은 Gateway에 640.007ms 뒤 `ACTIVATING/NOT_READY/OBSERVATION_EXPIRED`로 도착했고, 늦은 READY/명령은 원 기한이 지난 약 6.1초 뒤였습니다. 늦은 결과로 출력을 다시 열지 않았습니다. 같은 lifecycle의 raw 관측과 Gateway의 검증 후 관측 사이에는 최소 382.084ms가 있었지만, 네트워크·Paho callback 대기·검증·actor scheduling의 몫은 아직 분리하지 못했습니다. Timeline의 `publish_enter/exit`는 `_publish_control`의 RAM 등록 경계이며 실제 socket write 시각이 아닙니다. PUBACK 관측도 actor가 ticket을 확인한 시각입니다.
+
+R41 활성 표본에서 maps는 used 26,824/HWM 53,648B, paths는 used 10,512/HWM 21,024B였습니다. 현재 점유가 앞선 최고값보다 줄어든 일시 슬롯 반환은 확인했습니다. 입력 종료 뒤 새 표본으로 확인하는 전체 수명 assertion은 아직 충족하지 못했습니다. 예약 RAM의 OS 반환이나 VM 전체 메모리 감소를 의미하지 않습니다.
+
+별도 console query v4는 준비 45초·실제 query 12초·정리 5초를 구분하고, 원 실행·host·Xen unique identity guard를 유지합니다. 로컬 실제 PTY 포함 41개와 부모 연결 7개를 통과했습니다. R41–R43에서는 각각 같은 실행에 `xenova drive\r` 13byte를 한 번 쓰고 응답·lease 반환·console 자식 종료를 확인했습니다. 이 명령은 모드를 변경하지 않습니다. R41 context 누계 loads999/failures106/first_rc=-2/last_rc=0/available=true, R42 988/111, R43 1010/123입니다. 모두 CPU4 복원 뒤 읽은 부팅 누계이므로 실패 임계 구간의 현재 상태로 소급하지 않습니다.
+
+세 시험 뒤 CPU0–3, Worker·운영 mock Gateway·display-feed·runtime-log-collector 복원을 확인했습니다. A/Debian·Xen pinning·운영 모듈·원 자격은 유지했습니다. R41 archive `e361e59f3aed5a9d46c2193abc3ad2d1a4183f9d8688e7aa74a375b5b334d862`(35개/2,524,636B), R42 `ef8179006e633a2c0e4cab85961f403945ad2466a9c99f2afa27a9fd5a57efd7`(26개/1,275,650B), R43 `cdabc229fc16ab98da10b73cbbd2e78c5c8376a8c2e4644f3b033582fde1e7f9`(30개/1,362,569B)의 모든 경로·크기·hash를 회수 대조했습니다. 원 필수 기록과 과거 실패는 보존했고, 종료한 private broker와 원 자격 hash를 먼저 확인한 뒤 R31–R42의 시험용 자격 사본 72개만 정리했습니다.
+
+### 공통 MQTT 수신 시각 보완과 다음 원인 분리
+
+확인된 별도 결함은 공통 `xenova_mqtt/client.py`의 수신 시각 경계입니다. 기존 코드는 JSON·envelope·현재 binding guard·중복 검사를 마친 뒤 `Message`의 기본 시각을 찍어, 검증 대기가 메시지 나이에서 빠졌습니다. callback 진입에서 `time.monotonic()`을 한 번 읽어 기존 `received_monotonic`에 전달하도록 바꿨습니다. 현재 binding 검사는 여전히 검사 시점의 현재 시각을 쓰며, 검증 순서·최초 원인·직접 `Message` 생성의 기본값·wire·의존성은 유지합니다. 이 시각도 커널 socket 도착이나 callback 이전 Paho 대기를 나타내지는 않습니다.
+
+원 소스 `c1f53425a211eb8a2398162e249ddbc20df5f9d0ea17b2e02f01e2944cc079eb`에서 지연 주입 3반례를 재현했고, 후보 `8e0a9d5b5a9cb0d4c68f45ae658a90368d77d9036c8de2923d860e4255576653`로 client 27개·패키지 160개가 통과했습니다(실제 broker 4개 skip). 검증은 `mqtt-callback-entry-validation.json`에 연결합니다. 이 독립적인 신선도 결함을 R41 지연의 유일한 원인으로 확정하지 않습니다. 현재 보드 R44는 이전 c1 client를 고정한 별도 TCP 옵션 대조이며, 새 수신 시각 후보와 섞지 않습니다.
+
+읽기 전용 보드 검사에서는 common Paho2.1.0 socket의 TCP_NODELAY=0을 확인했습니다. C client와 DriveLinkIO의 기존 NODELAY=1, private broker의 GLOBAL NODELAY 설정과는 다른 연결입니다. R44는 이 common Gateway 연결에만 명시적인 시험용 socket-open callback으로 1을 적용합니다. 제품 기본값으로 승격한 상태는 아닙니다. 고정 [Paho2.1.0 원문](https://raw.githubusercontent.com/eclipse-paho/paho.mqtt.python/v2.1.0/src/paho/mqtt/client.py)의 socket-open 경계와 대조했으며, [Linux tcp(7)](https://man7.org/linux/man-pages/man7/tcp.7.html)의 작은 패킷 버퍼링 동작을 scheduling·전체 지연 보장으로 확대하지 않습니다.
+
+또한 시험 mapper가 Gateway와 같은 Python 프로세스에서 지도 생성·실제 codec 검증/인코딩을 실행하는 인공 결합을 확인했습니다. 보드 Python3.14.7/upb·CPU4·원 서비스 상태에서 cold1+warm30개씩 읽기 전용 측정한 warm 값은 64×32의 thread 아닌 **process CPU** 중앙 13.434ms·wall 중앙 18.136ms/최대55.028ms, 64×64의 CPU 중앙18.959ms·wall 중앙31.800ms/최대67.502ms입니다. 별도 실행의 micro 표본이며 원 통합 시험의 GIL 지연·순수 인코딩 시간·하드 상한이 아닙니다. 실제 Jetson의 외부 생산자 배치와 맞추는 mapper-child 대조를 준비하되, 원 codec·입력 나이·ID·발행 주기·차량 출력 차단은 유지합니다.
+
+### R44–R47 후속: 입력의 지속 유효성과 시험 준비 조건
+
+| 시험 | 추가로 바꾼 시험 경계 | 실제 결과 |
+|---|---|---|
+| R44 | 이전 common client 고정, 이 Gateway의 TCP_NODELAY만 0→1 | 실제 socket-open의 적용·종료 후 callback 반환 확인. 점유8.165초·StateApplied9.396초, 전체26.255초/지도queue65, command64개 모두0. 원1초 적용 실패 |
+| R45 | R44 조건에 callback-entry 수신 시각 후보8e만 적용 | 점유6.991초·StateApplied8.974초, 전체27.659초/지도queue60, command61개 모두0. 적용 실패. 이 신선도 결함 수정의 독립 타당성과 전체 실패 원인은 구분 |
+| R46 | R45 조건에 실제 mapper 생산자만 별도 Python process로 분리 | 원 world/codec·입력나이200ms·최소발행간격100ms·원ID/시각 유지. 점유7.119초·StateApplied9.534초, 전체35.545초/지도queue67, command76개 모두0. mapper 정상 종료·join 확인. GIL 결합 분리만으로는 해결되지 않음 |
+| R47 | R46 조건에 기존 `_qualified(...,held=True)`를 초기 AUTO 선택 전에 연결 | 점유5.949초 뒤 원20초 준비 대기에서 held qualification을 얻지 못함. 전체45.947초/지도queue107, AUTO 발행0·generation1·SAFE_STOP/DISARMED·failure=null·output=false. 적용 후1초 기한은 시작되지 않음 |
+
+StateApplied는 현재 실행의 사본 수락 근거이고, 최신 지도·차량 상태의 지속 유효성은 별도입니다. 기존 시험은 전자만 확인하고 AUTO를 선택했습니다. v6는 기존 신원·source·readiness lease·ready_hold 검사를 actor에서 한 번 확인하며, 불충족이면 원20초 대기 안에서 준비를 계속합니다. 새 운영 수치·READY 승격·원 generation/기한 재발급은 없습니다. 로컬 실제 machine 및 실제 C qualification 21경계를 포함한 8개가 통과했고, path owner/RTOS/clock context fixture 경계는 `bootstrap-v6-validation.json`에 명시했습니다. 제품 Gateway의 전환 규칙을 변경한 것은 아닙니다.
+
+R46 mapper child는 실제 Paho 구독→제품 VehicleSample decode→원 지도 생성/encode→별도 broker 발행을 수행했습니다. 실행18.012초의 process CPU2.153초·주 스레드 CPU1.531초, encode83회 CPU합계0.453초·wall합계2.534초를 기록했습니다. 포함 관계가 있는 비용이므로 더하지 않습니다. 이 결과는 Pi 전체 CPU나 GIL 대기의 직접 계수가 아닙니다. actor722회 중20ms 초과344/100ms 초과28, 마지막512개의 wall p95는95.797ms였습니다. 현재 자료만으로 scheduling·GIL·동기 처리의 몫을 분리하지 못해 다음 R48에서 제한된 phase wall/thread-CPU와 callback→enqueue→feed를 연결합니다. 정상/희귀 오류의 진단은 지우지 않습니다.
+
+새 common8e를 recipe 선택 12개 Python 모듈+pyproject/0644로 새 격리 root에 설치한 고정 ARM Python3.14.7/QEMU·Paho2.1.0 검증도 11개 통과했습니다. 느린 검증·현재 binding 만료·중복/무효 입력 뒤 정상 회복·원 Message 기본값을 확인했고 네트워크·VM·서비스 동작은 막았습니다. 새 후보를 포함한 전체 Gateway 로컬 회귀370개 통과/1개 skip(native state codec 실행파일 미제공), source hash 전후 불변입니다. `mqtt-receive-arm-evidence.json` SHA `b2c8aefe644a68c9d822e0ffad8413b211ff9e6f3652f9df7337d5d718ede51d`, `gateway-receive-full-tests.json/xml`에 실제 실행 환경과 명령을 보존했습니다. 정규 RPM/이미지·실차 수락은 아닙니다.
+
+R47 뒤 B1.0.8 dom70/execution `37ad3bd1-f121-41a3-aecb-c8f3402d650a`, CPU0–3, Worker·운영 mock Gateway·두 부가 서비스와 query lease/자식 종료를 확인했습니다. A/Debian은 유지했습니다. R44 archive SHA `346e7d1eb4921eaf0ad5363731ae4dcf32052fe359fdc4eab3d3cf0dbc018894`(30개/882,349B), R45 `d88fe9b6274b6a47da44d69ba1bdf87765ad73dc51e37a6a84cc70e6b4706545`(30개/839,277B), R46 `11a98415350e832e5b217211d99b035649e7d82718f2e2714a0950120d9276e8`(32개/1,073,294B), R47 `6a524fc8a9ec85672973404ab8491c8deaf6f2d65f26b70737c0cdf057d92967`(33개/1,382,649B)를 전수 회수·대조했고 비밀값 검출0입니다. 필수 기록은 보존했습니다. 사용자 지정 모음의 v9는 R45까지와 동결 제공물을 포함한5,586개/241,793,115B 전수SHA 확인이며, R46 이후는 다음 checkpoint에 추가합니다. **세 부하 조건과 전체 정상 주행·반환은 계속 미수락입니다.**
+
+### R48: CPU 사용과 경과시간, 메시지 상관 계측의 한계
+
+R48은 R47 조건에 제한된 wall/thread-CPU 계측만 추가했습니다. 지도 점유5.368초 뒤 원20초 안에 held qualification을 얻지 못했고, 전체49.828초/지도queue95개에서 AUTO 제출0·generation1·SAFE_STOP/DISARMED·output=false로 끝났습니다. B1.0.8 dom72/execution `bd355a71-2ad7-44e3-bc64-14f5ff086cea`, CPU0–3·Worker·mock Gateway·두 부가 서비스와 query 종료를 복원 확인했습니다.
+
+actor 894회의 wall 합계28.881초와 thread-CPU 합계3.729초를 기록했습니다. 마지막190회 p95는 wall84.042ms/CPU7.664ms였고, 공통 MQTT callback 마지막512회 p95는 wall51.128ms/CPU1.917ms였습니다. 직렬 경로·callback·actor 계측은 서로 포함되므로 합산하지 않습니다. 차이는 scheduling·GIL·I/O·잠금 등을 포함할 수 있으며 특정 원인의 몫이나 WCET로 단정하지 않습니다. 계측 자체의 시각 조회·작은 metadata 할당 비용도 있습니다.
+
+원 v7 계측기는 message_id를 UUID 길이로 제한했지만 실제 C `publish_as()`는 uint32 counter를 문자열로 발행합니다. 따라서 R48의 빈 callback→feed 상관은 트래픽 부재나 0대기의 근거가 아닙니다. 원자료와 `critical-timing-v8-erratum.json`을 보존했습니다. 새 v8은 원 ID를 바꾸지 않고 topic·VM·app·boot·publisher·seq와 함께 묶습니다. 실제 C encoder→공통 callback→등록 handler→제품 Runner/Machine 경로를 포함한 로컬59개가 통과했으며, R49는 이 계측기 수정만 비교합니다. 제품 wire·기한·nice·출력 권한은 바꾸지 않았습니다.
+
+R48 회수 archive SHA `88595ed5e5842e8287a8f29987ba371046558d23f95b6534f4fac3de5664430e`(1,730,416B)의 모든 member 크기·hash와 비밀값 검출0을 확인했습니다. 새 격리 ARM root의4 recipe/138파일 대조·제품82모듈·Worker9모듈·entrypoint4개 import도 통과했습니다. 다만 고정 로컬 캐시에 `libsqlite3.so.0`이 없어 전체 API/log-runtime stdlib 수락은 미완료이며, 원 실패를 `combined-provider-arm-evidence.json`에 남겼습니다. 정규 RPM·이미지·실차 수락으로 확대하지 않습니다.
+
+
+### R49: 실제 C 메시지의 수신·전달 지연과 reader 대기 후보
+
+수정된 v8 계측만 바꾼 R49에서 실제 C 메시지의 상관을 얻었습니다. 보존 표본 callback→enqueue 256개는 중앙1.269ms/p95 21.182ms/최대177.914ms, 유일하게 대응한 enqueue→feed 90개는 중앙16.481ms/p95 112.899ms/최대183.325ms였습니다. 나머지166개는 feed 미관측·덮어쓰기·거절을 이 자료만으로 구분하지 못합니다. actor 마지막166회 p95 wall95.495ms/CPU7.622ms, callback 마지막256회는 wall52.435ms/CPU2.260ms였습니다. 소표본·계측 포함이며 전체 운영 지연 상한이나 단일 GIL/잠금 원인으로 확대하지 않습니다.
+
+R49 지도 활성→점유23.192초, 전체69.367초/지도queue180개였고 원 준비20초 안에 held qualification을 얻지 못했습니다. AUTO 제출0·generation1·SAFE_STOP/DISARMED·output=false였습니다. B1.0.8 dom74/execution `dd81553a-286d-4c83-a8cf-4b5e2fcfbaab`, CPU0–3·Worker·mock Gateway·두 서비스 복원과 query13byte/lease·자식 종료를 확인했습니다. query context는 loads1334/failures165/first-2/last0/available=true인 원 부팅 누계입니다.
+
+소스에서 별도로 확인한 BindingCache reader는 writer의 JSON clone 중 같은 mutex를 기다립니다. 게시된 private root는 교체만 하는 현재 구조이므로 reader가 root를 한 번 캡처해 원 TTL·신원·row와 기존 세 nested map copy를 검사하는 국소 보완을 검증 중입니다. writer 직렬화·clone·invalidate 순서는 바꾸지 않습니다. 이 보완의 정합성과 R49 지연의 주원인 여부는 다른 판단이며, 새 후보 보드 비교 전까지 해결로 표시하지 않습니다.
+
+R49 증분 archive `6e0901f11772e8748ae96dc709990367cff50cdcd55043cbd74fd96cfd3e4a1b`의32파일/2,930,059B를 전수 회수·대조했고 비밀값 검출0입니다. 종료한 private broker와 원 자격·경로·권한을 모두 선확인한 뒤 R43–R49의 시험 자격 사본42개만 정리했습니다. 필수 기록·원 자격·다음 R50 사본은 유지했습니다. 정상 주행·입력 종료 뒤 반환과 세 부하 조건은 아직 미수락입니다.
+
+### BindingCache reader 보완과 R50 단독 비교
+
+공통 `xenova_mqtt/drive_binding.py`의 `current()`·`observation_status()`에서 writer mutex 대기만 제거했습니다. reader는 게시된 private root 참조를 한 번 캡처해 동일 객체의 원 외곽 TTL·row TTL·신원과 기존 세 app map 복사를 검사합니다. writer의 validation·JSON clone·교체·invalidate 직렬화와 원 오류는 그대로입니다. 고정 GIL-enabled CPython 및 게시 객체를 변경하지 않는 현재 생산 경로에 한정합니다. 겹친 invalidate 전에 캡처한 완전한 옛 snapshot을 반환할 수 있지만, invalidate 완료 후 시작한 새 읽기는 unavailable이어야 합니다. 영구 허가·전역 철회 barrier·free-threaded 보장을 새로 제공하지 않습니다. 기존에 shallow alias가 가능한 추가 nested 값은 trusted reader가 변경하지 않아야 합니다.
+
+원 source `4c1a6fc6cbcc3418869280c07785e5e439ada4c089f74763c1e97d228b1b203e`의 실제 clone 대기3반례를 재현하고, 새 `4f5aadbbd26bbabcc22372c8d937017dc1d38d00f2081e6bc9cf4abdb2c46525`의 집중14개·MQTT174개/4skip·Gateway370개/1skip·Worker관련469개/1skip를 통과했습니다. 집중14개는 MQTT 전체에 포함하므로 합산하지 않습니다. 새 coherent clone에 한 파일을0644로 교체한 실제 ARM Python3.14.7/QEMU 경합4사례도 통과했고, 소유 thread1→1·외부 효과0·source drift0을 확인했습니다. `drive-binding-reader-local-validation.json`과 `binding-reader-arm-validation.json`에 명령·원 실패·skip·기존 경고를 보존했습니다. 새 원장·영구 cache·lock·dependency·전체 deep copy는 추가하지 않았으며 겹친 reader가 끝날 때까지 이전 작은 snapshot 참조가 살아 있을 수 있습니다.
+
+보드 R50은 R49의 FW23·CPU2·두 부가 서비스 중지·v8 계측을 고정하고 이 reader 한 파일만 시험 소스에 적용했습니다. 지도 점유14.249초, 전체60.598초/지도queue146개였으며 held qualification20초를 채우지 못했습니다. AUTO 제출0·generation1·SAFE_STOP/DISARMED·output=false였습니다. callback→enqueue 보존256개 p95는19.371ms, enqueue→feed 유일대응102개 p95는174.950ms였습니다. R49의21.182/112.899ms와 비교해 전체 지연이 해결됐다고 하지 않습니다. 로컬에서 확인한 불필요한 mutex 대기 제거와 실보드 전체 실패 원인은 구분합니다.
+
+R50 뒤 B1.0.8 dom76/execution `7a148c64-c89e-457b-a259-a565089105de`, CPU0–3·Worker·mock Gateway·두 서비스와 query13byte/lease·자식 종료를 복원했습니다. query context 누계는1245/143/first-2/last0/available=true입니다. archive `82eaab8f1bb44846e1d0c529650c9920e0fdb48293ac20dbf99229543eae18eb`의33파일/2,648,709B를 회수·대조했고 비밀값 검출0입니다. 다음 R51은 운영 priority를 건드리지 않는 시험 cohort nice 비교입니다. 사용자 모음 v10은 R49까지 포함한6,016파일/253,246,494B 전수해시 일치이며 원61개·사용자 파일·이력은 보존했습니다. R50 이후는 다음 checkpoint에 추가합니다.
+
+### R51: thread nice와 autogroup의 구분
+
+R51은 R50 후보를 유지하고 시험 Gateway cohort의 기존 nice 옵션만 -5로 선택했습니다. device·mapper·observer는 작업과 thread 생성 전에 실제 nice0으로 되돌렸습니다. 알려진 Gateway native TID10개의 nice-5/scheduler0, 세 자식의 nice0 및 동일 `/autogroup-9742 nice 0`을 한 번씩 확인했습니다. 운영 PID의 우선순위·Xen pinning은 변경하지 않았습니다. 이 비교는 actor 한 thread만의 효과가 아니며, 짧은 보호조회 자식은 cohort의 nice를 상속할 수 있습니다.
+
+전체45.587초/지도queue58개에서 원25초 점유 확인을 통과하지 못했습니다. AUTO 제출0·generation1·SAFE_STOP/DISARMED·output=false입니다. callback→enqueue 보존201개 p95 5.647ms, enqueue→feed 유일대응75개 p95 50.848ms, actor 마지막181회 wall p95 58.133ms/CPU5.709ms였습니다. 일부 Gateway 경과시간은 작아졌으나 정상 입력·점유가 함께 진행하지 않았으므로 성능 수락으로 세지 않습니다. 가상 장치·생산자가 같은 autogroup 안에서 상대적으로 불리해졌을 가능성은 가설이며, 단일 표본으로 확정하지 않습니다.
+
+보드의 별도 읽기 전용 관측은 kernel6.18.33-v8, autogroup enabled1, CPU controller는 available이나 root/system.slice의 활성 subtree controller는 memory/pids였음을 확인했습니다. [Linux sched(7)](https://man7.org/linux/man-pages/man7/sched.7.html)은 thread nice의 같은 task group 내 효과와 autogroup 전체의 상대 배분을 구분합니다. 문서만으로 이 보드의 지연 몫을 계산하거나 CPU 보장으로 승격하지 않습니다. 새 독립 시험 세션의 group 배분을 비교할 수 있는지 권한·원상 복구부터 확인하며, 전역 sysctl·운영 cgroup을 변경하지 않습니다.
+
+R51 뒤 B1.0.8 dom78/execution `5cb5cff2-a229-4097-bdac-f3e073ceece5`, CPU0–3·Worker·mock Gateway·부가 서비스와 query 정리를 복원 확인했습니다. archive `76c812204b69a4653883f81049494e4f55a6678325573445e483334c28c64410`의32파일/2,130,765B를 전수 회수·대조했고 비밀값 검출0입니다. 원 필수 기록과 실패를 유지하며 정상 주행·반환·세 부하 조건은 계속 미수락입니다.
+
+### 격리 ARM 설치의 SQLite 의존성 후속 확인
+
+이전 고정 캐시의 `libsqlite3.so.0` 부재를 제품 결함이나 설치 성공으로 덮지 않고 보드의 읽기 전용 inventory와 대조했습니다. DB 연결·network·subprocess를 차단한 probe에서 Python3.14.7/SQLite3.51.3, `_sqlite3` SHA `f178c827192e115c4e6431a0ca60536cda09060dddbd7243da446249248a57d0`를 확인했습니다. 이는 고정 RPM에서 추출한 확장과 같습니다. 기존 보드 library `/usr/lib/libsqlite3.so.3.51.3`(1,525,864B/0755/ARM64/SONAME libsqlite3.so.0) SHA `a7b12fd67093ab9889bfe1eab6b70b07f463f8268a201878b515b4903a0d00e8`만 새 PC fixture로 회수했습니다. DB·자격은 읽거나 전송하지 않았으며 운영 파일 변경도 없습니다. RPM DB를 읽지 않아 이 library의 package owner는 unknown입니다.
+
+새 coherent root의 기존138개 제공물에 이 library와 상대 SONAME 링크만 더했습니다. Binding4f5/common8e 및 모든 원 payload bytes/mode를 확인했고, 필요한 SQLite심볼85개·외부 strong심볼89개의 고정 의존성을 대조했습니다. 실제 ARM/QEMU에서134개 Python compile·제품101모듈/stdlib15개·API/log/main의 명시적 mock assembly가 통과했습니다(26.444초). 실제 reader 경합4사례(2.639초)와 별도 `:memory:` SQL fixture1개(0.684초)도 통과했습니다. 메인 import audit의 외부 효과 시도0·thread1→1, 실제 로드된 library가 새 격리 root 사본임을 확인했습니다. 원 실패 root와 `/proc/self/maps` 경로를 과도하게 resolve한 첫 probe 오류도 보존했습니다.
+
+최종 근거는 `combined-sqlite-complete-arm-evidence.json` SHA `b72a37588af49eb67204d16bddef5d8c89626b11888ec5e60384be04f909ab83`입니다. 이는 보드 설치 binary로 보완한 격리 ARM 검증이며 canonical RPM/package QA·전체 이미지·API lifespan/운영 서비스·실차 수락은 아닙니다. 제품 dependency/recipe 버전은 변경하지 않았습니다.
+
+### R52–R53: 시험 그룹 배분과 중복 서비스 조회
+
+| 시험 | 실제 관측 | 구분 |
+|---|---|---|
+| R52, 자기 새 session의 autogroup만0→-5 | 점유8.244초, 전체48.089초/지도queue72, AUTO0·generation1·SAFE_STOP/DISARMED·output=false. 원20초 준비 확인 중 `TimeoutExpired` | 자기 SID/PGID·단일 thread·부모와 다른 group을 확인한 뒤 적용했고 종료 시 같은 group0 readback 완료. 운영 priority/전역 sysctl·cgroup 변경0. 정상 수락은 아님 |
+| R53, R52 조건 + 중복 systemctl 조회만 제거 | 점유2.765초, 전체45.414초/지도queue82, AUTO0·generation1·안전 상태 유지. 원20초 held qualification 대기의 `TimeoutError` | 불필요한 시험 관측을 제거한 뒤에도 제품 입력의 지속 유효성이 부족함. 단일 표본·서로 다른 tail을 일반 성능 개선율로 확대하지 않음 |
+
+시험 driver는 `pi_port==18886`을 먼저 강제한 뒤, 반복 `physical_guard()`에서 `systemctl is-active` 결과와 `pi_port!=18886`을 함께 검사했습니다. 따라서 지원 모드에서 그 반환값은 거절에 쓰일 수 없지만, 조회 timeout은 원 예외로 전파됐습니다. 원 source/포트 fence를 실행한 독립6경계와 새 후보18개 집중 회귀로 확인했습니다. 새 `board_isolated_guard_timeline_trial.py` SHA `543a403d18847474b0ff647f289086b541ecc0eff61b8e8d148d8cbd225c3232`는 그3줄만 제거했습니다. 포트·USB/ACM·PTY 독점/FD·Authority·부모의 mock 정지/복원·원 기한은 유지합니다. R52 실패의 실제 cmd는 저장되지 않아 이 조회를 가장 강한 추론으로 분류하며, 제품의 clock 지연 원인과 합치지 않습니다.
+
+R52 callback→enqueue p95 2.926ms/유일한 enqueue→feed p95 37.699ms, R53은3.641/54.252ms였습니다. 정해진 tail·조건 안에서 얻은 계측 포함 값이며 queue/kernel/GIL의 개별 지연 몫이나 운영 상한이 아닙니다. group 적용·복원 증거의 complete와 전체 주행 passed는 별개입니다. R53의 준비 전용 memory parent 초안은 한 번도 실행하지 않았고, 정상 재시험으로 이름을 재사용하기 전 정확7파일/109,140B와 SHA를 `history-r53-memory-pending-before-guard-retry`에 보존했습니다. 그 보조 시험의 로컬 수락을 실보드 결과로 세지 않습니다.
+
+R52 뒤 B1.0.8 dom80/execution `939f1d93-4550-4405-890c-d2aa4d3f84f9`, R53 뒤 dom82/execution `c01def2b-96f8-4563-ae5c-1cc8f67ba7f1`와 CPU0–3·Worker·mock Gateway·부가 서비스·query lease/자식 종료를 확인했습니다. R52 archive `da93872e0d6cb3d2e272a86aae2774474932cde375ad6f5ce992b594ed30ea17`(33파일/2,485,174B), R53 `a11ec7777dfdc71b146e0d6aa86777f988a41a7e7a1512f29e94f8ebeb6d804d`(33파일/2,427,839B)를 회수·전수 대조했고 비밀값 검출0입니다. A/Debian·원 자격·필수 기록은 유지했습니다.
+
+### 기존 C clock 표본의 범위와 다음 계측
+
+`r52-clock-width-audit.json` SHA `d2adb10d7173c4ccad5461cd1ed6bcaa89de11714f6685376da4b2d73f1a0f33`은 실제 FW23/config·a76 source·원 raw offset/strict context를 대조했습니다. raw16행 중 확인 구간6행을 분리하고, 신원 거절 phase1의 g0를 reply echo와 같다고 가정하지 않았습니다. 확인된 phase2의 residual full width는43.113/100.230/126.147/392.290ms, phase5는11.691ms였습니다. 판정식은 `(g3-g0)-(p2-p1)`이며 실제 한도20,000us는 half-RTT가 아닙니다. Pi 처리26.410~77.093ms는 이 식에서 이미 상쇄됩니다.
+
+해당 표본의 C callback 진입→판정은191~346us였습니다. 네 시각만으로 C 송신 전·전송/broker·guest pump·Pi stamp 뒤 socket 대기를 각각 분리하지 못합니다. guest state owner(priority12)는 poll0→probe/상태 작업→sleep2ms이며, 별도 v1 IO(priority8)의 wakeable10ms와 구분합니다. 다음 후보는 원 값·기한·poll 주기를 유지한 진단 전용의 bounded phase metadata와 별도 읽기 전용 `xenova_clock` 명령입니다. 기존 `dl_report`는 종료 뒤 전용이므로 현재 `xenova drive` 조회가 이 새 표본을 이미 제공한다고 주장하지 않습니다. 이 문단 작성 시 새 C 계측·FW 후보·명령의 보드 수락은 미수행이며 정상 주행·반환·세 부하 조건은 계속 미수락입니다.
+
+
+### R54 준비: 같은 원 clock 요청의 송신·pump 계측
+
+새 C `lattice_input.c` SHA `f52651d120d38c1ca9b30fa8ac381780b0db263a7c8eb0c13c3cbd982e5c8c30`는 INPUT 진단 설정에서만 원 probe의 encode/TX·state pump·다른 송신 구간을 작은 metadata로 보존합니다. 기존 오류·송신 결과·시각·기한은 그대로이며, 추가 clock 읽기 실패는 별도 진단 오류로 남습니다. state owner가 쓰고 shell은 slot CAS로 한 행만 복사·반납한 뒤 출력합니다. 첫2·완료 tail4·유효 width peak2의 8슬롯이며, `no_reply`를 네트워크 미송신의 확정 근거로 해석하지 않습니다. 알려진 값의 presence mask가 없는 raw0은 성공·관측0이 아닙니다.
+
+동일 단일 source SHA가 base/diagnostic ARM snapshot·receipt·FW28 manifest에 있음을 대조했습니다. aggregate fingerprint `48dafee6180124aba79a87639ea7bbf83293948cd8af5df68139324119484716`는 파일 전체 목록의 해시이므로 단일 C 해시와 구별합니다. base→전체 INPUT 진단의 text +10,201B/data -1,992B/bss +4,103B는 기존 진단도 포함한 차이입니다. row360B·`ct_shell` 직접 frame560B/예약 shell4096B이며 전체 호출 체인의 최고 스택 사용을 측정한 것은 아닙니다. shell priority14·TX ring1024B·TX timeout500ms를 유지하고 느린 콘솔의 CPU/출력 대기까지 제거했다고 하지 않습니다. 질의는 시험 소유자 종료·CPU4 복원 후에만 실행합니다.
+
+Pi의 새 시험 전용 collector는 이미 해석된 원 probe의 VM/execution/app/sequence/g0/p1을 같은 p2와 Paho의 실제 QoS0 완료 콜백에 연결합니다. 512행·손실/미확정이 명시되고, actual Paho2.1·격리 broker·부분 송신/EAGAIN·재접속·원 오류·정상 회복 등35개 집중 회귀가 통과했습니다. `on_publish`는 소켓 송신 제출 관측이며 broker·guest·장치 수신 확인이 아닙니다. 선택 clock의 시간 읽기·metadata·기존 callback mutex/ReasonCode/Properties dispatch 비용이 추가됩니다. actor/socket 소유자 join을 확인한 뒤 저장하며 원543a driver의 off 경로 전체 AST를 보존합니다. 동결은 `pi-clock-send-freeze.json` SHA `dae7e75aa5ad8fc76e889ce1143c4249e08599319bdbc65c09ad5658c8873dd3`입니다.
+
+FW1.0.28 archive `6887b27e1ac862e3f7c52e0dc7409fc094282677cd0310c1b805754869ef259d`(2,823,303B), manifest `b6b100e9a60ddef52c5a078b2c25afcafa8bbff9e812a95b43506bd4062c29b6`, bin `81a07085d51376910babe3d61f7b8b12b097d90fe3e5ea673de72697714fee32`를 보드의 root 전용 시험 디렉터리에 stage하고 전수 바이트/0444/16MiB·1vCPU를 확인했습니다. 기존 catalog·선택 firmware·운영 설치는 변경하지 않았습니다. 이 절 작성 시 B는 원1.0.8이며, 새 `xenova_clock`의 별도 strict query 수락을 마치기 전에는 R54를 시작하지 않습니다. 기본20ms/원1초 적용/원20초 준비와 출력 보호를 유지합니다. 원 FW26의 C source는 a76이며, 현재 f526로 만들어졌다고 기록하지 않습니다. 읽기 검토 proof `clock-transport-independent-read-review.json` SHA `1fbc39d9b9d30b351dba30ae20e19f27b7bd2cd6f9f0fb752b9744518acc6db5`는 재실행 시험이 아닙니다.
+
+
+<a id="clock-r54-20261107"></a>
+### R54 실제 clock 구간·새 명령 수락·복원
+
+R53과 같은 source4f5/common8e·16MiB/1vCPU·pCPU2·원20ms clock width/20초 준비/1초 적용 한도에서, 진단 C와 Pi 관측만 결합했습니다. 실제 점유는 world 입력 활성 후5.048초에 확인했습니다. 표본의 used/high-water는 maps26,824/53,648B, paths10,512/10,512B, search27,312/27,312B였습니다. 원 계산·pool 사용 근거이며 고정 예약 RAM의 OS 반환이나 입력 만료 후 전체 반환을 확인한 것은 아닙니다. 전체47.783초/지도 queue103에서 held qualification이 끝내 충족되지 않았고 AUTO 제출0·generation1·SAFE_STOP/DISARMED·output=false를 유지했습니다. 정상 주행 수락으로 세지 않습니다.
+
+새 `xenova_clock`는 원7필드 context·lease·45/12/5초·한 번13B 입력을 유지한 별도 helper로 실행했습니다. 로컬36개/실제 PTY 회귀, 최대 parent 결과30,597B<32KiB 및 raw16KiB 초과의 실패·정리 구분이 통과했습니다. 슬롯 간 marker가 섞여도 수락하던 새 parser의 빈틈은 전체0..7/triplet 순서 검사로 보완했습니다. 큰 pre/post PTY 시험의 실패는 외부 stub의 cold-start·부분송수신 경계에서 분리했고 원 query의 기한을 늘리지 않았습니다. 동결 `clock-query-freeze.json` SHA `3ff9bff22a0f24fc8a6ee430b6aca28930b57314ffa19daa40f81072de52e5be`입니다. 실제 B 질의는7,169B·8개 원 record·전체 marker 순서/부분·충돌0으로 완료됐고 helper/console join·lease 반환을 확인했습니다. 질의 완료는 clock/READY/출력 허가가 아닙니다.
+
+| 원 probe seq | C residual width(ms) | 같은 원 요청의 Pi p2→socket 제출(ms) |
+|---:|---:|---:|
+| 74 | 54.386 | 23.376 |
+| 76 | 27.821 | 2.196 |
+| 131 | 85.201 | 1.283 |
+| 133 | 217.599 | 15.554 |
+| 134 | 10.575 | 1.380 |
+| 129 | 17.539 | 1.326 |
+| 127 | 374.100 | 12.475 |
+| 80 | 320.989 | 18.109 |
+
+8개 C 행은 원 VM/execution/app/seq/g0/p1/p2로 Pi의 유일한 한 행씩과 결합했습니다. Pi58행은 error/drop/unconfirmed0·owner join/callback 복원 확인, 전부 publish 반환 전에 실제 on_publish가 있었습니다. p2→on_publish의 median4.652445ms, nearest-rank p95(`ceil(.95*58)`번째)29.360217ms, max31.539831ms입니다. 원 `r54-clock-phase-joined.json`의28.834278ms는 `floor((n-1)*.95)` 방식의 lower quantile입니다. 값은 보존하되 nearest-rank p95와 구분합니다. on_publish는 커널 socket 제출 관측이며 broker/guest 수신 ACK가 아닙니다.
+
+이 8개에서 C encode14~16us, TX 함수164~214us, 최대 poll gap2.474~2.754ms, other_calls0이었습니다. 따라서 probe 이후 다른 송신이 state owner를 길게 막았다는 가설을 이 표본이 지지하지 않아 송신 순서를 바꾸지 않습니다. C TX rc0도 TCP 큐 수락이지 ring/backend 전송 완료가 아닙니다. 고정 Zephyr는 queued send의 -ENOBUFS를 내부 재전송으로 넘길 수 있습니다. 최초 RTO200~299ms와 후속×1.5가 현재 수백ms 지연의 후보이지만 재전송을 실제 확인한 것은 아닙니다. C first/tail/peak8행은 전체 probe 분포가 아니고, boot누계 probes204/no_reply153에는 Gateway 종료 뒤 질의 준비 구간도 포함되어 이를 시험 packet loss로 읽지 않습니다. Pi p1 이전 socket/owner/Paho 대기와 양방향 TCP·broker·Xen/guest 도착 경계도 남습니다. width에서 Pi interval을 뺀 산술 나머지를 단방향 network 지연으로 부르지 않습니다.
+
+사후 읽기 전용 증거는 private broker PID435247/start4365859·SID/PGID435247·thread nice0·autogroup10788 nice0을 확인했습니다. driver는 별도 autogroup11022 nice-5입니다. 한 mosquitto가18885(world)/18886(Pi)를 함께 소유합니다. set_tcp_nodelay true는 이미 요청했고 실제 binary는 `mosquitto -h`의2.1.2/SHA `768b10d0847c54dc3103d94a112212c222621d29632db44f8a17fb58b71579f0`입니다. 설정 요청과 각 socket 옵션의 실제 성공은 구분합니다. lifetime schedstat는 active-phase 지연 증거가 아니며 기존 sampler는 broker PID를 수집하지 않았고 sched_schedstats=0이라 대기는 unknown입니다. 이 두 사후 증거는 R54 archive를 만든 뒤 별도 out/JSON으로 보존했습니다. 다음 대조는 firmware·프로토콜·원 기한을 유지하고 이 소유 broker group만 맞춰 기존 v4에 그 PID를 추가하는 시험입니다. 운영 broker와 정책은 바꾸지 않습니다.
+
+R54 뒤 원 B1.0.8 dom84/execution `7377b9b6-b5ed-4de0-987c-ce7a23c359ae`, CPU0–3·Worker·mock Gateway·두 부가 서비스·원 query/자식 정리를 확인했습니다. archive `65b8d4604359a6945dc57f5ffd435ec340e075e316dbaf8f4ee459e69d4b6ab0`(35파일/2,608,308B; 압축268,509B)를 전수 회수·대조했고 secret scan0입니다. 이후 exact private broker를 종료하고 원 자격 해시/경로/0600을 확인한 임시 사본6개만 정리했습니다. 원 ledger/자격 삭제0·A/Debian 조작0·실제 차량 출력0·운영 설치/commit/push0입니다. 전체 READY·PTY 주행·만료 후 반환과 세 부하 조건은 아직 미수락입니다.
+
+
+<a id="r54-launcher-guard-erratum"></a>
+### R54 시험 런처 검증 정정과 R55 준비
+
+R55 준비 중 root 작성 생성기의 오류를 확인했습니다. source 존재 검사의 `for name`을 고를 때 실제 body 대신 같은 loop 변수명만 사용하여, R54 launcher의 원 산출 경로16개 `lexists` 사전검사를 root 아래 helper 이름24개 검사로 잘못 바꿨습니다. AST 대조도 두 loop의 iterator를 모두 비워 그 변경을 놓쳤습니다. **R54 launcher 전체가 승인된 변경만 보존됐다는 기존 검증 주장은 잘못됐으며 철회합니다.** 원 R54 source·FROZEN JSON·실패 근거는 수정하지 않았습니다.
+
+독립 읽기에서 원 session 보호 함수13개, 같은 key의 기존 결과·key `open('x')`, 원 work/authority `mkdir(exist_ok=False)`, 증거·로그의 배타 생성, source24개 hash·session hash, CPU/optional guard의 개별 사전검사와 실행 중 serial/격리 포트/PTY descriptor/SAFE_STOP 출력 보호는 유지된 것을 확인했습니다. 실제 R54도 출력980개가 모두 STOP·positive drive0, trial thread0, lease/자식·CPU·원 B·서비스 복원이 확인됩니다. 다만 이 결과로 과거의 모든 경로 부재나 덮어쓰기 없음을 소급 증명하지 않습니다. stale/partial 산출물이나 dangling symlink를 VM 변경 전에 모두 거절한다는 사전 보장이 누락된 결함입니다. 운영 경로의 실제 덮어쓰기나 중복 실행을 재현한 것은 아닙니다.
+
+새 R55는 body의 `lexists`와 `is_file`로 loop를 유일하게 구분했습니다. R53의 원16개 경로와 새 broker guard5개 경로, source25개를 각각 첫 mkdir 전에 검사하도록 복원했습니다. 실제 frozen launcher AST만 격리 ext4 fixture에서 실행해 기존 오류1회 재현·21경로의 파일/디렉터리/dangling symlink 거절63회·누락 source25개 거절·정상 빈 경로1회, 총90개를 확인했습니다. 독립 읽기로 실제 iterator·4script/25dependency SHA와 원 CPU4 선복원/owner 정리를 대조했습니다. `r55-launcher-path-regression.json`에 명령 범위와 세 source SHA가 있습니다. 이 회귀는 실제 VM/서비스/네트워크를 실행한 시험이 아닙니다.
+
+R55의 별도 test-only `broker_group_guard.py` SHA `2a87645bdbedee580f3065ad109c8a3ffee804e4d88410e7bc0ecfa62322ea2c`는 exact PID/start/session/group·실행/설정 경로를 확인한 소유 private broker 한 개만 대상으로 합니다. 원 프로세스/thread nice0과 두 포트·firmware·원 기한을 유지하고 group0→-5→0만 비교합니다. 독립180초 watchdog·parent EOF/guard 종료·PID 교체·flush/close 최초 오류·정리·0600을 로컬35개로 검증했습니다. WSL autogroup 미지원은 실제 쓰기 성공으로 세지 않았습니다. 실제 target의 읽기 전용 import/proc 확인에서 thread1→1·외부 효과0·그룹0·아직 그룹 쓰기0을 확인한 뒤에만 시험을 시작했습니다. 일반 로그/필수 저장이나 운영 broker 정책을 수정한 것이 아닙니다. 최종 수락에는 driver passed 외에 broker의 comparison_complete와 복원·join 확인이 모두 필요합니다. 이 절 작성 시 R55는 진행 중이며 결과를 미리 수락하지 않습니다.
+
+
+<a id="clock-r55-20261107"></a>
+### R55 broker 배분 대조: 원복 완료, 정상 기준선 미수락
+
+동일 FW28/source4f5+8e·C/Pi/query·원 기한·가상 장치에서, private broker PID461141/start4639548의 group11412만0→-5→0으로 바꿨습니다. 두 포트18885/18886가 같은 broker를 사용하므로 지도·Pi 전달을 함께 바꾼 대조입니다. process/thread nice0·원 단일 thread를 유지했고 parent/독립180초 watchdog의 ready·applied ACK·명시 원복·join·comparison_complete를 실제 확인했습니다. 기존 v4는 Gateway threads 관측을 유지하며 이 broker PID만 추가 추적했습니다. `/proc` CPU ticks는94→217(100Hz)이지만 sched_schedstats=0이므로 raw 누계의 변화로 scheduler 대기를 추정하지 않습니다.
+
+실제 pool 점유는 입력 활성 후6.784초에 확인했습니다. 표본의 maps used/HWM26,824/53,648B, paths10,512/10,512B, search27,312/27,312B입니다. 전체44.282초/지도 queue70에서 held qualification이 충족되지 않아 SAFE_STOP/DISARMED·generation1·AUTO 제출0·출력 false로 끝났습니다. R54와 총 시간·queue 수가 달라도 단일 대조로 성능 개선율이나 악화를 결론내리지 않습니다. **broker 배분만 바꾸는 것을 해결책으로 채택하지 않습니다.** 정상 READY·주행·만료 후 반환과 세 부하 조건은 계속 미수락입니다.
+
+같은 원7필드로 결합한 C8행에서 width 최대372.627ms, TX 큐 수락 함수171~296us, 최대 poll gap2.458~2.866ms, other_calls0이었습니다. Pi64행 중63개는 on_publish 관측·1개는 latest_slot_replaced 미확정으로 보존했습니다. 완료63개의 p2→on_publish median3.768638ms/nearest-rank p95 42.933873ms/max79.264968ms입니다. 이 callback 시각은 실제 kernel send 시각이 아닙니다. 고정 Paho는 마지막 양수 send 반환 뒤 mutex/dispatch를 거쳐 callback을 부르므로, 이미 넘긴 데이터는 이후 scheduling 중에도 전달됩니다. 실제 seq148은 C width8.576ms보다 Pi callback 관측24.599ms가 늦고, seq86은23.609/28.540ms입니다. 따라서 두 값을 빼서 지연의 필수 포함 구간이나 network 소요를 계산하지 않습니다. R54도 같은 해석 한계를 적용합니다.
+
+새 query는7,168B·8행·부분/충돌0과 lease/console/helper 정리를 확인했습니다. source/기한을 바꾸지 않았고, 원 broker group0·CPU0–3·두 부가 서비스·mock Gateway·Worker·B1.0.8 dom86/execution `6bf9751b-25c3-4b20-83f0-67342d3b454c`를 복원했습니다. archive `44fe73304f9ee24c729c3e390a2bbec3eade9e639bc319003f1f3cc9a6dae2ba`(42파일/2,593,035B; 압축264,600B)를 전수 회수·대조했고 secret scan0입니다. private broker 종료와 원 자격 해시·0600을 확인한 임시 사본6개 정리도 끝났습니다. A/Debian·원 자격/ledger·운영 설치·실제 차량 출력·commit/push는 변경하지 않았습니다.
+
+다음 관측은 추측으로 새로운 배분을 반복하지 않고 기존 설치 도구의 kernel TCP 정보를 사용합니다. 실제 `/usr/sbin/ss`는 iproute2-6.19.0/SHA `30d6d0fd1dda514422fbed44d7f775d9b7096c698c3bd55ac52859574cb596a4`이고 격리18886 필터의 -i/-o/-e/-m 조회가 rc0으로 지원됐습니다. 당시 시험 연결은 이미 닫혀 출력이 비어 있었으며 이를 재전송0이나 기능 수락으로 읽지 않습니다. 새 패킷 도구·CAP_NET_RAW·본문/자격 수집 없이 별도 유한 sampler를 준비합니다. fixed TCP/RTOS 경계는 `r54-tcp-source-boundaries.json` SHA `e705e5d8fa74971bb2e9c4e61b7e67ba62829c185b2b1d086a7421bb2434a5fd`에 실제 source/config full hash·함수·행과 미확정 가설을 기록했습니다.
+
+
+<a id="clock-r56-20261107"></a>
+### 2026-11-07 R56 — host TCP 관측과 종료 단계 오인 분리
+
+R56도 정상 READY·PTY 주행·입력 만료 뒤 메모리 반환 baseline은 통과하지 못했다. 61.027초 동안 지도139개를 공급했고, 실제 지도·경로·탐색 풀 점유는 원 표본에서 증가했다. 정상 고부하·A만 지연·양쪽 공통 입력 한계의 세 부하 조건은 아직 실보드 미수행이다. 실패를 정상 완료로 바꾸거나 시각·작업 한도를 늘리지 않았다.
+
+| 실제 연결·후보 | 확인 근거와 한계 |
+|---|---|
+| 같은 제품 후보 | FW1.0.28 manifest `b6b100e9a60ddef52c5a078b2c25afcafa8bbff9e812a95b43506bd4062c29b6`, bin `81a07085d51376910babe3d61f7b8b12b097d90fe3e5ea673de72697714fee32`; C/Pi clock·query와 MQTT8e0a/Binding4f5a 후보 유지. 원 R54 profile인 private broker group0으로 돌아가 ss 관측만 추가했다. |
+| 시험 실행 | B dom87 / execution `35b77e71-8c90-4c51-8a45-c6b0d7999e78`. 같은16MiB·1vCPU·pCPU2, dom0 Linux CPU2·optional 서비스 유한 중지·원 guard·예산·지도·PTY 조건 유지. |
+| 실제 계산·점유 | world enabled48719.159599→점유48735.562496:16.403초. `drive_maps`: seq301 used/HWM0/0→seq392 26824/53648B, `drive_paths`0/0→10512/10512B, `drive_search_nodes` seq312 0/0→seq392 27312/27312B. 같은 guest boot/publisher의 원 표본이다. 반환·완주 근거는 아니다. |
+| 새 host 관측 | 기존 target `ss`6.19.0, binary SHA `30d6d0fd1dda514422fbed44d7f775d9b7096c698c3bd55ac52859574cb596a4`; test-only sampler `0769392d7160fc1229869d20728b6836c69edab55eae0a0108a5bfe3a07963db`, freeze `584b1557f3803e8d87456f1dec46616e8210ebb75be61e213992aa7abd7e18d9`. local26PASS4.010초·절대기한 수정 독립 확인 뒤 실행. |
+| 관측 범위 | 원 부모 end를 넘겨1Hz 이하로 격리18886 TCP metadata만 수집. packet/credential/body·raw capture·새 의존성 없음. 47sample 중44observed,3CALL_TIMEOUT이며 ss child 전부join·collector 수명 완료. 결과 SHA `e73a50c76cbabaf6735ec955c0b7e259431ad4278e1433f2a084bc7a0b828e4a`. 1Hz는 짧은 정체를 놓칠 수 있고 관측 비용도0이 아니다. |
+| 실제 socket 대응 | broker 연결 metadata와 `lattice_input.state()`를 함께 대조했다. B49572=`…-state-62bc…`는 binary Clock/StateApplied, B56078은 공통v1 runtime/control/events, B63277은 telemetry. host54551은 Pi DriveLinkIO이다. 명칭이 아닌 실제 client ID·호출자로 구분했다. |
+| 큐·재전송 | Clock socket의 broker Recv-Q 최대390B. 공통v1·telemetry Recv-Q 최대10640/25849B는 별도 흐름이다. 16201B는 **Pi DriveLinkIO→broker**의 broker Recv-Q이고 Gateway client Recv-Q는196B, Send-Q는1276B이다. 일부 host↔host 흐름의 `bytes_retrans` 누계 증가도 관측했으나 개별 ClockProbe 원인으로 귀속하지 않는다. guest 방향의 해당 필드 부재는 unknown이며0으로 채우지 않는다. |
+| C/Pi 원 시각 | C8행 모두 원 VM/execution/app/seq/g0/p1/p2에 맞는 Pi 관측1개와 결합. Pi clock_offers85/진단수명 완료. C 폭은 첫/꼬리/peak 편향 표본이며 최대307.019ms. 성공8250/7479µs 외 >20000µs인6개는 기존 -ETIME. 상행·하행 offset 경계 변화가 각각 관측돼 한 방향의 원인으로 확정하지 않는다. |
+| 원 보호·실제 효과 | generation1 SAFE_STOP/DISARMED/outputfalse, 보존된serial1366표본의 source는 모두None(STOP 경로). 종료 STOP은generation2이며 앞선 정상 주행 성공이 아니다. 실제 차량 출력0. |
+
+추가로 종료 단계 fixture 오류를 분리했다. `SAFE_STOP_BOOTSTRAP_CHANGED`는 준비20초 대기가 끝난 뒤 cleanup의 보호 요청이 만든 PENDING을, 남아 있던 `select_auto` 분기가 예상 밖 상태로 취급하는 순서였다. R56의 대기 끝까지 actor2604회는 DISARMED로 관측됐고 마지막end48755.590795 뒤 cleanup 요청48756.531·gen2 STOP48756.609959가 나온다. 따라서 이 부수 오류가 준비 대기 중 actor를 먼저 죽였다고 해석하지 않는다. 원 TimeoutError·thread 실패·Authority 기록을 모두 보존하며, 새 fixture 후보에서 종료 선택의 수명만 국소 보완한다. 제품 보호·실제 준비 조건을 완화하는 수정은 아니다.
+
+Clock의20ms 폭/1초lease가 실제 준비·pose gate로 연결돼 있다는 근거와, 전체 실패의 단독 원인을 확정했다는 주장은 구별한다. R55 private broker group 대조는 해결책으로 채택하지 않았다. 다음 좁은 관측은 기존 Pi binary RX owner의 `_network_once` 진입 gap·wall·thread CPU이며 원 처리·반환·기한을 유지한다. 새 우선순위·pool·retry·한도 변경부터 하지 않는다.
+
+R56 정리·복원은 끝났다. query13B의8개행·응답 순서·원 lease 반환·console/helper join, CPU4 선복원, optional 서비스·operating mock Gateway·Worker 복원, B 원1.0.8 dom88/execution `718d773c-8ddc-4680-a238-f7feb538c2ec`·CPU 검증을 확인했다. 원 A·Debian·자격·Xen 정책은 변경하지 않았다. private broker480708/start4846748 종료 뒤 root0600인 임시 자격6개만 원본해시를 대조해 정리했다. backend가 참조하는 source-r56과 필수 기록은 남겼다.
+
+원자료는 `evidence-through-r56.tar.gz` SHA `99d94900a496552678af46f5ba6e0a5eb1cd169d6d6768b894fd402ff227a18a`, 39파일/3,978,304B이며 전수 hash·실제 credential scan0을 확인해 회수했다. 후속 정리 stdout은 `r56-broker-closed.out` SHA `e2d4dc25e97606163c99bb193d1c2b7ac859bf1c9f561b8ae3d443b4982c3f8c`, `r56-credentials-cleaned.out` SHA `f48e1a55435778b3f353f4acdcc763408737535d909230d99f00169dc3242ba5`이다. 전송·실행·회수 명령과 소스 SHA는 각 wrapper json에 보존했다. source/로컬/ARM/QEMU의 앞선 검증 범위는 그대로이며 정규 이미지·운영 배포·7번 전체 수락·commit/push는 수행하지 않았다.
+
+
+<a id="clock-r57-20261107"></a>
+### 2026-11-07 R57 — 상세 시험 계측 비용 대조, 준비 실패는 잔존
+
+R56의 상세 계측14,543개 사건에 제품 처리와 중첩 관측 비용이 섞여 있어, 같은 제품/FW28·Pi clock·C clock·ss·CPU2·optional 중지·broker group0·입력·기한에서 기존 CriticalTiming만 비활성화했다. 이 flag는 literal `off`를 허용하지 않으므로 전용 child env를 만든 직후 `env.pop('XD_TEST_CRITICAL_TIMING',None)`로 기존 지원 계약인 부재를 강제했다. 부모 `os.environ`이나 제품 parser는 바꾸지 않았다. 실제 새 interpreter에서 frozen driver를 import하고 원 설치 분기를 실행해 critical helper import/생성0을 확인했다.
+
+종료 fixture는 별도 동결 후보 `board_clock_send_cleanup_trial.py` SHA `c97bb83f0c307bdcdcf238a3b8c618605f1f4f6b78fcb021b4667cbe8347f861`을 채택했다. 원69dd driver의 전체 AST와 비교해 cleanup 요청 직전 `select_auto.clear()` 1호출만 다르다. 실제 machine·Authority·G1 queue 로컬5PASS와 독립 읽기를 거쳤다. 종료 시점의 보완을 baseline 중 동작 개선으로 합치지 않는다. 나머지 원18경로·25개 의존성·원 절대 end·CPU4 선복원·원 key/소유/기한은 그대로다.
+
+| 실제 결과 | 해석 |
+|---|---|
+| B dom89/ex `8aa1289f-ca82-4455-83e1-5e7ce7f7dd16`, driver46.087초/maps79 | 실제 지도/경로/탐색 점유는 확인했지만, 그 뒤 `prepared-state-auto-selected` 20초 대기는 TimeoutError. 원 result의 `failure_stage=actual-map-search-path-occupancy`는 마지막 성공 단계 표시이므로 그 단계의 점유 실패로 잘못 읽지 않는다. 정상 READY·주행·입력 만료 뒤 반환은 미수락이다. |
+| CriticalTiming 결과 null, 원 source/env pin 확인 | 상세 계측이 빠진 실제 경로를 사용했다. Pi/C/ss 및 정식 출력·필수 저장은 유지했다. |
+| world→pool16.403→8.610초(R56→R57) | 단일 대조의 관측이다. 트래픽·스케줄 차이도 있어 전부 계측 제거 효과로 귀속하지 않는다. |
+| pool 뒤 held20 안의 온전한 CPU19창씩, 실제 분모19.054836/19.121595초 | Linux core 상당량: Gateway .754139→.666262, actor .260301→.223308, serial .174234→.148000, common MQTT .065075→.039223, DriveLink .077671→.080014. 감소분과 변동을 구별하며 process와 thread를 더해 중복 집계하지 않는다. |
+| 같은 held20 Pi 완료 관측38/37개 | P2→on_publish 중앙2.883→2.023ms, nearest-rank p95 23.683→28.470ms, 최대40.113→37.878ms. 중앙값만으로 꼬리 지연 개선을 선언하지 않는다. on_publish는 실제 socket send 시각이나 RTT의 일부를 확정하는 시점이 아니다. |
+| C 원8행 재파싱·7-key 결합 | R56 최대307.019ms, R57 최대389.961ms이며 R57 held20 안에도388.708ms 표본이 남았다. first/tail/peak 보존8개를 전체 분포로 쓰지 않는다. 이전372.627ms는 R55 값이다. |
+| 종료 thread failure0, 원 TimeoutError 보존 | cleanup 후 gen2 SAFE_STOP/DISARMED 관측과 합치한다. cleanup 오인은 해소됐지만 앞선 gen1 준비 실패는 그대로다. 전체61.027→46.087초에는 cleanup 변경도 섞여 있다. |
+| ss34sample/32observed/2unknown | collector/ss child join은 완료. socket 정보 수집 성공과 통신/READY 수락은 다르다. schedstats 비활성이므로 scheduler 대기는 unknown이고, ss sampler와 짧은 child의 CPU는 직접 계수되지 않았다. |
+
+이 대조에서 확인한 범위는 선택적인 상세 계측 부담을 줄여도 잔여 지연이 남는다는 것이다. 이를 근거로 timeout·메모리 풀·우선순위부터 올리지 않는다. 다음 후보는 기존 Pi binary RX owner의 원 호출1회에 gap/wall/thread CPU의 작은 metadata를 덧붙이며, 이미 수신하는 v2.1 network raw32 표본을 보존하는 시험용 경로다. 별도 로컬 동결 RX helper는 아직 R57에 통합·보드 실행하지 않았다. network의 envelope seq·송신 uptime과 app_memory의 표본 seq·관측 uptime을 혼용하지 않는다.
+
+R57은 원 B1.0.8 dom90/ex `a437e698-5238-4bf2-b70c-9078c69d8bf5`와 CPU 검증complete, CPU4·Worker·두 optional 서비스·operating mock Gateway·console/query lease/helper/소유 thread를 복원했다. 원 A·Debian과 실제 차량 출력은 변경하지 않았다. private broker496748/start5015226을 종료하고 원 credential hash를 대조한 임시 root0600 사본6개만 정리했다. backend가 참조하는 source-r57과 원 기록은 보존했다.
+
+원자료 `evidence-through-r57.tar.gz` SHA `9248c8649ed5cdf37aa7412f2d37618c8cd17f6e9c385fcbdb91cb70deb3830c`, 37파일/2,370,482B를 전수 hash·비밀0으로 회수했다. `r57-status-4.out` SHA `48e3ab1d2d309fbd2272a86633de5740c74670d1cadab7d28940a86d9bc651bf`, broker 종료 `56e4ac354982100fc0e12e9a65ca8711190b5921571d540eb161a4d67f005bb3`, 임시 자격 정리 `f48e1a55435778b3f353f4acdcc763408737535d909230d99f00169dc3242ba5`로 후속 정리를 연결한다. 준비 builder의 최초 검증 직후 추가된3개 hash 검사문은 런타임4파일을 바꾸지 않았다. 원315acf…와 정확히 일치하는 역사 사본, 현 builder, `r57-builder-post-validation-note.json`을 함께 보존했다. 실제 stage/launch는 동결4파일과25개 소스 hash를 대조했다. 운영 설치·정규 이미지·실차·7번 전체 수락·commit/push는 수행하지 않았다.
+
+<a id="clock-r58-r59-20261107"></a>
+### 2026-11-07 R58–R59 — 수락 전 전체 기록 검사와 시험 실행의 구분
+
+R58은 RX owner의 원 `_network_once()` 호출을 바꾸지 않고 wall/thread CPU/호출 사이 gap을 제한된 metadata로 관측하는 시험 후보였다. 기존에 받던 network 표본의 envelope seq·송신 uptime·collection과 raw32 상태도 보존했다. driver `04ac2884ee965a9f972dffb4d05635aaf4e5a257c362dcc50389794d09235e31`, helper `e4490dc75ad2433c0f09b2a0e6298da1a4c0bde8e4cad69ff17b41a0f977bfbc`의 실제 Paho/codec/native 표본 로컬33PASS 및 target Python3.14.7 import의 thread1→1·FD4→4·socket/process 효과0을 확인했다. 이는 실제 RX 지연 구간을 보드에서 관측했다는 뜻은 아니다.
+
+두 실행 모두 `test-stop`의 내구 수락 전에 `DEADLINE_EXCEEDED: control request scan budget expired`로 거절됐다(R58 2.045초, R59 2.084초). operation_id는 null이며 시험 실행·driver·console·ss sampler가 생성되지 않았다. 미생성 자식의 null을 join 성공으로 채우지 않는다. 원 B1.0.8 dom90/ex `a437e698-5238-4bf2-b70c-9078c69d8bf5`는 그대로이고 CPU4·Worker·서비스 복원을 확인했다. 따라서 이번 두 실행을 기존 binding/clock 문제의 재현이나 해결 근거로 세지 않는다.
+
+공개 `control-operation`의 원 key 조회는 완전 검색 후 `VM_NOT_FOUND`/operation_id null을 반환했다. R59는 R58의 네 역할 key를 바이트·값 그대로 재사용했고 새 key·원 기한 재발급·추가 자동 DEADLINE retry는 없다. R59에도 같은 수락 전 거절이 재현돼 반복 시험을 멈추고 검사 비용을 분리했다. 읽기 전용 두 표본에서 등록3개 약0.059–0.063초, 자산 operation19개 약0.210–0.274초, control232개 약1.259–1.407초였다. 각 검사는 기존 stop admission2초의 일부이며 profiler 자체 비용이 있는 측정과 구별한다. 실제 `_json` C accelerator는 제공·선택되어 있어 누락 원인으로 보지 않는다.
+
+한 번의 읽기 전용 cProfile은 같은 파일명에 대한 반복 Path.stem/name 해석과 `_text_token`의 문자별 Python generator 비용을 확인했다. 전체 열거·record decode·request hash·중복 key·FD/경로 안전·기한 검사는 유지하며 이 두 국소 계산만 줄이는 후보를 검증한다. 아직 실제 board 전후 절감이나 정상 baseline 통과를 선언하지 않는다. 원자료 `r59-scan-profile.out` SHA `44365349168290d419f22834b1eb551f803f24dd753866078ec63de5cd245775`와 전체 명령·소스 SHA를 wrapper 기록에 남겼다.
+
+R58 archive SHA `6b7d22a2e5d3f79281425a5a3c5da7bc947e85fcf330d48ffae672506543245d`(10파일/15,209B), R59 archive SHA `c143f6f7ad288decf16a081b9caa6da751387efe3de623751419d1f1e12be695`(9파일/21,215B)을 전수 hash·비밀0으로 회수했다. 각 private broker 종료·원 credential hash 대조 뒤 root0600 임시 사본6개만 정리했다. R59 정리 도구의 첫 시도는 이전 숫자 range를 남겨 이미 정리한 R58 파일 부재로 삭제 전에 실패했으며, 원 소스를 보존하고 범위를59로 바로잡아 정리를 마쳤다. 원 key·필수 원장·운영 자격과 backend가 참조하는 source-r57은 보존했다. 실제 차량 출력·운영 설치·commit/push는 수행하지 않았다.
+
+
+<a id="clock-r60-r61-20261107"></a>
+### 2026-11-07 R60–R61 — 검사 비용 보완·로컬 복구 의미·진단 후보와 실제 수락의 경계
+
+R58–R61의 네 번 모두 원 stop admission 2초 안에 전체 control 기록 검사를 끝내지 못해 **내구 수락 전 안전 거절**됐다. R60은2.059초, R61은2.092초에 `DEADLINE_EXCEEDED/control request scan budget expired`, operation_id=null이었다. 원 R58 네 역할 key의 바이트·값을 그대로 재사용했고 새 key·기한 연장·자동 재시도를 추가하지 않았다. 시험 guest/driver/console/ss/query는 시작하지 않았으므로 이 결과는 RX 지연 재현이나 해결이 아니다. 원 B1.0.8 dom90/execution `a437e698-5238-4bf2-b70c-9078c69d8bf5`·CPU0–3·Worker·서비스 복원을 확인했다. 보호는 유지됐지만 **수락 가용성은 미해결**이다. `r60-status-full.out` SHA `772f2db133d39e9d98206c8f93da4a25843200a0cf290145a1b6fb84562eaf56`, `r61-status-full.out` SHA `d85c79789c2e31410edee6f68d583addbf57ecf58ba09ec3fbeefb6233486439`가 근거다.
+
+전체 열거·JSON/schema·request hash·중복 key·원 reader hook·FD/경로/regular/nlink·신원·기한과 효과 guard는 유지하며 세 계산만 줄였다. R60은 열거에서 이미 얻은 파일명 신원을 재사용하고 C0 문자 검사를 동등한 사전 컴파일 regex로 바꿨다(Execution `fbd91c35…`, Management `0e2d62b0…`). R61은 검증된 builtin FD reader에 이미 확인한 leaf 문자열을 직접 전달해 record마다 Path를 다시 만들지 않는다(Execution `30184aa8…`; custom reader에는 기존 Path 유지). 앞선82개 회귀12.07초와 leaf 후보82개11.72초·별도 차등1개/7분기1.58초를 통과했다. 겹치는82개를 새 수락 개수로 합산하지 않는다. `control-scan-cost-local-validation.json` SHA `d420eafb6b165fc6da1d8065a5775188723afe31ee61f3d10d8d2b3d93a46996`, `control-scan-leaf-local-validation.json` SHA `bb43b78203d14109228e94444b1f12f87802b2d560c389d68a5d2ceef0a45fc8`에 원 source·AST·명령·실패 경계를 보존했다.
+
+원 `_accept_stop`의 쓰기/수락만 대역으로 막은 읽기 경계 시험에서도 등록·state·asset·operation·intent 검사 뒤 `requests`가 남은1.549초를 쓰고 만료됐다(전체2.027초). 실제 stop 성공 시험은 아니다. 별도의 Manager 선행 import 없는 A/B와, Manager를 먼저 import한 warm A/B를 구분한다. warm 전후 각3회 모두232개 기록과 결과 SHA `fb8eaf62…`가 같았고 scan median wall1.637→1.500초, CPU1.102→0.972초였다. 선행 import wall3.459–5.159초는 이 scan 시간 밖에 따로 기록했다. 작은 CPU 절감과 결과 동등성은 전체 admission 성공이나 지연 상한을 입증하지 않는다. `r60-stop-read-boundary.out` SHA `aa711397d496fa3108f4f2117978220921986b3d59bde42d2dedef37cbf04a9f`, warm 원문 SHA `3c8b25d59d68e061541bdb73a305e80f69b17ad8490a59c00c226e702a46599b`를 대조했다.
+
+별도 로컬 복구 의미 시험은 실제 전체 `lattice_app.c`와 engine/world/lattice/충돌 검사/tracker/primitives/nanopb를 연결했다. 초기 prepare seq1 뒤 clock 거절·복귀만으로는 새 AppliedState를 만들지 않고, 같은 geometry의 새 map/observation으로 retained path를 재준비하면 plans1·path generation/revision1을 유지한 seq2가 실제 발생했다. 원 prepared 만료의 ms floor 직후에는 seq3 `applied=false/PREPARATION_EVIDENCE_EXPIRED`를 통지하고, 원 pose 수명까지 끝나면 -EAGAIN/추가 enqueue 없음이었다. 이 negative를 성공 준비로 세지 않는다. ASan/UBSan build10.382초/run0.051초·원 wire3개를 실제 Python DriveLink/StateCopies/Warm에 넣은5개 시험을 통과했다. seq2의 현재 proof 복구·같은 seq replay 거절·binding 변경·원 link/lifecycle lease·negative 뒤 proof 철회를 확인했으며3초 held/READY를 꾸미지 않았다. RTOS/context/clock·전송/lifecycle 입력은 명시적 fixture이고 실제 planner thread 배치·보드/MQTT/READY 수락을 대신하지 않는다. `recovery-semantic-local-validation.json` SHA `cb8e4e01f21de2b5de27e665b2c5ee74d53c66c301750b2afb5ff306ccdbef56`, native 원문 SHA `862c903b6012fddafe26145755a5ca5fa8e201d61a0296aba8838f8d3dc59458`에 source drift0과 초기 잘못된 만료 기대값 시험 실패도 따로 보존했다.
+
+FW1.0.29는 frozen FW28 source 복사본에 `NET_STATISTICS=y/NET_STATISTICS_TCP=y`만 추가한 **로컬 진단 후보**다. 고정 Zephyr `684c9e8f…` ARM 빌드33.183초와 실제 packager/bundle/catalog 소비를 확인했다. config 차이는 통계 계열뿐이며 timer/pool/한도·16MiB/1vCPU·기존 앱 직접 stack frame은 그대로다. FW28 대비 text+8,923B/data+3,544B/BSS0, 실제 stats shell의 최대 직접 frame208B다(전체 call-chain/보드 high-water 상한은 아님). bundle 전 파일0444, manifest `38c68e00b98547b55ba2e23d17dd37cabc2e3e463391ccba5d74223d4124d70f`, bin `e1947bc10650a5fa3fc49adeabd60ad2fc258f0440c5539ab59811ab5c1c34b9`, archive `4f21d2da7c4aee312a1472b99e9e410d698134e4675bc23d9907e40620f32c36`다. 실제 assembly reader는 원1.0.8 lock과 다른 후보를 거절하므로 **기본 이미지·recipe do_install/RPM·운영 선택에는 미반영**이다. 별도 `net stats\r`10B helper는 원45/12/5초·신원/lease/종료를 유지하고 실제 SDK 출력 normal/max/미지원 및 PTY34개 회귀로 동결했다. 부팅 누계·관측된 interface·비원자 snapshot이며 개별 probe/RTO 원인이나 READY 증거가 아니다. FW29 실보드 설치·통계 질의는 아직 미수행이다. `tcp-statistics-candidate-ready.json` SHA `9beeb2cc…`, selection proof `9139ab97…`, query freeze `de0c338c…`에 범위를 구분했다.
+
+공간 정리는 원 데이터를 보존한 뒤 제한된 원격 중복 사본만 대상으로 했다. source-r58/59/60의741개 source는 retained source-r61 또는 검증한 scan before/after의 상대 경로·전 바이트 SHA 일치를 확인했고, 재생 가능한 cache75개와 함께16,605,927B를 정리했다. backend가 쓰는 source-r57·source-r61·필수 기록/원 자격은 보존했다(`superseded-test-source-cleanup.out` SHA `0c0846b3…`). 이미 전수 회수·hash 검증한 archive37개도 원격 사본만16,676,314B 정리했고 로컬 원문과 source tree는 삭제하지 않았다(`recovered-archive-copy-cleanup.out` SHA `b39746e6…`). 별도 source-r27..35 전체 archive 읽기 두 번은90초에 timeout됐고 결과 archive/삭제는 없었다. 두 소유 reader의 실제 종료를 확인했으나 timeout 원인을 공간·압축·CPU 중 하나로 확정하지 않는다. 뒤에 만든 SHA별 blob1회/gzip level1 helper는 로컬 임시 fixture12개만 통과한 미실행 제공물이며 그9개 source를 정리했다고 세지 않는다.
+
+R60 archive `2974e63fa4c46ea98f193216be22630c766655e9b0ca9a191226d67749af9140`(13파일/20,890B), R61 archive `ff3287eb87b3e67b824c4042c653cb9ff3d37f2291f5668e15fc3c7d793dc37e`(12파일/221,672B)을 전수 hash·비밀0으로 회수했다. private broker 종료·원 credential 대조 후 각 임시 사본6개 정리도 확인했다. 위 원자료는 `C:/Users/SSAFY/Documents/Codex/2026-11-06/board-resume-evening`에 보존한다. R62는 optional 서비스를 더 이른 시험 구간에서 분리할 준비 단계이며 아직 보드 미실행이다. 정상 지도 계산의 부분 점유 근거를 전체 baseline 성공으로 확대하지 않는다. READY·PTY 주행·입력 만료 뒤 반환과 정상 고부하/A만 지연/양쪽 공통 입력 한계의 세 부하 조건은 여전히 미수행·미수락이며 실제 차량 출력·운영 설치·commit/push는 하지 않았다.
+
+
+<a id="stop-request-prevalidation-local-20261107"></a>
+### 2026-11-07 — stop 수락 전 제한된 사전 검증: 로컬·ARM 검증 완료, 보드 미검증
+
+반복된 전체 기록 검사의 비용을 줄이기 위해 `xenova_execution.py`와 `xenova_management.py`에 요청 한 번 동안만 쓰는 사전 검증을 추가했다. admission 잠금을 잡기 전에 최대 128개 **열거 항목**과 raw 합계 1MiB만 읽어 검증하고, 잠금 안에서는 기존 전체 열거와 새 안전 FD 읽기를 다시 수행한다. 읽은 raw bytes와 실제 text encoding이 정확히 같을 때만 앞선 JSON decode·request hash 검증 결과를 재사용한다. 바뀐 파일·새 파일·상한 밖 파일은 원 검증을 수행하며, hint는 사용 즉시 제거한다. 부분 사전 관측으로 부재·유일성을 확정하지 않고 영구 cache·index·새 잠금·의존성·원장 삭제를 추가하지 않았다.
+
+전체 열거·NOFOLLOW/NONBLOCK·regular/nlink·부모 경로의 시작/끝 canonical/devino·UUID/schema/request hash·중복 key·현재 신원·효과 보호를 유지했다. custom reader와 module/class/instance/subclass hook은 기존 Path 호출 경로로 돌아가며, prework 뒤 hook 변경과 private core의 unpinned 경로도 재사용을 차단한다. prework의 실제 EIO·손상·경로 오류는 원 실패로 전파하고, 용량 상한과 미지원 hook만 hint 없는 원 검증으로 진행한다. non-JSON 128개 뒤의 정상 파일도 authoritative 전체 검사에서 빠지지 않는 반례를 고정했다.
+
+**시간 계약의 변화:** 내부 admission 2초는 제한된 prework 뒤 한 번 시작한다. 따라서 전체 요청/수락 시간은 2초를 넘을 수 있다. 기존 caller·operation 90초에는 prework가 포함되며, 재시도나 기한 갱신은 추가하지 않았다. `execution.stop_prevalidation`, `execution.stop_authoritative_requests`, 잠금 획득 뒤 `manager.stop_admission`, 기존 전체 `trace.elapsed_seconds`를 구분한다. 전체 요청이 계속 2초 이내라고 주장하지 않는다.
+
+최종 동결 source는 Execution `ac5911d27cc150a41e7661562ad781ee5382140817c8765ecb724c06fb5f0ae3`, Management `8ee90a1e64caafa9e7652f67955bc50c716ac8430dbbbf558358774424e3d39d`다. 로컬 ext4 회귀는 **108 passed/13.74초**(신규25 + 기존83), 실제 aarch64 Python3.14.7/QEMU는 **71 passed/11.82초**(신규25 + 기존45 + 7개 파일명 경계를 포함한 차등1)였다. 두 환경의 겹치는 시험 수를 더해 고유 수락 개수로 세지 않는다. ARM 부분 설치의 compile/import는26.49초, 기존 선택139파일과 두 변경 모듈0644·원 설치본 보존·source drift0을 확인했다. 원138개 recipe 선택 Python/entrypoint와 기존 SQLite 보충1개를 재사용한 부분 포장 검증이며 새 RPM·정규 이미지·보드 지연 증거는 아니다.
+
+[결합 증거 인덱스](C:/Users/SSAFY/Documents/Codex/2026-11-06/board-resume-evening/request-prevalidation-evidence-index.json) SHA `a633bd590cd77952ad40da01f21cd2caa2a940bdf11d7c9aaf9c25ccc4a0c0fe`에 before/r1/최종 source·실행 명령·stdout/XML·QEMU/인터프리터·한계를 연결했다. 로컬 r2 검증 SHA `867d99945178f84b9182ee04598072552c2d9fa2def2fdc5f2032a61b031ad66`, ARM 검증 SHA `36db5e651c78c40d5a70454f9ea5cbba3a7550cb17231a8d5212300c6d8bad42`다. 이 후보의 실보드 stop 수락·정상 주행 baseline·세 부하 조건은 아직 미검증이며 운영 설치·실차·commit/push는 하지 않았다.
+
+
+<a id="netfront-tx-reap-r2-local-20261107"></a>
+### 2026-11-07 — TX 완료 회수 누락의 국소 보완: native 동결, R63 인과·최종 ARM/보드 수락 미확정
+
+실제 `netfront_ring.c::xnf_send()`는 고정 TX 슬롯8개가 모두 busy이면 backend가 이미 게시한 정상 완료 응답을 회수하지 않고 `-ENOBUFS/pool_busy+1`을 반환했다. 원 제품 C를 연결한 반례에서 응답1개 또는8개가 `rsp_prod`에 release 게시된 뒤에도 이 반환을 재현했고, 원 `xnf_poll()` 후에는 즉시 송신이 가능했다. 응답이 전혀 없는 실제 full 상태의 거절은 정상이다. R63의 `pool_busy` 증가3회에 완료 응답이 이미 존재했는지는 관측하지 않았으므로 **이 결함이 R63 지연·held 실패의 원인이라고 확정하지 않는다**. 최초 반례 증거 `tx-reap-counterfactual-local/native-validation.json` SHA `9a3efdd524f5f15214ae906e27b884a90491ce5b4aab3c46292d7c7137e4b7e7`를 보존했다.
+
+최종 제품 변경은 `platform/guests/zephyr/xen-runtime/src/netfront_ring.c` 한 파일이다. private `reap_tx()`(:28)는 원 producer 범위·descriptor generation ID·busy·status 검증과 완료/negative-response counter 처리를 공유한다. `xnf_send()`(:50)는 all-busy 때만 최대8개 TX 완료를 회수하고 `rsp_event` release 게시·fence·producer 재확인 뒤 슬롯을 다시 찾는다. 여전히 없으면 원 ENOBUFS를 반환한다. `xnf_poll()`(:73)은 같은 helper와 원 TX+RX 합계64개 한도를 사용한다. 원 `netfront.c::send()`(:245)의 packet_lock·worker wake와 `loop()`(:187)의 RX 소유는 변경하지 않았다. 송신에서 full poll/RX 전달·새 대기/큐/잠금·페이지/grant/종료·헤더/ABI 변경은 없다. [Linux v6.12 공식 netfront](https://raw.githubusercontent.com/torvalds/linux/v6.12/drivers/net/xen-netfront.c)의 `xennet_tx_buf_gc()`(:365), `xennet_start_xmit()`(:786–802)는 잠금 아래 TX 완료를 따로 회수하는 참고 근거이며, 이 구현의 동일성이나 grant 정책을 대신 증명하지 않는다.
+
+r1 검토에서 새 송신 경계가 프로토콜 오류를 먼저 감지하면 `bad()`는 EPROTO를 반환하지만 후속 worker poll이 ENETDOWN으로 기록하는 분류 공백을 찾았다. r2는 **poll의 failed-latch 반환만 EPROTO로 보존**한다. `failed=true` 대입은 `bad()`(:19, EPROTO) 한 곳이고 init(:43)의 false 초기화 외 다른 대입은 없다. 후속 send의 기존 ENETDOWN 계약은 그대로다. 반복 poll은 원 오류를 다시 집계하거나 인덱스를 움직이지 않는다. 기존 backend-error 우선순위는 유지되며 전역 시간순 최초 오류 보장을 새로 주장하지 않는다. 원 ring overflow 송신에도 있던 패턴이지만 새 TX 검증 경계의 분류 손실은 최종 수락 전에 보완했다.
+
+native x86_64 실제 제품 C 회귀는 r1 45건, 최종 r2 **47건을 ASAN/UBSAN과 O2 각각 통과**했다(최종 compile+run 0.796초/0.562초, stderr0). 두 실행의 중복 건수를 합산하지 않는다. 기존32건·70,000-frame descriptor/ID wrap과 추가 send-side 70,000회 재사용, UINT32 producer wrap, 정상 완료1/8개, 진짜 full, 잘못된 ID/index/status·중복 ID fail-closed, negative RSP drop, 송신 중 RX 미소비, 원64개 poll budget 및 corrupt-send/initial-bad-poll 뒤 반복 EPROTO·counter1·인덱스 불변을 확인했다. 외부 backend 게시·잠금 직렬화는 명시적 native fixture이며 Zephyr thread/실제 ARM/TCP 시간 시험을 대신하지 않는다.
+
+최종 C SHA `7310ab54a1a9cca508f00ce5e79e62286e50aaa3c6a405cd2a8995425a26486f`, native test SHA `e424abbe9d6057cd5c99921e69945ac291334c80d9d01ca3a91a945d008ac161`다. `tx-reap-fix-local/FREEZE-r2.json` SHA `fd1fbd93a54f217d0a1be5f08873e2334072229b5625ff4f280e067567b00f2c`, `native-validation-r2.json` SHA `9d2f64bdae0549211b412895ed6303cf86bac28f9d5b8318bd4c118b0de87b02`에 정확한 명령·전후 source SHA·setter 근거를 연결했다. r1 C/test 원문·diff·45건 증거·FREEZE와 최초 반례는 별도 바이트로 유지하며 r1을 최종 수락본으로 세지 않는다. 본 절 작성 시 최종 r2의 FW30 ARM 포장은 다른 담당자가 진행 중이며 **빌드 수락·보드 적용·정상 baseline·세 부하 조건 통과를 선언하지 않는다**. 이 작업의 SSH/보드/commit/push는 없다.
+
+
+<a id="clock-r64-retained30-20261107"></a>
+### 2026-11-07 R64 — FW30 실제 통계·수락 경계·유지 상태, 정상 기준선은 미수락
+
+R64는 제한된 사전 검증의 최종 Execution `ac5911d27cc150a41e7661562ad781ee5382140817c8765ecb724c06fb5f0ae3` / Management `8ee90a1e64caafa9e7652f67955bc50c716ac8430dbbbf558358774424e3d39d`와 FW1.0.30을 시험용 경로에 공급했다. 실제 test-stop은 operation을 수락해12.851초에 끝났으며 이 시간에는 물리 종료가 포함된다. 별도 읽기 전용 비교의 scan 시간과 같지 않다. 그 비교는 동일236개 원장·같은 hash와 원 reader/원장 불변을 확인한 표본 한 쌍이다. 이전 후보는 total1.830초/lock 대기0.008초/hold1.820초에 읽기 경계를 완료한 뒤 쓰기 차단용 NoAcceptance로 끝났고, 새 후보는 total2.888초/대기0.393초/hold1.607초에 **DEADLINE_EXCEEDED**였다. 새 검사가 완주했다거나 수락 가용성이 보장됐다고 쓰지 않는다. prework를 포함한 전체 요청과 내부 admission2초·기존 caller/operation90초를 구분하고 기한을 갱신하지 않는다. 비교 원문 SHA `e62e0c7c2063011d2e94c815d32b4b15cd458eabfa58af6bd292fbf510d60d20`를 보존했다.
+
+FW30은 정확한 FW29 source에서 `netfront_ring.c` 하나만 `7310ab54a1a9cca508f00ce5e79e62286e50aaa3c6a405cd2a8995425a26486f`로 바꾼 후보다. 송신 슬롯이 모두 바쁠 때 TX 응답만 최대8개 회수하고 RX·재연결·새 잠금·대기를 추가하지 않고 기존 grant/신원 검사를 유지한다. 오류 latch의 poll은 원 EPROTO를 보존한다. native47개를 ASAN/UBSAN·O2 각각 통과하고, 고정 ARM 빌드33.085초·실제 bundle reader·로컬 staging10개를 통과했다. stats/TCP·자원·한도 설정과16MiB/1vCPU는 유지했다. ELF 합계 text+8/data−8/BSS0은 배치 영향이 포함되며 send/poll 직접 frame은 각각48→64B/80→96B다. 전체 call-chain·실행 high-water·주행 성공으로 확대하지 않는다. ARM 검증 SHA `0ad4fcd94bdb7ee0a89ecedcb5cd3346c153e6360585a3d80cd7fbcbddd60799`와 manifest `2c61df2edb446e7dae02dfcf402f3204ee3a08207b0c19578d03c4b81e5d7e07`, bin `c3c20ca8523bc0cd2cb1e62088c2b669983220bbad523a12c0c39e2438cb5f75`를 연결한다.
+
+**이번 정상 시험은 관측 도구 때문에 중단됐다.** 선택적인 console/API 신원 조회가 기존3초 경계에서 DEADLINE_EXCEEDED(최대3.045초)로 끝나자 부모가 `CONSOLE_EXITED_DURING_CPU_WINDOW`로 제품 driver를 중단했다. driver는38.824초/지도 local queue50개, 마지막 단계 fresh-synthetic-world-enabled·KeyboardInterrupt였고 점유 gate 수락에 이르지 못했다. console 수집은 collection_complete=false지만 원 raw7926B·확정/미확정 span·lease 반환·console/driver/sampler join과 최초 실패는 남겼다. 이를 제품 준비 실패의 정상 재현, 정상 기준선 통과 또는 같은 조건의 R63 비교로 세지 않는다.
+
+종료 뒤 B dom93/execution `62b85524-3bdb-4bac-bbfe-42579391d5ce`의 기존 SDK `net stats`를 별도 lease에서10B 한 번 질의했다. Ethernet interface1의6개 TCP 행과 prompt 순서·원4회 신원 guard·lease/join을 관측했다. 원문 nonce가 없어 fresh_guest_measurement=false이며, 아래 값은 **해당 부팅 누계 한 표본**이다.
+
+| 실제 SDK counter | 값 |
+|---|---:|
+| bytes_received / bytes_sent / resent | 920031 / 3321104 / 0 |
+| segments_received / segments_sent / segments_resent | 10393 / 7959 / 0 |
+| segments_dropped / packets_dropped | 0 / 3 |
+| checksum_errors / ack_errors / reset_errors | 0 / 0 / 0 |
+| resets / connections_reset / connections_dropped | 0 / 3 / 0 |
+
+같은 driver 문맥으로 받은 network17표본은 guest boot `bf07fa2a-40d3-4728-869e-b697d68c1c89`·publisher `9c5843b8-2e4f-4e67-932a-a5fe037fe632`, envelope seq209→433·collection end uptime39748→73052ms였다. 원 raw32 tx_packets2047→4833, rx_packets1167→3418, tx_drop/rx_drop/protocol_errors는0→0, pool_busy는0→1이었다. busy1인 마지막3행은 **누계 증가 한 번**이며3개 장애가 아니다. status=ok/source_rc0·유효0을 그대로 보존하고 network의 envelope/collection을 app_memory 표본 시각으로 대입하지 않았다. 보존 표본에서 감소가 없다는 것만으로 reset/wrap 부재를 확정하지 않는다. 이 앞선17표본과 나중 TCP 질의는 계층·채집 경계가 달라 서로 빼거나 개별 probe/RTO·reset 원인으로 귀속하지 않는다. TCP 재전송 누계0도 손실·지연 부재의 증명은 아니다.
+
+R64 종료 정책은 매회 FW8을 재설치하는 비용을 반복하지 않고 검증된 FW30을 B에 유지하는 것으로 바꿨다. 따라서 원 결과의 **original_b_restored=false / firmware_retained=true**가 정확하다. B는 FW30·dom94/execution `2e92efc1-3fd3-4386-a029-1503d15c4fea`·CPU 검증complete로 다시 시작했으며, 원 영구 drive/telemetry source의 applied receipt가 이 실행과 일치한다. 이는 통신 설정 복귀이며 인증·앱 건강·READY를 의미하지 않는다. CPU0–3 선복원·Worker·optional 두 서비스·mock Gateway·소유 자식/console/lease 정리와 실제 차량 출력false를 확인했다. retained30을 원 FW8 복원 성공으로 표시하지 않는다.
+
+닫힌 원자료46파일/2,163,267B, archive SHA `1cc00d3bded60ffbd1f33108adb4be83bf7725c6f0ecd240dd084607c53f8380`를 전수 hash·비밀0으로 회수했다. private broker 종료 stdout SHA `4a4b8af4bdc36efe4411ac1408c013d213111bb57aca72a6e449577258d5e229`, root0600 임시 사본6개 정리 SHA `f48e1a55435778b3f353f4acdcc763408737535d909230d99f00169dc3242ba5`를 연결한다. [R64 단일 요약 근거](C:/Users/SSAFY/Documents/Codex/2026-11-06/board-resume-evening/r64-closed-counter-facts.json) SHA `7b9c62274ff10ca80b42a9e2f6d9e0ffe477ba50f896c9ad3a13c6c73a9d54ec`에 원 source hash·채집 경계·분모·실패·복원을 정리했다. 본 절에는 R65 결과가 없으며 READY·주행·만료 뒤 반환·세 부하 조건은 계속 미수락이다. 정규 이미지·기본 선택·실차·commit/push는 수행하지 않았다.
+
+<a id="r65-pause-20261107"></a>
+### R65 중단 상태: 실제 계산·점유와 준비 대기 실패를 구분
+
+사용자 요청으로 실보드 작업을 중단한 뒤 소스 보존·커밋으로 인계한다. 해결한 국소 결함과
+최종 주행 수락을 구분한다. **정상 READY·PTY 주행·입력 만료 뒤 전체 메모리 반환과
+두 VM의 세 부하 조건은 여전히 미수락**이다. 현재 단계는 운영 배포나 기본 이미지 선택 변경이 아니다.
+
+R65는 기존 B의 정확한 FW1.0.30 revision을 재사용해 재설치를 생략했다. 원 key·실행·기한·자격을
+각 수명대로 보존했고, 격리 Authority·가상 PTY 장치로 실제 출력을 차단했다. 실제 world 입력 활성 후
+8.462초에 map/search/path 점유를 확인했으나, 전체46.922초·지도 local queue115에서 준비 대기가
+`TimeoutError`로 끝났다. queue115는 수신·계산 성공 횟수가 아니다. 종료 전 상태는
+generation1/SAFE_STOP/DISARMED/output=false이며 AUTO/g2·그 뒤 1초 적용 단계에는 진입하지 않았다.
+
+`prepared-state-auto-selected`의 **20초는 시험 도구의 조건 성립 대기 상한**이다.
+20초 연속 READY 유지나 20회 중 한 번 실패하는 빈도를 뜻하지 않는다. 이 시험의 선행 조건은
+현재 StateApplied 근거와 `_qualified(held=True)`이며, 후자의 기존 `ready_hold_s`는3.0초다.
+시험 도구가 AUTO 선택 전에 이 조건을 두는 위치가 제품의 초기 AUTO 절차와 같은지는 재검토해야 한다.
+기록된 음성 결과만으로 StateApplied 근거 부재와 held qualification 불충족을 매 actor 회차별로
+분리할 수 없으며, 단순 대기 부족·특정 전송 계층의 단일 결함으로 확정하지 않는다.
+R64의 선택 콘솔 실패를 엄격한 독립 binding/owner 증거 아래 분리하는 시험 도구는 추가했지만,
+R65에서는 이 퇴역 분기를 사용하지 않았고 정상 기준선은 여전히 실패했다.
+
+C clock 8슬롯은7개의 서로 다른 과거 probe다. 유효한1개 폭6.527ms와 나머지 원 판정·미관측을
+유지하며 전체 분포나 단방향 지연으로 확대하지 않는다. 후기 TCP 부팅 누계의 재전송0도
+개별 지연/RTO 부재의 증명이 아니다. 원 분석은 `r65-c-clock-gate-review.json`
+SHA `64a3938853d1d39299a8fd730b9b601d97634ce3343d98494de1bd9405fd0259`와
+`r65-bootstrap-qualification-analysis.json`
+SHA `affcaea050a47299a7e62ade891e213312b1d8d6f3215d325282a64c8ee36b5b`에 보존했다.
+
+원자료44파일/2,736,135B의 archive SHA
+`cbae9e75874d8bdcc32af4ecd2a25538f7e68681618e8c033fca4cceb325ec15`를 전수 hash·비밀 제외
+검증으로 회수했다. 시험 broker와 private 자격 사본6개를 정리했고 원장·영구 자격은 유지했다.
+중단 확인 `pause-board-readonly.out` SHA
+`76eba4f1375020b83b4735e38224d96b474897612f425d6a0da11215a87dc104`에서 소유 시험 helper0,
+CPU0–3·Worker·mock Gateway·display-feed·log collector active,
+Gateway SAFE_STOP/DISARMED/output=false를 확인했다. B는 FW1.0.30·dom96/execution
+`78e2445c-f5a2-4ba1-b2ba-ff061e77698e`를 유지했고 원 drive/telemetry 소스의 새 실행 적용
+영수증을 확인했다. A는 FW1.0.8·기존 실행, Debian도 기존 실행을 유지했다.
+
+현재 소스와 격리 시험 사본의 보완을 운영 Python 모듈 전체의 설치·실제 로드 완료로 표시하지 않는다.
+FW30은 고정 ARM·불변 포장과 보드 선택을 확인했으나 진단용 설정으로 빌드됐다.
+현재 저장소의 기본 profile과 정확히 같은 전체 이미지 수락은 아니다. FW31은 정확한 FW30에
+기존 유한 부하 시험 모듈을 연결한 로컬 native/ARM 포장 후보이며, A/B pair에 설치하거나
+정상·A만 지연·공통 입력 한계 조건을 실행하지 않았다. 기본 lock의1.0.8 선택은 유지한다.
+
+<a id="mr-integration-20261107"></a>
+### 커밋·platform 통합 검증 — 2026-11-07
+
+실보드 중단 뒤 사용자의 커밋·push·MR 요청에 따라 작업을 원인별로 나눴다.
+이전 브랜치에 섞인 다른 파트의 develop 커밋은 포함하지 않고,
+`origin/platform`의 `91733c2f5db630791427696f4c4d40089003520d`에서
+`feat/platform/recovery-drive-runtime-hardening`을 만들었다. 기존 작업은 로컬
+`backup/platform/integration-followup-20261107`에 보존했다.
+
+통합 후보 `6b29348a2f196579879618adbd05942787bfcbee`에서 다음을 다시 실행했다.
+Worker 충돌은 platform의 `external_reason`·`external_execution_id`와 이번 안정 구간 관측을
+함께 보존했고, `xenova_execution.py` 충돌은 원 기록 검증을 설명하는 주석을 보존했다.
+platform의 실행 신원 batch 조회·scheduler 상태 재검증과 이번 FD 기반 원 요청 검사·
+현재 호출 안의 검증 재사용·만료 수습 함수가 각각 원본과 같은 AST임을 대조했다.
+
+| 로컬 실행 범위 | 결과와 제한 |
+|---|---|
+| Worker budget/status/worker/engine/watcher/rejoin | 306개 통과. VM_UNTRUSTED의 실행별 고정·새 실행 초기화와 E4 보호를 함께 확인 |
+| Manager·수습·원 요청·binding·clock와 platform의 신규 조회 회귀 | 354개 통과, 자식 프로세스의 `first_install_contract` import 1건 실패. 시험 PYTHONPATH에 `platform/first-install`을 추가한 해당 재시험은 통과. 제품 변경 없음 |
+| Gateway 전체 | 378개 통과·1개 skip·1개 실패. `test_memory_pressure_switches_manual_owner_using_manual_mirror_readiness`는 target `91733c2f`의 Gateway·MQTT·world 소스 사본에서도 같은 assertion으로 실패. 이번 통합의 새 회귀로 분류하지 않으며 미해결로 보존 |
+| MQTT 전체 | 174개 통과·4개 skip. 별도 broker/container 설정이 필요한 시험은 실행하지 않음 |
+| 실제 main·입력 시각·transport barrier·차량 진단·가상 차량 표본 | 143개 통과·1개 skip. 진단 비활성 `.text`의 이전 소스 대조는 해당 원본 경로 미공급으로 skip |
+| C controller·health·manual/preparation·codec·state transfer | 기존 고정 CMake 3.31.6·GCC 13.3으로 빌드, CTest 6/6 통과 |
+| 실제 netfront ring | ASAN/UBSAN 및 O2 각각 47개 사례와 70,000회 wrap 통과. 실제 공간 부족·손상 검출 보호 유지 |
+
+Gateway의 나머지 skip은 native state codec 실행 파일 미공급이며, CTest의 state-transfer
+통과와 별도 사실이다. 기존 SDK·시험 의존성을 재사용했고 새 의존성을 설치하지 않았다.
+실행 명령·JUnit·stdout/stderr·비교 사본은 로컬
+`Documents/Codex/2026-11-06/board-resume-evening/mr-integration-checks/`에 보존했다.
+`run_mr_integration_checks.py`의 그룹별 pytest와 `native-validation.json`에 정확한 입력·
+도구·해시를 기록했다. 이 절은 위 후보 이후 문서만 추가한 기록이다.
+
+이 통합 후보로 전체 ARM/RPM/이미지를 다시 빌드하거나 보드에 설치하지 않았다.
+앞 절의 FW30 ARM·보드 근거를 새 platform 전체 설치 근거로 바꾸지 않는다.
+READY·주행·메모리 반환·세 부하 조건의 실보드 미수락과 기존 출력 차단·E4 보호는 그대로다.
+
+<a id="recovery-demo-20261107"></a>
+## 장애 범위·재합류·binding 보완 — 2026-11-07
+
+**코드·로컬 검증·ARM 부분 포장·보드 개별 적용과 정리는 마쳤지만, 세 시연의 실보드 수락은 끝내지 못했다.**
+정상 준비의 기존 20초 창에서 binding·차량 관측이 유지되지 않아 실제 장애를 주입하지 않았다.
+Jetson 상실→MANUAL→명시 AUTO 재개, A AUTO 실패→B AUTO→A 재자격, 실제 VM 장애→Worker 복구→Standby→다음 장애를 통과했다고 표시하지 않는다.
+지도 발행은 0건이므로 이번 실보드에서 실제 계산·풀 점유 증가·반환도 입증하지 못했다.
+장기 READY 분석으로 범위를 늘리지 않는 사용자 지시에 따라 미수락을 남겼다.
+
+### 변경과 판단 기준
+
+| 위치 | 무엇을 왜 바꿨는가 | 유지한 보호 |
+|---|---|---|
+| 공통 runtime `io.c`, `Kconfig` | heap 점유율·AUTO deadline 반복을 별도 `vm.trust`로 확대하던 생산 경로를 제거. 실제 `workers` health와 `main`의 앱별 lifecycle을 재사용. 85/5 설정 기호는 과거 `.config` 호환용이며 새 운영 임계값이 아님 | 주입 명령·결과·errno·원 ID/boot/기한, 실제 필수 자원 실패, AUTO/MANUAL 독립성. 오류 종류·희귀 최초 원인 축소 없음 |
+| Worker `rejoin.py`, `worker.py` | FW32 보고를 엄격한 현재 binding/boot/app 검사 후 warning/function으로 보관. 이 두 보고만으로 VM 불신 latch·새 recovery attempt를 만들지 않음 | 실제 Xen 부재/crash·생존 실패, 원 attempt·현재 intent·Gateway 보호·E4. 원 사유/명령/실행 근거 보존 |
+| Gateway `verified.py`, `warm.py`, `provider.py` | A만의 입력 문제와 양쪽 입력 장애를 구분. 현재 준비된 B AUTO 또는 정지 후 정상 MANUAL을 평가. 유효한 새 실행·준비와 보호의 내구 종결 뒤에만 RAM 불신 상태 해제 | 사용자 MANUAL 의도·명시 resume·control 적용·중립 후 새 조작, 저장 실패 시 원 불신/보호 유지, 자동 재무장·Active 반환 없음 |
+| `xenova_drive_binding.py`, `xenova_execution.py`, `xenova_management.py` | 읽기 전용 초기 검증의 admission 대기를 제거. 이어 기존 일괄 관측을 사용해 A/B의 전후 Xen 목록·native identity 조회를 한 회차에서 공유. private `_input_ids`는 대상 외 실행 파일 의존만 줄임 | 전체 registry/tomb 검증 2회, Xen 목록 2회, native identity helper 2회, 최종 admission 1회. strict 타입·현재 run/intent/gate·원 표본 시각·최신 오류 순서 유지. TTL cache·새 전역 잠금 없음 |
+| RejoinCoordinator | 기존 executor에서 due 대상만 묶고 provisioning 전후 guard는 유지. 긴 A 작업이 있어도 남은 lane에서 B만 갱신. 실제 publisher/batch/work가 살아 있으면 종료 완료를 반환하지 않음 | 2개 lane·유한 큐·원 2초 관측 예산·3초 binding lease·필수 receipt 저장 유지. 타 대상의 정상 결과·원 작업을 취소하거나 새 시각으로 꾸미지 않음 |
+
+고정 app pool은 system heap과 다르다. 높은 점유·주입기 자신의 ENOMEM을 앱 필수 pool 실패로 대신하지 않는다.
+map/path의 current 사본·마지막 결과·마지막 search slice는 정당하게 보관될 수 있다.
+입력이 끊겼다는 이유로 used=0이나 예약 RAM의 OS 반환을 요구하지 않으며, 실제 writer/reader 반환과 retained floor·peak를 구분한다.
+
+### 실행한 검증과 남긴 반례
+
+| 묶음 | 실행 결과·범위 |
+|---|---|
+| C/native I/O·workers | 27개 통과. 원 명령·중복·오류·실제 작업 지연과 기능 독립성. I/O의 health/resource 대역을 실제 앱 pool 고갈 증거로 쓰지 않음 |
+| Gateway | 최종 계측 전체 390개 통과·1개 skip. 앞선 3개 실패는 보존. 약 125ms actor 공백의 동일 generation/owner 반례를 HEAD 사본에서도 재현했으며, 최초 비계측 실패의 원인을 단정하지 않음 |
+| Worker | 기존 관련 136개, batch 연결/warm-liveness 113개, 느린 sink 종료 1개, A provisioning/refresh 지연 중 B 갱신 등 후속 16개 통과. 집합이 겹치므로 합산하지 않음 |
+| 하위 조회·실행 | 확장 198개 통과 뒤 대상 입력 제한의 최종 84개 통과. 신규 paired 시험 24개는 무관 run/intent 손상 격리·전체 등록부/대상 손상 거절·원 시각/기한·신원 변경·정상 B 보존을 검사 |
+| 고정 환경 | source checkout의 정책 mode·systemd loader·주입 unit 경로 문제를 소유 fixture에서 보정. 원 실패 기록은 보존. 기존 ARM/QEMU systemd 259.5 ordering 검사 통과. FW33의 QEMU 주행 수락은 아님 |
+| 실보드 준비 | 첫 두 시도는 가상 장치 프로세스 준비 경계에서 종료. 불필요한 world/protobuf 재로딩 제거와 단계별 계측 후, 세 번째는 실제 Gateway까지 실행했지만 실제 readiness 20초를 통과하지 못함 |
+
+세 번째 종료 상태는 `SAFE_STOP`, `output_permitted=false`, A/B binding null이었다.
+앱은 MANUAL `POSE_UNAVAILABLE`, AUTO `STATE_PREPARING`을 보고했다.
+drive link 거절 78건 중 `LINK_BINDING` 70건, 지도 0건이다.
+장치 보고 counter 241과 최신 counter 247이 달랐으며 accepted/applied/physical-stop·VehicleSample은 null이었다.
+이 상태를 장치 적용·물리 정지·앱 정상으로 바꾸지 않았다.
+실제 Worker의 시작 뒤 fresh A/B binding 확인은 약 13.85초였지만 지속 유지 수락이 아니다.
+시험 E4 프로필은 기존에 사용한 `stable_s=60`, `vm_max_attempts=3`이며 소비 0→0, 실제 복구 시도 0건이다. 운영 수치·설정은 바꾸지 않았다.
+
+paired 단독 대조는 Worker 정지·mock Gateway 활성 조건에서 pair 3회가 0.654/0.593/0.664초로 끝났다.
+반면 서비스 활성 추가 병렬 probe는 6건 중 1건만 원 2초 안에 성공했고, 실제 합친 시연도 미수락이다.
+최종 운영 mock 복원 직후 5개 파일 표본에서도 A unavailable·B의 3초 이상 노후 표본을 확인했다.
+따라서 중복 조회 감소와 로컬 보호 검증을 실보드 지속 binding 해결·전체 부하 개선으로 확대하지 않는다.
+
+### 제공물·설치·정리
+
+기준은 `47b7304817eb9d726c7b37a80539d56bb5b5d1af`와 현재 diff다.
+FW1.0.33은 고정 ARM 환경에서 38.849초 빌드했고 strict bundle·target import 10개를 확인했다.
+firmware SHA256은 `8499076633aa0f458c38a2d7717d0acde0caa5b06c2b06edcb78a8b98dd659bc`,
+manifest는 `497e5234ba0b5128a223bc02221b0ef2912189ce7ad9071a04100051c692f3c1`이다.
+기존 recipe의 모듈·native helper 설치 경로를 재사용했으며 정규 RPM·전체 이미지·factory 기본 firmware는 갱신하지 않았다.
+
+보드의 하위 31개·provider 59개를 대조했고 마지막 binding/execution/management/rejoin 4개를 같은 cohort로 교체했다.
+첫 설치 확인의 cold import는 20초 제한으로 rollback됐고, 모듈별 실측은 총 19.59초에 interpreter 시작 시간이 추가됐다.
+설치 확인만 40초로 분리한 재시험은 import 9개·90개 hash·새 서비스 PID·동일 VM 실행 검사를 통과했다.
+이 변경은 관리·제어·VM·Gateway의 실행 기한을 늘리지 않는다.
+
+최종 부분 source는 `source-closed/source-payload-manifest.json`의 141개 파일이며 fingerprint는
+`c9860b80aba3c51e6f2c8b2c4da75dbc4c83fa69af275f1277175906f9aa0969`, archive SHA256은
+`f7815b759d36b663f3d8ec13dfec333c1f073193ff3bfa5c3d18f0a0d87276f7`이다.
+설치한 Coordinator hash는 `b85edb29f2be8b6ea48914f4160d9b10795a64635b734fc51a8e847e907e284d`다.
+
+
+A/B는 FW1.0.33을 유지하고 원 통신 설정 4개의 정확한 원 바이트로 복원한 새 실행이다.
+A는 domid101 / `09417bc5-bfd0-4021-aaa7-c2eb3c84ab48`, B는 domid102 / `30b4bbc5-1a6c-4c57-9269-8dc32a91a2e5`다.
+각 새 실행의 drive·telemetry receipt를 확인했고 Debian domid1의 원 실행은 유지했다.
+CPU 정책 hash·UUID·비밀번호는 유지했다. API/Gateway/Worker는 active이며 Gateway는 mock·SAFE_STOP·출력 차단이다.
+소유 broker·scene·가상 장치 프로세스는 모두 종료했고, 원 설정 대조 뒤 소유 비밀 사본 6개를 제거했다.
+VM helper가 참조할 수 있는 소스·복구용 코드 백업·필수 원장/receipt는 삭제하지 않았다.
+
+정확한 명령·JUnit·소스 manifest·실패와 복원·설치 기록은 로컬
+`Documents/Codex/2026-11-07/recovery-demo-closure/`와 `fault-scope-c/`,
+Gateway의 `spring-stress-board/gateway-*.xml`에 보존했다.
+`final-board-evidence.tar.gz`는 비밀을 제외한 35개 증거를 포함하며 SHA256은
+`843930145e4ff9cb8af9c1bd8342180d2df83d23b0c9071d666a1345e5e6388d`다.
+세 시연의 남은 실제 수락은 정상 binding·차량 관측·준비가 먼저 확보된 뒤에만 진행한다.
+이번에는 실차 출력·EC2·commit/push를 수행하지 않았다.
+
+### 후속: 정상 준비를 요구하지 않는 Spring 세 명령의 실제 주입
+
+사용자 요청에 따라 위의 정상 준비 수락과 분리해, 같은 FW1.0.33 A 실행에
+`cpu_stress`, `memory_stress`, `auto_delay`를 각각 한 번 발행했다.
+위의 지도 0건·장애 주입 0건은 앞선 세 복구 장면의 선행조건 시험 결과이며,
+이번 후속에서는 세 명령을 실제로 수신·실행·종결했다. 세 복구 장면 전체의 수락을 뜻하지 않는다.
+
+| 실제 요청 | 제품 수신부의 결과 | 실제 관측 |
+|---|---|---|
+| `cpu_stress`, workers=1, load_percent=100, duration_s=10 | RUNNING→SUCCEEDED, duration_ms=10018 | `cpu.system.percent` 29개 정상 표본: 첫 14.483%, 최대 100%, 마지막 14.822%. 부하 종료 뒤 사용률 하락 |
+| `memory_stress`, memory_mib=8, duration_s=5 | RUNNING→SUCCEEDED, duration_ms=5007 | `memory.kernel_heap.used_bytes` 0→8,389,632→0. free 9,437,184→1,046,528→9,437,184 bytes. high_water 8,389,632 bytes는 종료·다음 명령 뒤에도 보존 |
+| `auto_delay`, delay_ms=100, duration_s=10 | RUNNING→SUCCEEDED, duration_ms=10003 | 주입 창 수락·종결은 확인. `loop.completed_total`, `loop.in_flight`, `loop.deadline_miss_total`은 모두 0. 실제 AUTO 작업·지연 효과·승계는 입증하지 못함 |
+
+CPU·메모리 부하는 정상 준비 없이도 실제로 작동했다. 메모리 주입의 5초는
+표본에서 할당·반환을 보기 위한 시험값이며 새 운영 교체 기준이 아니다.
+커널 heap 반환을 앱의 고정 map/path/search pool 반환이나 VM RAM의 OS 반환으로 확대하지 않는다.
+AUTO의 실제 지연은 `platform/apps/drive/zephyr/src/workers.c`의 AUTO 작업에서
+`drive_adapter_run_until` 뒤 `drive_auto_delay_apply`가 호출돼야 발생한다.
+이번 수신창의 앱 사건은 AUTO `STATE_PREPARING`, MANUAL `INPUT_UNAVAILABLE`였고,
+명령의 SUCCEEDED를 계산 성공·지연 발생·기능 장애·복구 성공으로 치환하지 않았다.
+
+전송은 기존 `direct_command_trial.py`를 재사용했다. `origin/backend`의 `5667ea6f`
+Spring `AgentStressService`/`AutoDelayService`와 동일한 MQTT-04 envelope·parameters로,
+`xenova/v1/vms/{vm_id}/command`에 QoS1, retain=false, 원 command/operation ID와
+현재 boot를 유지해 각각 한 번 발행했다. 각 PUBACK과 같은 ID의 제품 결과 2개를 회수했다.
+Spring HTTP·인증만 우회했으며 배포된 Spring REST/버튼의 종단 수락은 하지 않았다.
+
+실행 명령은 기존 도구에 공통 `--vm de113a23-d80e-4333-94b8-788babe0e41e --observation-s 25`를 주고,
+각각 `--action cpu_stress --amount 100 --duration-s 10`,
+`--action memory_stress --amount 8 --duration-s 5`,
+`--action auto_delay --amount 100 --duration-s 10`을 사용했다.
+원 command ID는 순서대로 `e5465e7c-1a3b-4579-82d3-f5b94eff3609`,
+`d9f7c8c6-c4e4-446a-a770-975833ec1455`, `c7edcec6-30e3-4c3a-a693-0ff3abb46023`이다.
+
+후속 조회에서도 A domid101/execution `09417bc5-bfd0-4021-aaa7-c2eb3c84ab48`,
+B domid102/execution `30b4bbc5-1a6c-4c57-9269-8dc32a91a2e5`, Debian domid1의 원 실행은 같았다.
+Gateway는 SAFE_STOP·output_permitted=false, API/Gateway/Worker는 active였다.
+새 VM 재시작·승계는 관측하지 않았다. E4 설정·필수 기록을 변경하지 않았고,
+시험 발행 프로세스는 종료했다. 실제 차량 출력·서비스 교체·추가 firmware 설치·commit/push는 하지 않았다.
+
+별도로 확인한 미보완 결함: `xm_payload.c`의 두 명령 parser는 `expires_at` 문자열을
+검사하지만 값은 전달하지 않고, `io.c:receive_fault_command`도 수신 age로 만료를 거절하지 않는다.
+이번 즉시 단발 발행의 성공과 별개인 만료 보호 공백이며, 만료 메시지 시험·제품 수정은 이번에 하지 않았다.
+관측한 원인 구분·원 ID·현재 boot 검사·유한 주입 시간·중복 처리 보호를 삭제하지 않는다.
+
+원 MQTT 결과·Telemetry 표본·실행/서비스 후속 조회·해시는 기존 로컬 증거 폴더의
+`direct-three-commands/`에 보존했다. 정확한 request와 result는 각 `direct-*.json`,
+요약은 `summary.json`, 서비스·host 조회는 `post-command-readback.json`이다.
+
+<a id="auto-delay-map-20261108"></a>
+### 시험 지도 공급 후 실제 AUTO 지연 재시험 — 2026-11-08
+
+**실제 AUTO 계산의 선행조건을 확보하지 못해 계산 중 지연·deadline·승계 수락은 미완료다.**
+이 절은 앞 절의 세 명령 수락·종결 결과와 구별한다. 실제 계산 뒤에 주입하라는 요청에 따라
+이번에는 AUTO 지연 명령을 발행하지 않았고, deadline 계수 0을 정상 계산의 증거로 쓰지 않았다.
+
+사용자가 허용한 Worker/mock Gateway 일시 정지·A/B 시험 통신 설정과 재기동 범위에서,
+FW1.0.33과 기존 64×32/0.1m 시험 지도·장애물·codec·가상 장치·제품 Gateway를 재사용했다.
+기존 자격은 재사용했고 firmware 재빌드·교체, 실제 장치 open, CPU 정책·E4·원장 초기화는 하지 않았다.
+시험 실행은 A domid103/`5615b884-87d3-4743-a4db-4d1da4e23db8`,
+B domid104/`e73ed3e5-6a03-4e48-86ad-d3a2262bd0c1`이었다. 이는 설정 공급을 위한 기동이며 자동 복구가 아니다.
+
+| 시도 | 결과와 해석 |
+|---|---|
+| 첫 실행 | 시험용 가상 장치 프로세스 entry 확인이 3초를 넘어 제품 준비 전에 종료 |
+| `scene-r2` | 프로세스 시작·준비를 기존 총 fixture 준비 20초 안에서 구분. 제품 readiness 20초는 유지. 차량 표본 73건 수신, mapper 만료 거절 215회, 지도 0건. `MANUAL_SELECTED_DISARMED`에서 종료 |
+| `scene-r3` | 시험 mapper만 Gateway의 원 VehicleSample을 직접 소비해 MQTT 관측 대기 구간을 분리. 원 시각·200ms 검사는 유지. 지도 전송 요청/큐 수락 57건. 앱의 실제 수신·채택·계산은 입증하지 못했고 같은 준비 경계에서 종료 |
+
+마지막 시도의 A CPU 정상 표본 11개는 14.880~18.377%(마지막 18.201%),
+B 29개는 14.568~18.121%(마지막 17.706%)였다. AUTO 지연을 발행하지 않았으므로 지연 효과가 아니다.
+두 VM의 `loop.completed_total`, `loop.in_flight`, `loop.deadline_miss_total`은 모두 0이었다.
+앱은 MANUAL `POSE_UNAVAILABLE`, AUTO `STATE_PREPARING`, progress_seq=0을 보고했다.
+마지막 snapshot에는 두 binding이 있었지만, 도중 DriveLink에서 `LINK_BINDING` 45회,
+`LINK_VEHICLE_UNAVAILABLE` 11회, `LINK_STALE` 3회를 거절했다. 일회 관측을 지속 준비로 대신하지 않았다.
+
+Gateway는 `SAFE_STOP/DISARMED`, output_permitted=false를 유지했다. B 승계는 없었다.
+이는 주입 지연에 대한 대응을 입증한 것이 아니라 기존의 준비되지 않은 상태를 보호한 결과다.
+종료 시 공개 protect 요청은 PROTECTED로 회수됐고 actor·IPC·link·binding·가상 장치 종료를 확인했다.
+각 시험 E4의 전후 소비는 0→0이며 원 상태 파일의 실제 부재를 보존했다.
+시험 mapper의 직접 VehicleSample 대조를 실제 Jetson의 MQTT 차량 관측 소비 수락으로 확대하지 않는다.
+
+추가 확인이 필요한 경계는 Gateway 원 차량 표본→DriveLink clock/pose→앱 current_vehicle/준비 채택과
+binding 지속성이다. 제품 검증을 완화하거나 장기 READY 분석·무주입 반복으로 확대하지 않았다.
+정확한 결과·실행 도구·해시는 로컬 `Documents/Codex/2026-11-08/auto-delay-map/`에 보존한다.
+`scene*/scene-delay-result.json`, `environment-result.json`은 실패·정리·E4를 포함하고,
+최종 원 설정·서비스·VM·비밀 사본 정리는 `post-test-readback.json`으로 별도 확인한다.
+제품 코드 추가 수정·EC2·commit/push는 하지 않았다.
+
+복원 후 A는 domid105/`100e0902-5d23-4e45-b4fa-6545e836b657`,
+B는 domid106/`b6611a35-7803-43cf-ab79-b1f2e37f0f51`이며 FW1.0.33을 유지한다.
+원 통신 설정 4개의 정확한 원 바이트·CPU 정책·Debian 원 실행을 확인했다.
+API/Gateway/Worker 모두 active, 운영 Gateway는 mock·SAFE_STOP·출력 차단이다.
+시험 브로커는 returncode=0으로 종료했고 잔존 소유 프로세스는 없었다.
+원 설정 대조 뒤 소유 비밀 사본 6개만 정리했으며 필수 기록·receipt·시험 Authority는 보존했다.

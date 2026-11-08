@@ -20,6 +20,12 @@
 `xenova-platform`의 provisioning/profile/registration·Bootstrap·first-boot와 broker provider를 같은 내부 후보로 설치한다.
 일반 full HTTP 호출자까지 새 journal 선택이나 동일 commit 교체를 요구하지 않는다.
 
+병렬 binding 후속의 `xenova_drive_binding`은 같은 후보 `xenova_management.ReadContext.validate_one`의
+call-local 반환 근거를 사용한다. 둘은 기존 `xenova-platform` 패키지에 함께 설치하며 신 reader와 옛 Manager를
+따로 섞지 않는다. Gateway의 feedback/output owner도 같은 패키지 후보로 교체한다. 외부 Worker·HTTP 호출자에게
+새 인자·저장 버전 선택을 요구하지 않는다. [최신 검증 범위](../verification/recovery-scenario-closure-20261030.md#parallel-binding-feedback-20261106)의
+ARM 모듈 설치 fixture와 전체 RPM/이미지·운영 교체를 구분한다. 이번 보드 시험은 임시 module path만 사용한다.
+
 <a id="registration-api"></a>
 ### 등록 조회·FastAPI 통지의 교체
 
@@ -313,3 +319,26 @@ fixture의 실제 UUID/template/version/key·기존 예산·관측 지점과 정
 RAM 표시 기준의 최신 후속은 [최근 관측 계약 마감](../verification/recovery-scenario-closure-20261030.md#ram-recent-observation-20261104)이다. 계약·참조 도구의 별도 제공물은 `ram-recent-observation-contract-2.1-20261104.tar.gz`다. 기존 불변 `1.0.8` firmware와 이전 bundle을 덮지 않는다. 이 후속은 host 소비 참조·문서 변경이며 FastAPI 응답·권한·서비스·운영 설정을 확장하지 않는다.
 
 2026-11-05 다음 이미지 선택은 주행 A/B 공통 1.0.8로 맞췄다. default lock·factory metadata·조립 예시는 동일한 불변 manifest를 참조한다. 로컬 release/seed 검증과 실제 전체 이미지 빌드·운영 VM 전환은 [선택 검증](../verification/recovery-scenario-closure-20261030.md#image-default108-20261105)에서 구분한다. 기존 설치·UUID·자격·운영 firmware는 바꾸지 않는다.
+
+2026-11-06 lattice 연결 슬롯 보완은 새 불변1.0.9로 ARM 빌드·포장하고 **소유 시험 B만** 설치했다.
+기존 TCP/UDP 공통 슬롯에 DHCP 직접 handler를 포함하도록 프로필 최소값을 검증한다.
+기본 이미지 lock·factory 선택은1.0.8을 유지하며 새 제공물·실제 TCP4+DHCP1·시험 경계는
+[보드 예산 후속](../verification/recovery-scenario-closure-20261030.md#budget-board-observations-20261106)에 연결한다.
+설치·기동·MQTT 연결 성공은 앱 준비·출력 허가·물리 장치 수락이 아니다.
+
+2026-11-06 저녁~11-07 후속의 1.0.10/1.0.11/1.0.12는 같은 16MiB/1vCPU의 불변 시험 후보다.
+callback 수신 시각·선택 진단·제한 0 명령 시도를 구분하며 기본 image/factory 선택은1.0.8이다.
+Gateway의 첫 제출 odom·외부 Paho loop·native owner read는 기존 package의 관련 모듈을 함께 교체할 대상이다.
+새 42모듈 설치 fixture의 ARM import는 통과했으나 정규 RPM/이미지 갱신은 하지 않았다.
+ARM/QEMU PTY ioctl 실패와 실제 B 시험의 남은 입력 지연·미수락 baseline은
+[제출 경계 후속](../verification/recovery-scenario-closure-20261030.md#clock-retry-submit-20261106)에서 구분한다.
+B는1.0.8·원 통신 설정으로 복원했고 Worker/mock Gateway 복구·소유 broker/자격 사본 정리를 확인했다.
+시험용 `/run` 소스를 운영 설치본으로 취급하거나 새 firmware를 검증된 기본값으로 승격하지 않는다.
+
+2026-11-07 장애 범위 보완의 FW1.0.33은 새 불변 bundle로 ARM 빌드하고 보드 A/B에 개별 적용했다.
+Python은 기존 Manager/Execution/binding·Worker·Gateway·공용 MQTT 설치 경로의 같은 후보를 대조한다.
+paired binding은 기존 `${libexecdir}/xenova-domain-identities-native`를 재사용한다.
+`xenova-platform_1.0.bb`가 이미 이 helper를 빌드해 0755로 설치하므로 새 runtime 의존성이나 recipe 분해는 없다.
+새 필수 공개 옵션·journal 버전 선택·운영 예산은 추가하지 않았다.
+실제 import·설치 파일 hash·서비스 복구는 [시연 범위 검증](../verification/recovery-scenario-closure-20261030.md#recovery-demo-20261107)에 기록한다.
+이는 정규 RPM·전체 이미지 재빌드, 이미지/factory 기본 firmware 변경, 주행 종단 수락의 증거가 아니다.

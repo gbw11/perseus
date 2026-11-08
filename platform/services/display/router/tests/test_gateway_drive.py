@@ -1,4 +1,5 @@
 from dataclasses import replace
+import logging
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -9,7 +10,7 @@ from xenova_display.gateway import GatewayReader, normalize
 from xenova_display.main import create_app
 from xenova_display.mqtt import MqttSource
 from xenova_display.state import StateStore
-from xenova_display.config import DISPLAY_DRIVE_TOPIC, DISPLAY_DRIVE_TYPE
+from xenova_display.config import FeedSettings
 from test_feed import settings, domains, VM1, VM2, VM3, message
 
 HOST = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
@@ -29,7 +30,7 @@ def project(**changes):
 
 def gateway_store(settings):
     now = [100.0]
-    store = StateStore(replace(settings, drive_transport='gateway'), clock=lambda: now[0])
+    store = StateStore(settings, clock=lambda: now[0])
     store.poll_success(domains())
     return store, now
 
@@ -149,22 +150,57 @@ def test_expiry_failure_recovery_and_mqtt_independence(settings):
         store.gateway_success(project(owner=VM2), observed_mono=102.6)
 
 
-def test_gateway_mode_excludes_mqtt_control_but_keeps_guest_topics(settings):
+def test_no_mqtt_driving_state_but_guest_topics_are_kept(settings):
     store, _ = gateway_store(settings)
     source = MqttSource(store)
-    assert DISPLAY_DRIVE_TOPIC not in source.topics
+    assert 'xenova/v1/display/drive-state' not in source.topics
+    assert not any('/vehicle/' in t or '/display/' in t for t in source.topics)
     assert any('/apps/' in t for t in source.topics)
-    env = message(kind=DISPLAY_DRIVE_TYPE, mode='MANUAL', active_vm_id=VM2)
+    env = message(kind='display.drive_state', mode='MANUAL', active_vm_id=VM2)
     env.pop('vm_id'); env['source_id'] = 'dom0-gateway'
-    assert not store.ingest(DISPLAY_DRIVE_TOPIC, env)
+    assert not store.ingest('xenova/v1/display/drive-state', env)
     assert store.snapshot()['drive']['mode'] == 'unknown'
 
 
-def test_mqtt_mode_remains_default(settings):
-    store = StateStore(settings)
-    assert DISPLAY_DRIVE_TOPIC in MqttSource(store).topics
-    with pytest.raises(ValueError):
-        store.gateway_success(project(), observed_mono=0)
+def test_retired_drive_transport_setting_is_ignored_with_warning(settings, tmp_path, monkeypatch, caplog):
+    path = tmp_path / 'bindings.json'
+    path.write_text('[' + ','.join(b.model_dump_json() for b in settings.bindings) + ']', encoding='utf-8')
+    monkeypatch.setenv('XENOVA_DISPLAY_BINDINGS', str(path))
+    monkeypatch.setenv('XENOVA_DISPLAY_TOKEN', 'test-only-token')
+    monkeypatch.setenv('XENOVA_DISPLAY_DRIVE_TRANSPORT', 'mqtt')
+    monkeypatch.setenv('XENOVA_DISPLAY_CONTROL_SOURCE', 'dom0-gateway')
+    with caplog.at_level(logging.WARNING, logger='xenova_display.config'):
+        loaded = FeedSettings.from_env()
+    assert loaded.bindings == settings.bindings
+    assert not hasattr(loaded, 'drive_transport')
+    assert 'XENOVA_DISPLAY_DRIVE_TRANSPORT' in caplog.text and 'XENOVA_DISPLAY_CONTROL_SOURCE' in caplog.text
+    assert 'xenova/v1/display/drive-state' not in MqttSource(StateStore(loaded)).topics
+    caplog.clear()
+    monkeypatch.setenv('XENOVA_DISPLAY_DRIVE_TRANSPORT', 'gateway')
+    monkeypatch.delenv('XENOVA_DISPLAY_CONTROL_SOURCE')
+    with caplog.at_level(logging.WARNING, logger='xenova_display.config'):
+        FeedSettings.from_env()
+    assert caplog.text == ''
+
+
+def test_missing_gateway_client_starts_with_unknown_driving_state(settings):
+    store, _ = gateway_store(settings)
+    attempts = []
+    def unavailable(_):
+        attempts.append(1)
+        raise FileNotFoundError('no Gateway client or host boot id on this machine')
+    app = create_app(store.settings, store=store, driver=SimpleNamespace(list_domains=domains),
+                     mqtt_factory=NoMqtt, gateway_factory=unavailable)
+    with TestClient(app) as client:
+        import time
+        deadline = time.monotonic() + 2
+        while not attempts and time.monotonic() < deadline:
+            time.sleep(.01)
+        drive = client.get('/api/v1/display/state',
+                           headers={'Authorization': f'Bearer {settings.token}'}).json()['drive']
+    assert attempts
+    assert drive['mode'] == 'unknown' and drive['active_vm_id'] is None
+    assert drive['source']['status'] == 'unknown' and drive['authority'] is None
 
 
 class NoMqtt:
@@ -194,7 +230,7 @@ def test_gateway_observation_reaches_authenticated_rest_ws_and_presentation(sett
     assert reader.read.call_count == 1  # No per-client extra Gateway poll.
 
 
-@pytest.mark.parametrize('changes', [dict(drive_transport='bad'), dict(gateway_budget_s=0),
+@pytest.mark.parametrize('changes', [dict(gateway_budget_s=0),
     dict(gateway_budget_s=float('nan')), dict(gateway_budget_s=2), dict(gateway_socket='relative')])
 def test_invalid_gateway_configuration_fails(settings, changes):
     with pytest.raises(ValueError):

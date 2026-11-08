@@ -22,6 +22,81 @@ static int health_clock(uint64_t *out){assert(clock_index<4);*out=clock_values[c
 static int no_memory(void *context,struct xm_span control,struct xm_span input,int64_t age,struct drive_sample *out){
  (void)context;(void)control;(void)input;(void)age;(void)out;return -ENOMEM;
 }
+static struct drive_command_context command_context(void){
+ struct drive_command_context c={.control_revision=1,.connection_revision=2,.lifetime=3,
+  .generation=4,.mode=DRIVE_AUTO};
+ strcpy(c.app_instance,A);return c;
+}
+static void command_attempt_tests(void){
+ struct drive_command_context c=command_context();struct drive_command_gate gate={0};
+ /* The first stop is never delayed; rejection/later TX drop cannot suppress
+  * retries permanently. Existing supervision, not a new timer, advances it. */
+ unsigned attempts=0,accepted=0,transmitted=0;
+ for(unsigned release=0;release<50;release++){
+  if(!drive_command_attempt_due(&gate,&c,release/5,"STATE_PREPARING",0,0))continue;
+  attempts++;
+  if(attempts==1)continue; /* existing mailbox rejected this attempt */
+  accepted++;
+  if(attempts==2)continue; /* queued candidate later expired/dropped */
+  transmitted++;
+ }
+ assert(attempts==10&&accepted==9&&transmitted==8);
+ assert(!drive_command_attempt_due(&gate,&c,9,"STATE_PREPARING",0,0));
+ /* A healthy neutral result is real work, not an unready zero candidate. */
+ for(unsigned i=0;i<50;i++)assert(drive_command_attempt_due(&gate,&c,9,NULL,0,0));
+ assert(!gate.restricted);
+ assert(drive_command_attempt_due(&gate,&c,9,"STATE_PREPARING",0,0));
+ assert(!drive_command_attempt_due(&gate,&c,9,"STATE_PREPARING",0,0));
+ assert(drive_command_attempt_due(&gate,&c,9,NULL,.3f,.1f));
+ assert(drive_command_attempt_due(&gate,&c,9,"STATE_PREPARING",0,0));
+ /* Every changed safety context/reason gets its immediate first stop. */
+ assert(drive_command_attempt_due(&gate,&c,9,"POSE_UNAVAILABLE",0,0));
+ assert(!drive_command_attempt_due(&gate,&c,9,"POSE_UNAVAILABLE",0,0));
+#define CHANGED(member,value) do {c.member=(value);assert(drive_command_attempt_due(&gate,&c,9,"POSE_UNAVAILABLE",0,0)); \
+ assert(!drive_command_attempt_due(&gate,&c,9,"POSE_UNAVAILABLE",0,0));} while(0)
+ CHANGED(control_revision,5);CHANGED(connection_revision,6);CHANGED(lifetime,7);
+ CHANGED(generation,8);CHANGED(mode,DRIVE_MANUAL);
+#undef CHANGED
+ strcpy(c.app_instance,B);
+ assert(drive_command_attempt_due(&gate,&c,9,"POSE_UNAVAILABLE",0,0));
+ assert(!drive_command_attempt_due(&gate,&c,9,"POSE_UNAVAILABLE",0,0));
+ struct drive_command_gate other={0};
+ assert(drive_command_attempt_due(&other,&c,9,"POSE_UNAVAILABLE",0,0));
+ /* Preserve the original path for malformed/nonzero outputs or metadata;
+  * do not let throttling conceal an existing validator's first cause. */
+ const float values[]={.1f,NAN,INFINITY,-INFINITY};
+ for(size_t i=0;i<sizeof(values)/sizeof(values[0]);i++){
+  assert(drive_command_attempt_due(&gate,&c,9,"POSE_UNAVAILABLE",values[i],0));
+  assert(!gate.restricted);
+  assert(drive_command_attempt_due(&gate,&c,9,"POSE_UNAVAILABLE",0,values[i]));
+  assert(!gate.restricted);
+ }
+ char reason[66];memset(reason,'X',sizeof(reason));reason[65]=0;
+ assert(drive_command_attempt_due(&gate,&c,9,reason,0,0)&&!gate.restricted);
+ reason[64]=0;
+ assert(drive_command_attempt_due(&gate,&c,9,reason,0,0));
+ assert(!drive_command_attempt_due(&gate,&c,9,reason,0,0));
+ assert(drive_command_attempt_due(&gate,&c,9,"",0,0)&&!gate.restricted);
+ assert(drive_command_attempt_due(&gate,NULL,9,"POSE_UNAVAILABLE",0,0)&&!gate.restricted);
+ assert(drive_command_attempt_due(NULL,&c,9,"POSE_UNAVAILABLE",0,0));
+ struct drive_command_context bad=c;
+#define INVALID(member,value) do {bad=c;bad.member=(value); \
+ assert(drive_command_attempt_due(&gate,&bad,9,"POSE_UNAVAILABLE",0,0)&&!gate.restricted);} while(0)
+ INVALID(control_revision,0);INVALID(connection_revision,0);INVALID(lifetime,0);
+ INVALID(generation,0);INVALID(mode,DRIVE_STOP);INVALID(mode,(enum drive_mode)99);
+#undef INVALID
+ bad=c;memset(bad.app_instance,'X',sizeof(bad.app_instance));
+ assert(drive_command_attempt_due(&gate,&bad,9,"POSE_UNAVAILABLE",0,0)&&!gate.restricted);
+ bad=c;bad.app_instance[0]=0;
+ assert(drive_command_attempt_due(&gate,&bad,9,"POSE_UNAVAILABLE",0,0)&&!gate.restricted);
+ /* A new supervisor observation (including the first check0 -> check1) can
+  * retry the same restriction; neither timestamp nor command TTL is stored. */
+ assert(drive_command_attempt_due(&gate,&c,0,"POSE_UNAVAILABLE",0,0));
+ assert(!drive_command_attempt_due(&gate,&c,0,"POSE_UNAVAILABLE",0,0));
+ assert(drive_command_attempt_due(&gate,&c,1,"POSE_UNAVAILABLE",0,0));
+ printf("command attempts: restricted 50->10, neutral 50->50; first/retry/context/error passthrough PASS; gate=%zu pair=%zu bytes\n",
+  sizeof(gate),2*sizeof(gate));
+}
 static void health_tests(void){
  struct drive_controller c;struct drive_result r;
  struct xdr_snapshot resource={.sample=1,.raw={.at_ms=100},.cpu={.start_ms=0,.end_ms=100,.percent_milli=100000},
@@ -54,6 +129,7 @@ static void health_tests(void){
  puts("health adapter: actual algorithms, AUTO-only resource fault, serial deadline, fresh recovery PASS");
 }
 int main(void){
+ command_attempt_tests();
  health_tests();
  for(int swapped=0;swapped<2;swapped++){
   const char *own=swapped?B:A,*other=swapped?A:B;

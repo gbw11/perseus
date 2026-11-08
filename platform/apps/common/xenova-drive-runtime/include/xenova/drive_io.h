@@ -24,8 +24,10 @@ struct xd_inputs {
 struct xd_candidate {
  uint64_t id, created_us, queued_us, capture_us, control_revision, connection_revision;
  int64_t expires_ms;
- char topic[XM_TOPIC_MAX], json[160];
+ char topic[XM_TOPIC_MAX], json[XM_COMMAND2_BYTES + 1];
  char app_instance[XM_UUID_LEN+1];
+ struct xm_manual_input manual_source; /* immutable completed-job source */
+ bool modern_manual; /* false for STOP and the explicit legacy profile */
 };
 enum xd_disposition { XD_SENT, XD_SEND_FAILED, XD_REPLACED, XD_EXPIRED, XD_CONTEXT_CHANGED, XD_STOPPED };
 struct xd_delivery {

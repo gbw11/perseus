@@ -1,0 +1,161 @@
+{
+  "status": "incomplete",
+  "read_only": true,
+  "ttl_seconds": 3,
+  "source_commit": "ae6ac60",
+  "file_watcher": {
+    "seconds": 30,
+    "new_frames": 21,
+    "publication_age_seconds_median": 0.7572211532606161,
+    "publication_age_seconds_max": 1.185530235288752,
+    "publication_interval_seconds_median": 1.3838304281234741,
+    "publication_interval_seconds_max": 1.8005058765411377,
+    "expiry_between_new_files": 0
+  },
+  "paired_api": {
+    "seconds": 65,
+    "responses": 128,
+    "http_200": 128,
+    "errors": 0,
+    "stale_responses": 53,
+    "shared_expired_at_response": 34,
+    "stale_response_with_later_shared_fresh": 34,
+    "mqtt_connected": 128,
+    "expired_vm_with_current_app": 0,
+    "response_ms_median": 667.5,
+    "response_ms_max": 1448
+  },
+  "profile": {
+    "query": {
+      "ok": true,
+      "elapsed_s": 1.809490369996638,
+      "error_code": null,
+      "views": 5
+    },
+    "summary": {
+      "platform.registry": {
+        "calls": 2,
+        "errors": 0,
+        "inclusive_seconds": 0.24208869200083427,
+        "exclusive_seconds": 0.24208869200083427
+      },
+      "manager.registry-state": {
+        "calls": 18,
+        "errors": 0,
+        "inclusive_seconds": 0.014293712003563996,
+        "exclusive_seconds": 0.014293712003563996
+      },
+      "execution.publish_observation": {
+        "calls": 10,
+        "errors": 0,
+        "inclusive_seconds": 0.40037727200979134,
+        "exclusive_seconds": 0.40037727200979134
+      },
+      "external.command": {
+        "calls": 4,
+        "errors": 0,
+        "inclusive_seconds": 0.29841315199882956,
+        "exclusive_seconds": 0.29841315199882956
+      },
+      "diag.validate_all": {
+        "calls": 1,
+        "errors": 0,
+        "inclusive_seconds": 0.19151007199980086,
+        "exclusive_seconds": 0.09596815398981562
+      },
+      "diag.validate_one": {
+        "calls": 5,
+        "errors": 0,
+        "inclusive_seconds": 0.37404974000310176,
+        "exclusive_seconds": 0.11949432199980947
+      },
+      "storage.file_write": {
+        "calls": 5,
+        "errors": 0,
+        "inclusive_seconds": 0.006441055000323104,
+        "exclusive_seconds": 0.006441055000323104
+      },
+      "storage.file_fsync": {
+        "calls": 5,
+        "errors": 0,
+        "inclusive_seconds": 0.0007832890078134369,
+        "exclusive_seconds": 0.0007832890078134369
+      },
+      "storage.replace": {
+        "calls": 5,
+        "errors": 0,
+        "inclusive_seconds": 0.015604477001033956,
+        "exclusive_seconds": 0.015604477001033956
+      },
+      "storage.directory_fsync": {
+        "calls": 5,
+        "errors": 0,
+        "inclusive_seconds": 0.0008683460036991164,
+        "exclusive_seconds": 0.0008683460036991164
+      },
+      "storage.atomic_write": {
+        "calls": 5,
+        "errors": 0,
+        "inclusive_seconds": 0.05030888200417394,
+        "exclusive_seconds": 0.026611714991304325
+      },
+      "diag.publish_one": {
+        "calls": 5,
+        "errors": 0,
+        "inclusive_seconds": 0.6577347019992885,
+        "exclusive_seconds": 0.23337607999201282
+      },
+      "execution.observe_many": {
+        "calls": 1,
+        "errors": 0,
+        "inclusive_seconds": 1.199263164999138,
+        "exclusive_seconds": 0.05160523900121916
+      },
+      "manager.view": {
+        "calls": 5,
+        "errors": 0,
+        "inclusive_seconds": 0.016677558996889275,
+        "exclusive_seconds": 0.016677558996889275
+      },
+      "read.round": {
+        "calls": 1,
+        "errors": 0,
+        "inclusive_seconds": 1.6713771340000676,
+        "exclusive_seconds": 0.14877407000312814
+      },
+      "manager.call": {
+        "calls": 1,
+        "errors": 0,
+        "inclusive_seconds": 1.6932190759980585,
+        "exclusive_seconds": 0.021841941997990943
+      }
+    },
+    "hashes": {
+      "xenova_execution.py": "df36cc87e919dd9985c25a5441cb125380f87759035148b87ba165f5a3224ea7",
+      "xenova_management.py": "6ae93b5aa407a64eb798cd5cd38fe78817510ee89edf3f6459422ad09edb85a4"
+    },
+    "instrumented": true
+  },
+  "cpu": {
+    "duration_s": 10.014485604999209,
+    "cpu_core_equivalent": {
+      "xenova-display-feed.service": 0.25,
+      "mosquitto.service": 0.058,
+      "xenova-dom0-manager.service": 0.612
+    },
+    "services": {
+      "xenova-dom0-manager.service": 139068,
+      "xenova-display-feed.service": 598,
+      "xenova-drive-gateway.service": 0,
+      "mosquitto.service": 821,
+      "xenova-runtime-logs.service": 0
+    },
+    "load": "7.64 9.19 8.64 9/194 161836"
+  },
+  "artifacts": {
+    "file_timing-result.json": "dba9d573c67ef63c7764ce8774f0d759af137cbee042996a11c060a6e21087a8",
+    "paired_read-result.json": "9e84a8051351cce3b963f6530a83752be1e78c99fd25491d995dbfe678fec62c",
+    "profile_read-result.json": "c7be8cc98126775f9771c579f43ec4bd69222a0f16eecbff8ff9b46a93a3ab25",
+    "cpu_read-result.json": "15aeb4185b41e4f7672ccdb61e2c83738bf750539190aaa3e9d679b956f906bb"
+  }
+}

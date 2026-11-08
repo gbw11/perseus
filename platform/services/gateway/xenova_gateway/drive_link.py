@@ -9,15 +9,17 @@ from pathlib import Path
 from types import SimpleNamespace
 import os
 import queue
+import select
 import socket
 import stat
 import threading
 import time
 from uuid import UUID
 
-from xenova_drive_world import schema,encode,decode,validate,MAX_BYTES
+from xenova_drive_world import schema,encode,decode,validate,MAX_BYTES,PreparedClock
 from xenova_mqtt.drive_binding import app_instance
 from .planning import context
+from .mission_link import MissionLinkPort, BudgetEnvelope
 
 PREFIX='xenova/v1'
 VEHICLE_TOPIC=PREFIX+'/vehicle/state.pb'
@@ -59,20 +61,28 @@ def stamp(*parts):
 
 
 def state_context(value):
+    metadata=()
+    if hasattr(value,'mission') and value.mission.kind:
+        metadata=(value.mission.SerializeToString(deterministic=True).hex(),
+            tuple(p.SerializeToString(deterministic=True).hex() for p in value.segments),
+            value.direction_gate.SerializeToString(deterministic=True).hex())
     return dict(frame=stamp(value.frame_epoch),configuration=stamp(value.configuration,value.calibration,value.primitive),
-        maneuver=stamp(value.reference_id,value.maneuver_revision),odom_epoch=value.odom_epoch,
+        maneuver=stamp(value.reference_id,value.maneuver_revision,*metadata),odom_epoch=value.odom_epoch,
         road_revision=str(value.reference_revision),route_revision=str(value.path_revision))
 
 
 class DriveLinkProvider:
     """Actor-only source/target checks. The full body stays outside Authority."""
-    def __init__(self,runner,io,trust,gateway_instance):
+    def __init__(self,runner,io,trust,gateway_instance,*,mission_port=None):
         self.runner=runner;self.io=io;self.trust=trust;self.instance=str(UUID(gateway_instance))
         self.copies=OrderedDict();self.inflight={};self.accepted=0;self.rejected=0;self.evicted=0
         self.reasons={};self.last_vehicle=None
         self.application_rejections={}
         self.application_order={}
         self.world_failure=None
+        self.missions=MissionLinkPort(io.vms) if mission_port is None else mission_port
+        self._scene=None
+        self.vehicle_history=OrderedDict();self.vehicle_origin=None
         io.configure(runner.authority.host,self.instance)
 
     def reject(self,reason):
@@ -106,39 +116,199 @@ class DriveLinkProvider:
         self._prune()
         return self.runner.machine.states.referenced()|{r['identity'] for r in self.inflight.values()}
 
+    def _grant_context_matches(self,grant):
+        m=self.runner.machine
+        owner=str(UUID(bytes=grant.owner_vm))
+        row=m.bindings.current(owner,self.runner._clock()) if owner in m.vm_ids else None
+        instance=None if row is None else app_instance(row,'autonomous')
+        if (row is None or instance is None or owner!=m.active_vm or grant.control_generation!=m.generation
+                or grant.pi_host_boot!=UUID(m.authority.host).bytes
+                or grant.gateway_instance!=UUID(self.instance).bytes
+                or grant.owner_execution!=UUID(row['execution_id']).bytes
+                or grant.app_instance!=UUID(instance).bytes):return False
+        if self.trust is None:return not grant.admitted
+        return (grant.vehicle==self.trust.vehicle and grant.configuration==self.trust.configuration
+            and grant.calibration==self.trust.calibration and grant.primitive==bytes.fromhex(self.trust.primitive))
+
+    def _current_mission(self,vm):
+        raw=self.missions.current_grant(vm)
+        if raw is None:return None
+        grant=decode(raw,schema.MissionGrant)
+        return grant if self._grant_context_matches(grant) else None
+
+    def clear_scene(self):
+        """현재 전송 사본만 철회한다. 원 grant/HWM/임무 기록이나 기한을 새로 만들지 않는다."""
+        self._scene=None
+        clear=getattr(self.io,'clear_scene',None)
+        if clear is not None:clear()
+
+    def publish_scene(self,raw):
+        """실제 Scene owner가 선택한 원 grant를 두 VM의 기존 state 연결에 전달한다."""
+        if type(raw) is not bytes or len(raw)>1024:raise ValueError('LINK_SCENE_SIZE')
+        grant=decode(raw,schema.SceneGrant);m=self.runner.machine
+        if (m is None or grant.pi_host_boot!=m.authority.host or grant.gateway_instance!=self.instance
+                or not grant.issued_pi_us<=int(self.runner._clock()*1e6)<grant.valid_until_pi_us):
+            return self.reject('SCENE_CONTEXT')
+        if self.trust is not None and any(getattr(grant,key)!=getattr(self.trust,key) for key in
+                ('vehicle','map_epoch','frame_epoch','odom_epoch','configuration','calibration','primitive')):
+            return self.reject('SCENE_SOURCE')
+        value=schema.DriveLink(major=2);value.scene_grant.CopyFrom(grant)
+        wire=encode(value);self._scene=raw,wire
+        for vm in self.io.vms:self.io.offer(inbound(vm),wire,'scene')
+        return True
+
+    def _send_scene(self,vm):
+        if self._scene is None:return
+        grant=decode(self._scene[0],schema.SceneGrant)
+        runtime=getattr(self.runner,'scene_runtime',None)
+        now=int(self.runner._clock()*1e6)
+        if (now>=grant.valid_until_pi_us or runtime is None
+                or grant.lifecycle_state==2 and runtime.motion_grant(now) is None):
+            self.clear_scene();return
+        self.io.offer(inbound(vm),self._scene[1],'scene')
+
+    def publish_mission(self,grant):
+        """Actor delivery after the durable issuer's commit; this method issues no authority.
+
+        Standby receives the current owner's original receipt too. A new owner
+        requires its issuer's new context, preserving the original mission budget.
+        """
+        if type(grant) is not schema.MissionGrant:raise ValueError('expected typed mission grant')
+        candidate=schema.MissionGrant();candidate.CopyFrom(grant);candidate.DiscardUnknownFields()
+        grant=candidate;validate(grant)
+        if not self._grant_context_matches(grant):return self.reject('MISSION_CONTEXT')
+        runtime=getattr(self.runner,'scene_runtime',None)
+        if (grant.admitted and grant.scene_admission_id!=bytes(16) and
+                (runtime is None or not runtime.mission_allowed(grant,int(self.runner._clock()*1e6)))):
+            return self.reject('MISSION_SCENE_AUTHORITY')
+        canonical=encode(grant)
+        for vm in self.io.vms:
+            old=self.missions.current_grant(vm)
+            if old is None:continue
+            previous=decode(old,schema.MissionGrant)
+            if (previous.mission_id,previous.mission_revision)==(grant.mission_id,grant.mission_revision):
+                if grant.grant_revision<previous.grant_revision:return self.reject('MISSION_GRANT_OLD')
+                binding=('pi_host_boot','gateway_instance','owner_vm','owner_execution','app_instance','control_generation')
+                same_binding=all(getattr(previous,k)==getattr(grant,k) for k in binding)
+                if same_binding and grant.grant_revision==previous.grant_revision and canonical!=old:
+                    return self.reject('MISSION_GRANT_CONFLICT')
+        link=schema.DriveLink(major=2);link.mission_grant.CopyFrom(grant)
+        wire=encode(link)
+        for vm in self.io.vms:
+            self.missions.publish_grant(vm,grant)
+            self.io.offer(inbound(vm),wire,'grant')
+        return True
+
+    @staticmethod
+    def _state_mission_matches(state,grant):
+        mission=state.mission
+        return bool(grant.admitted and state.source_generation==grant.control_generation
+            and all(getattr(mission,name)==getattr(grant,name) for name in
+                ('mission_id','mission_revision','kind','operator_request_nonce','strategy','grant_revision',
+                 'mission_deadline_pi_us','execution_deadline_pi_us','correction_attempts_used',
+                 'cancel_fence_revision','search_deadline_pi_us','scene_admission_id'))
+            and mission.scene_admission_revision==grant.scene_revision)
+
+    def _send_budget_reply(self,vm,raw):
+        reply=decode(raw,schema.MissionBudgetReply)
+        link=schema.DriveLink(major=2);link.budget_reply.CopyFrom(reply)
+        self.io.offer(inbound(vm),encode(link),'budget')
+
+    def take_budget_request(self):
+        """Nonblocking original input for the actor's durable reservation owner."""
+        return self.missions.take_budget()
+
+    def complete_budget_request(self,original,reply):
+        """Deliver an issuer result without equating reservation with propulsion permission."""
+        raw=self.missions.complete_budget(original,reply)
+        m=self.runner.machine;row=m.bindings.current(original.vm,self.runner._clock())
+        if (row is None or row['execution_id']!=original.execution
+                or app_instance(row,'autonomous')!=original.app_instance):return False
+        self._send_budget_reply(original.vm,raw)
+        if reply.HasField('grant'):self.publish_mission(reply.grant)
+        return True
+
     def receive(self,vm,link,received,accepted_wire=None):
         m=self.runner.machine;now=self.runner._clock();kind=link.WhichOneof('payload')
         if not m or vm not in m.vm_ids or not 0<=now-received<=.5:return self.reject('LINK_STALE')
+        try:validate(link)
+        except ValueError:return self.reject('LINK_WIRE_INVALID')
+        if kind not in ('probe','snapshot','applied','budget_request'):return self.reject('LINK_DIRECTION')
         binding=m.bindings.current(vm,now)
-        if not binding or binding.get('app_state_models',{}).get('autonomous')!='stateful':return self.reject('LINK_BINDING')
+        modern=getattr(self.runner,'operator',None)
+        if not binding or (kind!='probe' or modern is None) and binding.get('app_state_models',{}).get('autonomous')!='stateful':
+            return self.reject('LINK_BINDING')
         body=getattr(link,kind)
-        execution=getattr(body,'source_execution',getattr(body,'execution',None))
-        instance=getattr(body,'source_app_instance',getattr(body,'app_instance',None))
-        named_vm=getattr(body,'source_vm',getattr(body,'vm',None))
-        if (named_vm!=vm or execution!=binding['execution_id'] or instance!=app_instance(binding,'autonomous')):
-            return self.reject('LINK_EXECUTION')
+        role='autonomous'
+        if kind=='probe' and modern is not None:
+            roles=[app for app in ('autonomous','manual') if app_instance(binding,app)==body.app_instance]
+            if len(roles)!=1:return self.reject('LINK_CLOCK_ROLE')
+            role=roles[0]
+        if kind!='budget_request':
+            execution=getattr(body,'source_execution',getattr(body,'execution',None))
+            instance=getattr(body,'source_app_instance',getattr(body,'app_instance',None))
+            named_vm=getattr(body,'source_vm',getattr(body,'vm',None))
+            if (named_vm!=vm or execution!=binding['execution_id'] or instance!=app_instance(binding,role)):
+                return self.reject('LINK_EXECUTION')
         if kind=='probe':
             if not body.sequence or not body.guest_send_us:return self.reject('LINK_CLOCK_PROBE')
-            reply=schema.DriveLink(major=1)
+            reply=schema.DriveLink(major=2)
             reply.clock.probe.CopyFrom(body);reply.clock.host_boot=m.authority.host
             reply.clock.gateway_instance=self.instance;reply.clock.pi_receive_us=int(received*1e6)
             reply.clock.pi_send_us=int(now*1e6)
-            if self.trust is not None:reply.clock.trust.CopyFrom(self.trust)
+            replay=None;peer=(vm,binding['execution_id'],app_instance(binding,role))
+            if modern is not None:
+                peers=[]
+                for registered_vm in m.vm_ids:
+                    current_row=m.bindings.current(registered_vm,now)
+                    if current_row is not None:
+                        peers.extend((registered_vm,current_row['execution_id'],app_instance(current_row,a)) for a in ('autonomous','manual')
+                            if app_instance(current_row,a) is not None)
+                modern.clocks.register_peers(peers)
+                try:receipt,replay=modern.clocks.accept_probe(body,peer,m.generation,int(now*1e6))
+                except ValueError:return self.reject('LINK_CLOCK_RECEIPT')
+                if receipt is not None:reply.clock.accepted_receipt.CopyFrom(receipt)
+                if modern.clocks.policy is not None:
+                    reply.clock.guest_clock_valid_until_pi_us=int(received*1e6)+modern.clocks.policy.lease_us
+            if self.trust is not None and role=='autonomous':reply.clock.trust.CopyFrom(self.trust)
             current=self.runner.device_view().get('vehicle_sample')
             if not current:return self.reject('LINK_VEHICLE_UNAVAILABLE')
             reply.clock.vehicle.CopyFrom(schema.VehicleSample(major=1,**{**current,'gateway_instance':self.instance}))
-            if self.trust is not None:
+            if self.trust is not None and role=='autonomous':
                 if current['calibration']!=self.trust.calibration:return self.reject('LINK_CALIBRATION')
                 reply.clock.trust.odom_epoch=current['odom_epoch']
+            mission=self._current_mission(vm)
+            if mission is not None and role=='autonomous':reply.clock.current_mission.CopyFrom(mission)
+            if modern is not None:
+                witness=modern.direction_witness(vm,role)
+                if witness is not None:reply.clock.direction_gate.CopyFrom(witness)
             # An unavailable/expired mapper clock blocks AUTO world adoption,
             # not the independent Pi vehicle clock or MANUAL input path.
-            self.io.offer(inbound(vm),encode(reply),'clock');self._send_copy(vm)
+            if modern is not None:
+                from .guest_clock import OwnedPreparedClock
+                self.io.offer(inbound(vm),OwnedPreparedClock(reply,peer,m.generation,replay),'clock-manual' if role=='manual' else 'clock')
+            else:self.io.offer(inbound(vm),PreparedClock(reply),'clock')
+            if role=='autonomous':self._send_scene(vm);self._send_copy(vm)
         elif kind=='snapshot':
             if self.trust is None:return self.reject('WORLD_PROFILE_UNAVAILABLE')
             if (m.active_vm!=vm or m.active_app!='autonomous' or not m.output_permitted or
                     m.authority.protected(vm) or body.source_generation!=m.generation):return self.reject('STATE_SOURCE_AUTHORITY')
             if body.configuration!=self.trust.configuration or body.primitive!=self.trust.primitive or body.calibration!=self.trust.calibration:
                 return self.reject('STATE_CONFIGURATION')
+            # G2's existing maneuver model cannot represent parking execution.
+            # Full phase/episode admission uses a separate explicit later contract.
+            if body.mission.kind==2:
+                modern=getattr(self.runner,'operator',None)
+                if modern is None:return self.reject('STATE_PARKING_ADMISSION_UNAVAILABLE')
+                return modern.missions.observe_execution(body,now)
+            if body.mission.kind:
+                mission=self._current_mission(vm)
+                if mission is None or not self._state_mission_matches(body,mission):
+                    return self.reject('STATE_MISSION_CONTEXT')
+                runtime=getattr(self.runner,'scene_runtime',None)
+                if (mission.scene_admission_id!=bytes(16) and
+                        (runtime is None or not runtime.mission_allowed(mission,int(now*1e6)))):
+                    return self.reject('STATE_SCENE_AUTHORITY')
             try:identity=str(UUID(body.message_id))
             except ValueError:return self.reject('STATE_MESSAGE_ID')
             old=self.copies.get(identity)
@@ -156,7 +326,7 @@ class DriveLinkProvider:
                 maneuver=dict(kind='AVOID' if body.direction else 'FOLLOW',side={-1:'RIGHT',0:'NONE',1:'LEFT'}[body.direction],
                     phase=('FOLLOW','PASS','REJOIN')[body.maneuver_phase] if body.direction else 'FOLLOW',merge_segment=body.reference_id))
             if not m.states.receive(self._message(vm,binding,'app.state.snapshot',payload,identity)):return self.reject('STATE_SOURCE_REJECTED')
-            self.copies[identity]=(accepted_wire,(body.path_revision,body.primitive,body.calibration,body.configuration,body.maneuver_revision))
+            self.copies[identity]=(accepted_wire,(body.path_revision,body.primitive,body.calibration,body.configuration,body.maneuver_revision),state_context(body))
             if removable is not None:del self.copies[removable];self.evicted+=1
             for target in m.vm_ids:
                 if target!=vm:self._send_copy(target)
@@ -171,9 +341,14 @@ class DriveLinkProvider:
             if body.HasField('copy_message_id'):
                 saved=self.copies.get(body.copy_message_id)
                 if not saved or saved[1]!=(body.path_revision,body.primitive,body.calibration,body.configuration,body.maneuver_revision):return self.reject('STATE_PATH_CONTEXT')
+                candidate=state_context(body)
+                if any(candidate[k]!=saved[2][k] for k in ('frame','configuration','odom_epoch','road_revision','route_revision')):
+                    return self.reject('STATE_PATH_CONTEXT')
+                applied_context=saved[2]
+            else:applied_context=state_context(body)
             payload=dict(profile='drive-state-1',execution_id=binding['execution_id'],intent_revision=binding['intent_revision'],
                 lifecycle_generation=binding['lifecycle_generation'],copy_message_id=body.copy_message_id if body.HasField('copy_message_id') else None,
-                state_revision=str(body.state_revision),context=state_context(body),
+                state_revision=str(body.state_revision),context=applied_context,
                 origin='rebuilt' if body.rebuilt else 'handoff',phase='APPLIED' if body.applied else 'REJECTED')
             received=m.states.receive(self._message(vm,binding,'app.state.applied',payload))
             held=self.inflight.get(vm)
@@ -186,10 +361,21 @@ class DriveLinkProvider:
             else:self.application_rejections.pop(vm,None)
             if received or not body.applied:self.application_order[vm]=(target,body.application_sequence,signature)
             if not received:return self.reject('STATE_APPLICATION_REJECTED')
-        else:return self.reject('LINK_DIRECTION')
+        elif kind=='budget_request':
+            result=self.missions.offer_budget(vm,binding['execution_id'],app_instance(binding,'autonomous'),
+                m.generation,body,int(received*1e6))
+            if isinstance(result,schema.MissionBudgetReply):self._send_budget_reply(vm,encode(result))
+            elif not isinstance(result,BudgetEnvelope):raise RuntimeError('invalid bounded mission port result')
         self.accepted+=1;return True
 
     def tick(self):
+        modern=getattr(self.runner,'operator',None)
+        if modern is not None:
+            for _ in range(8):
+                try:completed=self.io.clock_completions.get_nowait()
+                except queue.Empty:break
+                try:modern.clocks.sent_reply(completed)
+                except ValueError:self.reject('LINK_CLOCK_SENT_CONTEXT')
         for _ in range(2):
             item=self.io.take()
             if item is None:break
@@ -198,7 +384,14 @@ class DriveLinkProvider:
         identity=None if sample is None else tuple(sample.get(k) for k in ('host_boot','device_session','odom_epoch','pi_session','sequence'))
         if sample and identity!=self.last_vehicle:
             body=schema.VehicleSample(major=1,**{**sample,'gateway_instance':self.instance})
-            self.io.offer(VEHICLE_TOPIC,encode(body),'vehicle');self.last_vehicle=identity
+            raw=encode(body)
+            origin=tuple(sample.get(k) for k in ('host_boot','device_session','odom_epoch','pi_session'))
+            if origin!=self.vehicle_origin:self.vehicle_history.clear();self.vehicle_origin=origin
+            self.vehicle_history[body.sequence]=raw
+            while len(self.vehicle_history)>16:self.vehicle_history.popitem(last=False)
+            self.io.offer(VEHICLE_TOPIC,raw,'vehicle');self.last_vehicle=identity
+            uplink=getattr(self.runner,'mapper_uplink',None)
+            if uplink is not None:uplink.offer_vehicle(raw)
 
     def status(self):
         """Small current diagnostic view. It is not output/recovery permission."""
@@ -225,6 +418,7 @@ class DriveLinkIO:
         self.received=self.dropped=self.sent=self.failed=self.high_water=self.oversize=0
         self.first_error=None;self.failure=None;self.first_transport=None;self.connected=False
         self.host_boot=None;self.instance=None
+        self.clock_completions=queue.Queue(maxsize=8)
         self.drop_reasons={};self.first_decode_error=None;self.decode_errors=deque(maxlen=8);self.decode_details_lost=0
 
     def _drop(self,reason,error=None):
@@ -246,17 +440,29 @@ class DriveLinkIO:
         """I/O owner only: encode a candidate before actor admission. It has no
         authority until the actor actually selects this immutable byte string."""
         if self.host_boot is None or self.instance is None:raise ValueError('LINK_NOT_CONFIGURED')
-        candidate=schema.DriveLink(major=1)
+        candidate=schema.DriveLink(major=2)
         candidate.accepted.host_boot=self.host_boot;candidate.accepted.gateway_instance=self.instance
         candidate.accepted.state.CopyFrom(value.snapshot)
         return encode(candidate)
 
     def offer(self,topic,data,kind):
         if len(data)>MAX_BYTES:raise ValueError('LINK_BYTES')
-        # At most one clock and one state reply per installed VM plus one
-        # vehicle sample. Replacing optional copies never drops a G1 operation.
-        if kind not in ('clock','state','vehicle') or topic not in (*map(inbound,self.vms),VEHICLE_TOPIC):raise ValueError('LINK_OUTPUT')
-        with self.lock:self.pending[topic,kind]=bytes(data);self.high_water=max(self.high_water,len(self.pending))
+        # One clock/state/grant/budget/scene reply per VM and one vehicle sample.
+        # These bounded binary replies never replace a G1 operation.
+        if (kind not in ('clock','clock-manual','state','grant','budget','scene','vehicle') or
+                (topic!=VEHICLE_TOPIC if kind=='vehicle' else topic not in tuple(map(inbound,self.vms)))):
+            raise ValueError('LINK_OUTPUT')
+        if kind in ('clock','clock-manual') and (not isinstance(data,PreparedClock) or data.vm not in self.vms or topic!=inbound(data.vm)):
+            raise ValueError('LINK_CLOCK_OUTPUT')
+        with self.lock:
+            self.pending[topic,kind]=data if kind in ('clock','clock-manual') else bytes(data)
+            self.high_water=max(self.high_water,len(self.pending))
+
+    def clear_scene(self):
+        """아직 선택되지 않은 scene mailbox만 비운다. I/O가 이미 고른 bytes의 기한은 불변이다."""
+        with self.lock:
+            for key in tuple(self.pending):
+                if key[1]=='scene':del self.pending[key]
 
     def take(self):
         try:return self.incoming.get_nowait()
@@ -265,6 +471,26 @@ class DriveLinkIO:
     def start(self):
         if self.thread:raise RuntimeError('LINK_OWNER_EXISTS')
         self.thread=threading.Thread(target=self._run,name='gateway-drive-link',daemon=True);self.thread.start();return self
+
+    def _network_once(self,client,mqtt):
+        # All Paho calls belong to this owner. Its external-loop API avoids
+        # creating a cross-thread wake socket for the same thread to signal.
+        sock=client.socket()
+        if sock is None:return mqtt.MQTT_ERR_NO_CONN
+        try:
+            readable,writable,_=select.select([sock],[sock] if client.want_write() else [],[],.002)
+        except InterruptedError:
+            readable=writable=[]
+        except (OSError,ValueError) as error:
+            if self.first_transport is None:self.first_transport=error
+            return mqtt.MQTT_ERR_CONN_LOST
+        if readable:
+            rc=client.loop_read()
+            if rc not in (mqtt.MQTT_ERR_SUCCESS,mqtt.MQTT_ERR_AGAIN):return rc
+        if writable and client.socket() is sock:
+            rc=client.loop_write()
+            if rc not in (mqtt.MQTT_ERR_SUCCESS,mqtt.MQTT_ERR_AGAIN):return rc
+        return client.loop_misc()
 
     def _run(self):
         import paho.mqtt.client as mqtt
@@ -295,7 +521,7 @@ class DriveLinkIO:
             try:
                 vm=next(vm for vm in self.vms if msg.topic==outbound(vm))
                 value=decode(bytes(msg.payload),schema.DriveLink)
-                if value.WhichOneof('payload') not in ('probe','snapshot','applied'):self._drop('DIRECTION');return
+                if value.WhichOneof('payload') not in ('probe','snapshot','applied','budget_request'):self._drop('DIRECTION');return
                 prepared=self.prepare_snapshot(value) if value.WhichOneof('payload')=='snapshot' else None
                 self.incoming.put_nowait((vm,value,received,prepared));self.received+=1
             except StopIteration:self._drop('UNBOUND_TOPIC')
@@ -317,17 +543,34 @@ class DriveLinkIO:
                         self.failed+=1
                         if self.first_transport is None:self.first_transport=exc
                         self.stop.wait(.1);continue
-                rc=client.loop(timeout=.002)
+                rc=self._network_once(client,mqtt)
                 if rc not in (mqtt.MQTT_ERR_SUCCESS,mqtt.MQTT_ERR_AGAIN):
                     self.failed+=1;self.connected=False;reconnect=True
                     if self.stop.wait(.1):break
                     continue
+                # Paho's max_queued_messages applies to QoS>0, not this QoS0
+                # wire. Drain its existing packet before taking another latest
+                # slot, so a slow peer cannot grow Paho's outgoing deque.
+                if client.want_write():continue
                 with self.lock:
-                    key=next((k for k in self.pending if k[1]=='clock'),next(iter(self.pending),None))
+                    key=next((k for k in self.pending if k[1] in ('clock','clock-manual')),next(iter(self.pending),None))
                     data=self.pending.pop(key) if key else None
                 if data is not None:
+                    prepared=data
+                    if key[1] in ('clock','clock-manual'):
+                        # Exclude known encode/actor/mailbox time from the
+                        # guest's network uncertainty interval. No protobuf
+                        # parse/encode or actor lock is needed at this boundary.
+                        try:data=data.stamp(int(self.clock()*1e6))
+                        except (ValueError,OverflowError) as error:
+                            self.failed+=1;self._drop('CLOCK_SEND_TIME',error);continue
                     info=client.publish(key[0],data,qos=0,retain=False)
-                    if info.rc==mqtt.MQTT_ERR_SUCCESS:self.sent+=1
+                    if info.rc==mqtt.MQTT_ERR_SUCCESS:
+                        self.sent+=1
+                        from .guest_clock import OwnedPreparedClock,SentClock
+                        if isinstance(prepared,OwnedPreparedClock):
+                            try:self.clock_completions.put_nowait(SentClock(prepared.peer,prepared.generation,data))
+                            except queue.Full:self._drop('CLOCK_COMPLETION_FULL')
                     else:self.failed+=1
         except Exception as exc:
             import traceback

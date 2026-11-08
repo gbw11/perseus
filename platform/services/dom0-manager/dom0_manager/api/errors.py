@@ -54,3 +54,11 @@ def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(NotImplementedError)
     async def on_not_implemented(_: Request, exc: NotImplementedError) -> JSONResponse:
         return JSONResponse(status_code=501, content={"code": "NotSupported", "message": f"not implemented: {exc}"})
+
+    @app.exception_handler(Exception)
+    async def on_unexpected(request: Request, exc: Exception) -> JSONResponse:
+        # 계약(openapi Error 500): 분류되지 않은 오류도 {code: DriverError} 본문으로 낸다.
+        # 처리기가 없으면 Starlette 의 text/plain 500 이 나가 Spring 이 502 VM_CONTROL_BAD_RESPONSE 로 바꾼다
+        log.exception("unhandled error: %s %s", request.method, request.url.path)
+        return JSONResponse(status_code=500, content={"code": "DriverError", "message": "internal error",
+                                                      "detail": type(exc).__name__})

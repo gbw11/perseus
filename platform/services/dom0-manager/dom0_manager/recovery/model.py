@@ -16,6 +16,7 @@ class FailureReason(str, Enum):
     APP_HEARTBEAT_LOST = "APP_HEARTBEAT_LOST"  # Zephyr VM: app.heartbeat 무수신 (시나리오 D8, 기본 15초)
     DOMAIN_ABSENT = "DOMAIN_ABSENT"  # 의도는 running 인데 Xen 에 도메인이 없음
     DOMAIN_CRASHED = "DOMAIN_CRASHED"  # xl 상태 crashed (on_crash=preserve 로 남은 도메인)
+    VM_UNTRUSTED = "VM_UNTRUSTED"  # Gateway가 현재 주행 execution의 계산 신뢰를 철회함
 
 
 class HealthState(str, Enum):

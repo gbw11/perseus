@@ -33,5 +33,10 @@ elseif(XL_MQTT_BOUNDARY)
   target_sources(app PRIVATE src/mqtt.c)
 else()
   zephyr_link_libraries(-Wl,--wrap=xm_zclient_latest,--wrap=xm_zclient_poll,--wrap=xm_zclient_publish_until,--wrap=xm_zclient_close,--wrap=z_impl_k_thread_create,--wrap=xm_zclient_subscribe)
+  if(XL_FAULT_BOUNDARY)
+    # The real command owner/parser is tested; calculation and cached resource
+    # evidence are external boundaries, not simulated application failures.
+    zephyr_link_libraries(-Wl,--wrap=xm_zclient_publish)
+  endif()
   target_sources(app PRIVATE src/main.c)
 endif()

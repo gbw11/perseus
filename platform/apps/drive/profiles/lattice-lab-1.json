@@ -3,7 +3,7 @@
   "id": "lattice-lab-1",
   "vehicle": "rc-test-1",
   "calibration": "encoder-lab-1",
-  "assumptions": "Synthetic rear-axle Ackermann vehicle, static occupied cells, bounded clock/pose errors. Not measured operating limits.",
+  "assumptions": "Synthetic rear-axle Ackermann vehicle, static occupied cells, bounded clock/pose errors. Guest clock error1000us/drift100ppm and direction phase10s are explicit provisional software caps, not measured operating limits.",
   "resolution": 0.1,
   "wheelbase": 0.25,
   "front": 0.3,
@@ -47,5 +47,8 @@
   "clock_error_us": 20000,
   "clock_lease_us": 1000000,
   "planner_budget_us": 2000000,
-  "state_period_us": 500000
+  "state_period_us": 500000,
+  "direction_phase_us": 10000000,
+  "guest_timestamp_error_us": 1000,
+  "guest_drift_ppm": 100
 }

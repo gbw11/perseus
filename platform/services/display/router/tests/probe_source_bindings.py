@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 import secrets
 import socket
+import time
 
 from amqtt.broker import Broker
 import httpx
@@ -23,7 +24,20 @@ from dom0_manager.models import VmState
 from xenova_display.config import FeedSettings, load_bindings
 from xenova_display.main import create_app
 from xenova_mqtt.envelope import Identity, build
-from probe_display_control import free_port, until
+
+
+def free_port():
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+async def until(test, timeout=15):
+    start = time.monotonic()
+    while time.monotonic() - start < timeout:
+        if await test(): return
+        await asyncio.sleep(.1)
+    raise TimeoutError("display contract condition not reached")
 
 
 async def run(output):

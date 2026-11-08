@@ -120,11 +120,11 @@ class DisplayPolicy:
                        "vms": state["vms"]}
             def stable(value, path=()):
                 if isinstance(value, dict):
-                    ignored = {"age_ms", "received_at", "observed_at"}
+                    # Per-message source sequence (heartbeat/drive seq) is delivery metadata, not screen content.
+                    # Including it changed the hash on every 1 s app/drive heartbeat and invalidated renderer ACKs.
+                    ignored = {"age_ms", "received_at", "observed_at", "sequence"}
                     if path[-2:] in {("lifecycle", "reported"), ("lifecycle", "current")}:
                         ignored.add("check_seq")  # 100ms supervision is not new screen content.
-                    if path[-2:] in {("lifecycle", "source"), ("lifecycle", "calculation_source")}:
-                        ignored.add("sequence")
                     return {k: stable(v, (*path, k)) for k, v in value.items() if k not in ignored}
                 if isinstance(value, list):
                     return [stable(v, path) for v in value]

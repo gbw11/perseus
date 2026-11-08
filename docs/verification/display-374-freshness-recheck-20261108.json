@@ -1,0 +1,606 @@
+{
+  "issue": "S15P31E110-374",
+  "date": "2026-11-08",
+  "platform_commit": "d54f1ed7a10178c1f3015290732d6fec73499517",
+  "complete": false,
+  "summary": {
+    "duration_s": 131.9529999999795,
+    "sample_span_s": 130.5470000000205,
+    "samples": 179,
+    "http": {
+      "200": 179
+    },
+    "errors": {},
+    "additional_board_requests": 0,
+    "source_status_per_response": {
+      "fresh": 178,
+      "stale": 1
+    },
+    "per_vm": {
+      "de113a23-d80e-4333-94b8-788babe0e41e": {
+        "fresh": 178,
+        "stale": 1
+      },
+      "5002a22d-63d6-4f7a-9106-193b14499898": {
+        "fresh": 178,
+        "stale": 1
+      },
+      "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": {
+        "fresh": 178,
+        "stale": 1
+      }
+    },
+    "expired_vm_with_current_app": 0,
+    "mqtt_connected_samples": 179,
+    "subscription_sets": [
+      [
+        "granted"
+      ]
+    ],
+    "feed_epochs": [
+      "9f146caf-76f8-491a-af24-7f64b1bd4c45"
+    ],
+    "drive_modes": {
+      "SAFE_STOP": 179
+    },
+    "drive_sources": {
+      "fresh": 179
+    },
+    "decisions": {
+      "de113a23-d80e-4333-94b8-788babe0e41e": {
+        "app_preparing": 178,
+        "stale": 1
+      },
+      "5002a22d-63d6-4f7a-9106-193b14499898": {
+        "app_preparing": 178,
+        "stale": 1
+      },
+      "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": {
+        "app_waiting": 178,
+        "stale": 1
+      }
+    },
+    "roundtrip_ms": {
+      "median": 438,
+      "p95": 797,
+      "max": 1172
+    },
+    "continuous_freshness_pass": false
+  },
+  "stale_events": [
+    {
+      "sample_index": 147,
+      "relative_received_s": 106.719,
+      "sequence": 1075,
+      "sources": [
+        {
+          "vm_id": "de113a23-d80e-4333-94b8-788babe0e41e",
+          "source": {
+            "received_at": "2026-11-07T15:45:53.523+00:00",
+            "observed_at": null,
+            "age_ms": 3076,
+            "status": "stale"
+          },
+          "current_app_states": {
+            "autonomous": null,
+            "manual": null
+          }
+        },
+        {
+          "vm_id": "5002a22d-63d6-4f7a-9106-193b14499898",
+          "source": {
+            "received_at": "2026-11-07T15:45:53.523+00:00",
+            "observed_at": null,
+            "age_ms": 3076,
+            "status": "stale"
+          },
+          "current_app_states": {
+            "autonomous": null,
+            "manual": null
+          }
+        },
+        {
+          "vm_id": "17cad3c4-b3cd-4b29-8740-e679d0eaebd4",
+          "source": {
+            "received_at": "2026-11-07T15:45:53.523+00:00",
+            "observed_at": null,
+            "age_ms": 3076,
+            "status": "stale"
+          },
+          "current_app_states": {
+            "interaction": null
+          }
+        }
+      ],
+      "recovered_after_s": 0.485,
+      "recovered_sequence": 1076
+    }
+  ],
+  "preliminary_80s_summary": {
+    "duration_s": 80.73399999999674,
+    "sample_span_s": 80.26600000000326,
+    "samples": 115,
+    "http": {
+      "200": 115
+    },
+    "errors": {},
+    "additional_board_requests": 0,
+    "source_status_per_response": {
+      "fresh": 112,
+      "stale": 3
+    },
+    "per_vm": {
+      "de113a23-d80e-4333-94b8-788babe0e41e": {
+        "fresh": 112,
+        "stale": 3
+      },
+      "5002a22d-63d6-4f7a-9106-193b14499898": {
+        "fresh": 112,
+        "stale": 3
+      },
+      "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": {
+        "fresh": 112,
+        "stale": 3
+      }
+    },
+    "expired_vm_with_current_app": 0,
+    "mqtt_connected_samples": 115,
+    "subscription_sets": [
+      [
+        "granted"
+      ]
+    ],
+    "feed_epochs": [
+      "9f146caf-76f8-491a-af24-7f64b1bd4c45"
+    ],
+    "drive_modes": {
+      "SAFE_STOP": 115
+    },
+    "drive_sources": {
+      "fresh": 115
+    },
+    "decisions": {
+      "de113a23-d80e-4333-94b8-788babe0e41e": {
+        "app_preparing": 112,
+        "stale": 3
+      },
+      "5002a22d-63d6-4f7a-9106-193b14499898": {
+        "app_preparing": 112,
+        "stale": 3
+      },
+      "17cad3c4-b3cd-4b29-8740-e679d0eaebd4": {
+        "app_waiting": 112,
+        "stale": 3
+      }
+    },
+    "roundtrip_ms": {
+      "median": 375,
+      "p95": 688,
+      "max": 875
+    },
+    "continuous_freshness_pass": false
+  },
+  "platform_sources": [
+    {
+      "module": "xenova_execution.py",
+      "board_sha256": "8538dadda458e190e7b597b39e6c90bc47a1dc312640c11c98639f91ffd2d368",
+      "platform_blob_sha256": "320148571284a32c811fc74998c5fa47393eba72d4d5642e143eb54b7b19bcc2",
+      "matches_platform": false,
+      "matching_git_history": []
+    },
+    {
+      "module": "xenova_management.py",
+      "board_sha256": "4ed1255bb9b9c909a62bd92e8d331cb38d50b5b4d003c03c19185890bfcf1319",
+      "platform_blob_sha256": "34cdbcaadb478714db3b8cd92f46fbba056084b08de00c93428fbf5cd4db484a",
+      "matches_platform": false,
+      "matching_git_history": []
+    },
+    {
+      "module": "xenova_telemetry_support.py",
+      "board_sha256": "a509cee8f6d7973184e11395aa1b342be7a9891fa79a133e7cb4df4ae91f525e",
+      "platform_blob_sha256": "a509cee8f6d7973184e11395aa1b342be7a9891fa79a133e7cb4df4ae91f525e",
+      "matches_platform": true,
+      "matching_git_history": [
+        {
+          "commit": "6a6760dc60de32d01b79fbd82c2828b545410164",
+          "subject": "fix(platform): bound clock responder repeat work"
+        }
+      ]
+    },
+    {
+      "module": "xenova_drive_binding.py",
+      "board_sha256": "a059c3267c5f92dde34739d0202f4573ca7353a66c1ffc12eca5876973304e0e",
+      "platform_blob_sha256": "1c73691ff98fadc130641daa23f26a0a50248d88ba19ced2f3086408c9183d1f",
+      "matches_platform": false,
+      "matching_git_history": []
+    }
+  ],
+  "collector_sources": [
+    {
+      "module": "dom0_manager/observations.py",
+      "board_sha256": "8fb108826f4bf79f6ab8c19fa53ce4a647e3bcff17f751f631ea39edd3767336",
+      "platform_blob_sha256": "8fb108826f4bf79f6ab8c19fa53ce4a647e3bcff17f751f631ea39edd3767336",
+      "matches_platform": true
+    },
+    {
+      "module": "xenova_display/main.py",
+      "board_sha256": "9af24d62e5c2d918fe034be6cb7cb1b9001f7f30a2f2ca99a907b0c485b18724",
+      "platform_blob_sha256": "9af24d62e5c2d918fe034be6cb7cb1b9001f7f30a2f2ca99a907b0c485b18724",
+      "matches_platform": true
+    },
+    {
+      "module": "xenova_display/shared.py",
+      "board_sha256": "e1e7f00b52ad8606e3f37e67e4dece2b07e36751b67f051acb7e4cd890377b9d",
+      "platform_blob_sha256": "e1e7f00b52ad8606e3f37e67e4dece2b07e36751b67f051acb7e4cd890377b9d",
+      "matches_platform": true
+    },
+    {
+      "module": "xenova_display/state.py",
+      "board_sha256": "8f8f9686c81767d11bc01d69a4f7add1b8987f84ea4bf5a0e73481e8bb1c7eb4",
+      "platform_blob_sha256": "8f8f9686c81767d11bc01d69a4f7add1b8987f84ea4bf5a0e73481e8bb1c7eb4",
+      "matches_platform": true
+    }
+  ],
+  "process_config": {
+    "xenova-dom0-manager.service": {
+      "XENOVA_OBSERVATIONS_PATH": "/run/xenova/vm-observations.json",
+      "XENOVA_DRIVER": "platform"
+    },
+    "xenova-display-feed.service": {
+      "XENOVA_DRIVER": "xen",
+      "XENOVA_OBSERVATIONS_PATH": "/run/xenova/vm-observations.json"
+    }
+  },
+  "preservation": {
+    "same_boot": true,
+    "service_states_and_pids_unchanged": true,
+    "module_hashes_unchanged": true,
+    "ssh_policy_hash_unchanged": true
+  },
+  "final_api": {
+    "api": {
+      "ActiveState": "active",
+      "SubState": "running",
+      "MainPID": "826360"
+    },
+    "responses": [
+      {
+        "path": "/healthz",
+        "status": 200
+      },
+      {
+        "path": "/api/v1/vms",
+        "status": 200,
+        "vms": [
+          {
+            "vm_id": "17cad3c4-b3cd-4b29-8740-e679d0eaebd4",
+            "state": "running"
+          },
+          {
+            "vm_id": "de113a23-d80e-4333-94b8-788babe0e41e",
+            "state": "running"
+          },
+          {
+            "vm_id": "5002a22d-63d6-4f7a-9106-193b14499898",
+            "state": "running"
+          }
+        ]
+      }
+    ],
+    "shared": {
+      "epoch": "c8d11b98-ffcf-426a-9622-d129adf08892",
+      "status": "ok",
+      "age_ms": 1729
+    }
+  },
+  "scope": {
+    "two_product_browser_consumers": true,
+    "extra_diagnostic_requests_during_capture": 0,
+    "temporary_stdio_http_relay": true,
+    "service_restarts": false,
+    "board_file_changes": false,
+    "ssh_policy_changes": false,
+    "vm_changes": false,
+    "cpu_changes": false,
+    "firmware_changes": false
+  },
+  "limitations": [
+    "Not physical HDMI or video latency validation",
+    "Runtime file hash mismatch is not proof of root cause",
+    "No induced VM or producer restart; prior execution data isolation not newly exercised",
+    "Local regression collection unavailable: missing pydantic on Windows and pytest in WSL",
+    "Preliminary 80s trace is retained but not qualifying acceptance",
+    "Automatic approval review rejected whole installed-source export; used hashes only"
+  ],
+  "followup": {
+    "provenance": {
+      "scope": "hashes, package metadata and classified journal counts only; no source export",
+      "files": {
+        "xenova_execution.py": {
+          "sha256": "8538dadda458e190e7b597b39e6c90bc47a1dc312640c11c98639f91ffd2d368",
+          "lf_sha256": "8538dadda458e190e7b597b39e6c90bc47a1dc312640c11c98639f91ffd2d368",
+          "bytes": 98581,
+          "mtime_ns": 1794061078078295057,
+          "uid": 0,
+          "mode": "0o644"
+        },
+        "xenova_management.py": {
+          "sha256": "4ed1255bb9b9c909a62bd92e8d331cb38d50b5b4d003c03c19185890bfcf1319",
+          "lf_sha256": "4ed1255bb9b9c909a62bd92e8d331cb38d50b5b4d003c03c19185890bfcf1319",
+          "bytes": 143694,
+          "mtime_ns": 1794061078113598043,
+          "uid": 0,
+          "mode": "0o644"
+        },
+        "xenova_drive_binding.py": {
+          "sha256": "a059c3267c5f92dde34739d0202f4573ca7353a66c1ffc12eca5876973304e0e",
+          "lf_sha256": "a059c3267c5f92dde34739d0202f4573ca7353a66c1ffc12eca5876973304e0e",
+          "bytes": 10382,
+          "mtime_ns": 1794061078051157127,
+          "uid": 0,
+          "mode": "0o644"
+        },
+        "xenova_telemetry_support.py": {
+          "sha256": "a509cee8f6d7973184e11395aa1b342be7a9891fa79a133e7cb4df4ae91f525e",
+          "lf_sha256": "a509cee8f6d7973184e11395aa1b342be7a9891fa79a133e7cb4df4ae91f525e",
+          "bytes": 18132,
+          "mtime_ns": 1794048073786412296,
+          "uid": 0,
+          "mode": "0o644"
+        }
+      },
+      "image_metadata": {
+        "/etc/os-release": {
+          "ID": "xenova",
+          "VERSION": "6.0.4 (wrynose)",
+          "VERSION_ID": "6.0.4"
+        },
+        "/etc/version": {
+          "sha256": "5702033fb057efc92efa4fd7f10335f4d6389322ef5a7a8da04a19e93acc2039",
+          "bytes": 15
+        },
+        "/etc/timestamp": {
+          "sha256": "5702033fb057efc92efa4fd7f10335f4d6389322ef5a7a8da04a19e93acc2039",
+          "bytes": 15
+        }
+      },
+      "package_metadata": {},
+      "units": [
+        {
+          "Id": "xenova-dom0-manager.service",
+          "ActiveState": "active",
+          "SubState": "running",
+          "MainPID": "826360",
+          "NRestarts": "0"
+        },
+        {
+          "Id": "xenova-display-feed.service",
+          "ActiveState": "active",
+          "SubState": "running",
+          "MainPID": "591163",
+          "NRestarts": "0"
+        },
+        {
+          "Id": "xenova-gateway.service",
+          "ActiveState": "active",
+          "SubState": "running",
+          "MainPID": "858989",
+          "NRestarts": "0"
+        },
+        {
+          "Id": "xenova-recovery-worker.service",
+          "ActiveState": "active",
+          "SubState": "running",
+          "MainPID": "861652",
+          "NRestarts": "0"
+        }
+      ],
+      "journal": {
+        "exit": 0,
+        "limit": 500,
+        "rows": 483,
+        "counts": {},
+        "raw_messages_exported": false
+      },
+      "boot_id": "754c8e16-131d-4929-a0cf-bda4134e318b"
+    },
+    "passive_age_analysis": {
+      "unique_received_at_count": 96,
+      "source_receive_gap_ms": {
+        "median": 1329,
+        "max": 2646
+      },
+      "largest_receive_gaps": [
+        {
+          "received_mono": 384690.203,
+          "source_received_at": "2026-11-07T15:45:53.523+00:00",
+          "age_ms": 1545,
+          "status": "fresh",
+          "sequence": 1073,
+          "source_receive_gap_ms": 2646
+        },
+        {
+          "received_mono": 384679.421,
+          "source_received_at": "2026-11-07T15:45:42.929+00:00",
+          "age_ms": 1206,
+          "status": "fresh",
+          "sequence": 1059,
+          "source_receive_gap_ms": 2530
+        },
+        {
+          "received_mono": 384713.609,
+          "source_received_at": "2026-11-07T15:46:16.824+00:00",
+          "age_ms": 953,
+          "status": "fresh",
+          "sequence": 1103,
+          "source_receive_gap_ms": 2323
+        },
+        {
+          "received_mono": 384692.0,
+          "source_received_at": "2026-11-07T15:45:55.787+00:00",
+          "age_ms": 1391,
+          "status": "fresh",
+          "sequence": 1076,
+          "source_receive_gap_ms": 2264
+        },
+        {
+          "received_mono": 384616.25,
+          "source_received_at": "2026-11-07T15:44:40.084+00:00",
+          "age_ms": 1292,
+          "status": "fresh",
+          "sequence": 971,
+          "source_receive_gap_ms": 2044
+        }
+      ],
+      "stale_contexts": [
+        [
+          {
+            "pc_offset_s": 105.407,
+            "sequence": 1073,
+            "source": {
+              "received_at": "2026-11-07T15:45:53.523+00:00",
+              "observed_at": null,
+              "age_ms": 1545,
+              "status": "fresh"
+            }
+          },
+          {
+            "pc_offset_s": 105.75,
+            "sequence": 1074,
+            "source": {
+              "received_at": "2026-11-07T15:45:53.523+00:00",
+              "observed_at": null,
+              "age_ms": 2015,
+              "status": "fresh"
+            }
+          },
+          {
+            "pc_offset_s": 106.719,
+            "sequence": 1075,
+            "source": {
+              "received_at": "2026-11-07T15:45:53.523+00:00",
+              "observed_at": null,
+              "age_ms": 3076,
+              "status": "stale"
+            }
+          },
+          {
+            "pc_offset_s": 107.204,
+            "sequence": 1076,
+            "source": {
+              "received_at": "2026-11-07T15:45:55.787+00:00",
+              "observed_at": null,
+              "age_ms": 1391,
+              "status": "fresh"
+            }
+          },
+          {
+            "pc_offset_s": 108.0,
+            "sequence": 1077,
+            "source": {
+              "received_at": "2026-11-07T15:45:55.787+00:00",
+              "observed_at": null,
+              "age_ms": 2377,
+              "status": "fresh"
+            }
+          }
+        ]
+      ]
+    },
+    "findings": [
+      "Module differences persist after CRLF normalization",
+      "No package metadata identifying the exact installed source revision was found at queried paths",
+      "No named shared-observation exception patterns in the bounded journal window; not proof of absence of other errors",
+      "Observed state age crossed TTL before the next new observation; exact upstream-versus-consumer delay attribution remains unproven"
+    ],
+    "modified_board_files": false,
+    "restarted_services": false
+  },
+  "branch_followup": {
+    "compared_refs": {
+      "origin/platform": "d54f1ed7a10178c1f3015290732d6fec73499517",
+      "origin/feat/platform/vm-stress-integration": "8d37fab551a12817d63b806eb0e12f7e9ad5f307",
+      "origin/vehicle": "c1045fc37aeccb0556611e4e292e844a627569c4"
+    },
+    "module_hashes": [
+      {
+        "module": "xenova_execution.py",
+        "board_sha256": "8538dadda458e190e7b597b39e6c90bc47a1dc312640c11c98639f91ffd2d368",
+        "branches": {
+          "origin/platform": {
+            "sha256": "320148571284a32c811fc74998c5fa47393eba72d4d5642e143eb54b7b19bcc2",
+            "matches_board": false
+          },
+          "origin/feat/platform/vm-stress-integration": {
+            "sha256": "8538dadda458e190e7b597b39e6c90bc47a1dc312640c11c98639f91ffd2d368",
+            "matches_board": true
+          },
+          "origin/vehicle": {
+            "sha256": "9b4cb13aa257ae1079abfd2aa4c88020b8f17df0c3242fb06dfe278721f37e79",
+            "matches_board": false
+          }
+        }
+      },
+      {
+        "module": "xenova_management.py",
+        "board_sha256": "4ed1255bb9b9c909a62bd92e8d331cb38d50b5b4d003c03c19185890bfcf1319",
+        "branches": {
+          "origin/platform": {
+            "sha256": "34cdbcaadb478714db3b8cd92f46fbba056084b08de00c93428fbf5cd4db484a",
+            "matches_board": false
+          },
+          "origin/feat/platform/vm-stress-integration": {
+            "sha256": "4ed1255bb9b9c909a62bd92e8d331cb38d50b5b4d003c03c19185890bfcf1319",
+            "matches_board": true
+          },
+          "origin/vehicle": {
+            "sha256": "eaedf7c76ed276e5487b89dbd5b353baac7463c166915bc20ea890938de07762",
+            "matches_board": false
+          }
+        }
+      },
+      {
+        "module": "xenova_drive_binding.py",
+        "board_sha256": "a059c3267c5f92dde34739d0202f4573ca7353a66c1ffc12eca5876973304e0e",
+        "branches": {
+          "origin/platform": {
+            "sha256": "1c73691ff98fadc130641daa23f26a0a50248d88ba19ced2f3086408c9183d1f",
+            "matches_board": false
+          },
+          "origin/feat/platform/vm-stress-integration": {
+            "sha256": "a059c3267c5f92dde34739d0202f4573ca7353a66c1ffc12eca5876973304e0e",
+            "matches_board": true
+          },
+          "origin/vehicle": {
+            "sha256": "c03030f9df065e06d96292b3338aaa721d29e24d94b91b320baacbbc244d9103",
+            "matches_board": false
+          }
+        }
+      },
+      {
+        "module": "xenova_telemetry_support.py",
+        "board_sha256": "a509cee8f6d7973184e11395aa1b342be7a9891fa79a133e7cb4df4ae91f525e",
+        "branches": {
+          "origin/platform": {
+            "sha256": "a509cee8f6d7973184e11395aa1b342be7a9891fa79a133e7cb4df4ae91f525e",
+            "matches_board": true
+          },
+          "origin/feat/platform/vm-stress-integration": {
+            "sha256": "a509cee8f6d7973184e11395aa1b342be7a9891fa79a133e7cb4df4ae91f525e",
+            "matches_board": true
+          },
+          "origin/vehicle": {
+            "sha256": "3d6070f11203fff6ab7ab6a6bee0176ca0e42a29b674686314cdd4dca37a12a7",
+            "matches_board": false
+          }
+        }
+      }
+    ],
+    "source_provenance_resolved": true,
+    "scope": "The three differing installed modules exactly match vm-stress-integration; this is not proof of the whole runtime or loaded process revision.",
+    "missing_platform_fix_in_stress": "f1013ad3",
+    "missing_fix_description": "identity-only observation failure ordering preserves newer verified success",
+    "causal_attribution_proven": false,
+    "board_access_this_branch_review": false
+  }
+}

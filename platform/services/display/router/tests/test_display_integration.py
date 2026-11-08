@@ -9,9 +9,8 @@ from fastapi.testclient import TestClient
 
 from dom0_manager.models import VmState
 from xenova_display.main import create_app
-from xenova_display.config import DISPLAY_DRIVE_TOPIC, DISPLAY_DRIVE_TYPE
 from xenova_display.outputs import X11Layout
-from test_feed import VM1, VM2, VM3, domains, message, settings, store  # noqa: F401
+from test_feed import VM1, VM2, VM3, domains, gateway_drive, message, settings, store  # noqa: F401
 from test_outputs import config
 
 
@@ -25,11 +24,12 @@ def test_control_failover_and_driving_mode_through_rest_and_ws(settings, store):
         def stop(self): pass
     driver=Driver()
     headers={"Authorization":"Bearer test-only-token"}
+    class NoGateway:
+        def __init__(self,s): raise RuntimeError("synthetic reads only")
     def control(sequence,active,mode):
-        env=message(kind=DISPLAY_DRIVE_TYPE,seq=sequence,active_vm_id=active,mode=mode)
-        env.pop("vm_id");env["source_id"]="dom0-gateway"
-        assert store.ingest(DISPLAY_DRIVE_TOPIC,env)
-    with TestClient(create_app(settings,store=store,driver=driver,mqtt_factory=NoMqtt)) as client:
+        gateway_drive(store,generation=sequence,active=active,mode=mode)
+    with TestClient(create_app(settings,store=store,driver=driver,mqtt_factory=NoMqtt,
+                               gateway_factory=NoGateway)) as client:
         def current():
             r=client.get("/api/v1/display/presentation",headers=headers)
             assert r.status_code==200

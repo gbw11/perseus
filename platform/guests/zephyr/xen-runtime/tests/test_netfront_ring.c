@@ -38,6 +38,70 @@ static void tx(unsigned sequence,uint16_t id,int16_t status){
  n.tx->ring[sequence&255].rsp=(struct xnf_tx_response){id,status};
  n.tx->h.rsp_prod=sequence+1;
 }
+static void fill_tx(const uint8_t *packet){
+ for(unsigned i=0;i<XNF_SLOTS;i++)assert(!xnf_send(&n,packet,64));
+}
+static void complete_tx(unsigned count,int16_t status){
+ uint16_t ids[XNF_SLOTS];assert(count<=XNF_SLOTS);
+ uint32_t start=n.tx_cons;
+ for(unsigned i=0;i<count;i++)ids[i]=n.tx->ring[(start+i)&255].req.id;
+ for(unsigned i=0;i<count;i++)
+  n.tx->ring[(start+i)&255].rsp=(struct xnf_tx_response){ids[i],status};
+ __atomic_store_n(&n.tx->h.rsp_prod,start+count,__ATOMIC_RELEASE);
+}
+static unsigned busy_reap_cases(const uint8_t *packet){
+ unsigned cases=0;
+ /* A real full pool still fails; already published completions free slots
+  * without waiting for the worker or delivering queued RX in this call. */
+ init();fill_tx(packet);assert(xnf_send(&n,packet,64)==-ENOBUFS);
+ assert(n.stats.pool_busy==1&&n.stats.tx==0&&n.tx_cons==0);cases++;
+ for(unsigned count=1;count<=XNF_SLOTS;count+=XNF_SLOTS-1){
+  init();fill_tx(packet);complete_tx(count,0);
+  memcpy(n.rx_pages[0],packet,64);rx(0,n.rx_id[0],0,0,64);
+  assert(!xnf_send(&n,packet,64));
+  assert(n.stats.tx==count&&n.tx_cons==count&&n.tx_prod==XNF_SLOTS+1);
+  assert(n.stats.pool_busy==0&&n.tx->h.rsp_event==count+1);
+  assert(delivered==0&&n.rx_cons==0&&n.rx_prod==XNF_SLOTS);
+  assert(!xnf_poll(&n)&&n.stats.tx==count&&delivered==1);cases++;
+ }
+ for(int status=-2;status<0;status++){
+  init();fill_tx(packet);complete_tx(1,status);assert(!xnf_send(&n,packet,64));
+  assert(n.stats.tx_drop==1&&n.stats.tx==0&&n.stats.pool_busy==0);
+  assert(!xnf_poll(&n)&&n.stats.tx_drop==1);cases++;
+ }
+ init();fill_tx(packet);complete_tx(1,0);n.tx->ring[0].rsp.id=65535;
+ assert(xnf_send(&n,packet,64)==-EPROTO&&n.failed&&n.tx_cons==0&&n.tx_prod==8);
+ assert(xnf_send(&n,packet,64)==-ENETDOWN&&n.stats.protocol_errors==1);cases++;
+ /* A send-side protocol fault must retain its diagnosis when the worker
+  * subsequently polls; the latch must not re-count or consume anything. */
+ for(unsigned i=0;i<2;i++)assert(xnf_poll(&n)==-EPROTO&&n.stats.protocol_errors==1&&
+                                n.tx_cons==0&&n.tx_prod==8&&n.stats.tx==0);
+ cases++;
+ init();fill_tx(packet);n.tx->h.rsp_prod=XNF_SLOTS+1;
+ assert(xnf_send(&n,packet,64)==-EPROTO&&n.failed&&n.tx_cons==0);cases++;
+ for(int status=-3;status<=1;status+=4){
+  init();fill_tx(packet);complete_tx(1,status);
+  assert(xnf_send(&n,packet,64)==-EPROTO&&n.failed&&n.tx_cons==0);cases++;
+ }
+ init();fill_tx(packet);complete_tx(2,0);n.tx->ring[1].rsp.id=n.tx->ring[0].rsp.id;
+ assert(xnf_send(&n,packet,64)==-EPROTO&&n.failed&&n.tx_cons==1&&n.stats.tx==1);cases++;
+ /* RX corruption remains for the RX owner; send never consumes its data. */
+ init();fill_tx(packet);complete_tx(1,0);n.rx->h.rsp_prod=XNF_SLOTS+1;
+ assert(!xnf_send(&n,packet,64)&&delivered==0&&n.rx_cons==0);
+ assert(xnf_poll(&n)==-EPROTO&&n.failed);cases++;
+ init();n.tx_prod=n.tx_cons=UINT32_MAX-3;n.tx->h.req_prod=n.tx_prod;
+ n.tx->h.rsp_prod=n.tx_cons;fill_tx(packet);complete_tx(XNF_SLOTS,0);
+ assert(!xnf_send(&n,packet,64)&&n.tx_cons==4&&n.tx_prod==5&&n.stats.tx==8);
+ assert(n.tx->h.rsp_event==5);cases++;
+ /* Descriptor generations wrap on the send-side reap path as well. */
+ init();fill_tx(packet);
+ for(unsigned i=0;i<70000;i++){
+  complete_tx(1,0);assert(!xnf_send(&n,packet,64));
+ }
+ assert(n.stats.tx==70000&&!n.stats.pool_busy&&delivered==0);
+ complete_tx(XNF_SLOTS,0);assert(!xnf_poll(&n)&&xnf_drained(&n));cases++;
+ return cases;
+}
 int main(void){
  unsigned cases=0;uint8_t packet[64];memset(packet,0x5a,sizeof(packet));
  init();assert(n.rx_prod==8&&notices==1);cases++;
@@ -57,6 +121,9 @@ int main(void){
   init();assert(!xnf_send(&n,packet,64));tx(0,n.tx->ring[0].req.id,st);assert(xnf_poll(&n)==-EPROTO);cases++;
  }
  init();n.tx->h.rsp_prod=1;assert(xnf_poll(&n)==-EPROTO);cases++;
+ for(unsigned i=0;i<2;i++)assert(xnf_poll(&n)==-EPROTO&&n.stats.protocol_errors==1&&
+                                n.tx_cons==0&&n.tx_prod==0&&n.stats.tx==0);
+ cases++;
  init();n.rx->h.rsp_prod=9;assert(xnf_poll(&n)==-EPROTO);cases++;
  init();memcpy(n.rx_pages[0]+4096-64,packet,64);
  rx(0,n.rx_id[0],4096-64,1,64);
@@ -102,6 +169,7 @@ int main(void){
  stream=true;backend_receive();assert(xnf_pending(&n));
  assert(!xnf_poll(&n)&&n.stats.tx+n.stats.rx==64&&n.stats.tx==1&&xnf_pending(&n));
  stream=false;assert(!xnf_poll(&n)&&!xnf_pending(&n)&&xnf_drained(&n));cases++;
+ cases+=busy_reap_cases(packet);
  printf("production netif ring: %u cases, 70000-frame descriptor/ID wrap loop PASS\n",cases);
  return 0;
 }
