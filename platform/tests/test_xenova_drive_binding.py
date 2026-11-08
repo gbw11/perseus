@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 import textwrap
+from contextlib import contextmanager
 from unittest.mock import patch
 import test_xenova_recovery_foundation as foundation
 from xenova_vm import PlatformError
@@ -11,6 +12,7 @@ from xenova_runtime import operation_lock
 from xenova_drive_binding import observe
 from xenova_execution import Execution,ExecutionError,ReadChanged,short_lock
 from xenova_management import Manager,ReadContext
+import xenova_drive_binding as binding
 
 class DriveBindingTest(unittest.TestCase):
     def setUp(self):
@@ -52,6 +54,35 @@ class DriveBindingTest(unittest.TestCase):
         self.assertEqual(admission.call_count,4)
         self.assertEqual(gate.call_count,1)
 
+    def test_only_final_binding_guard_acquires_admission(self):
+        f=self.f;f.start();validate=ReadContext.validate_one;gate=Execution.gate
+        checks=[];locks=[]
+        def admission_held():
+            try:
+                with short_lock(f.p.runtime,'admission'):pass
+            except ExecutionError as error:
+                self.assertEqual(error.error['code'],'OPERATION_IN_PROGRESS')
+                return True
+            return False
+        def validating(context,identity):
+            checks.append(admission_held())
+            return validate(context,identity)
+        @contextmanager
+        def locked(runtime,name,**kwargs):
+            locks.append(name)
+            with short_lock(runtime,name,**kwargs):yield
+        def gating(execution):
+            self.assertTrue(admission_held())
+            return gate(execution)
+        with (patch.object(ReadContext,'validate_one',validating),
+              patch.object(binding,'short_lock',locked),
+              patch.object(Execution,'gate',gating)):
+            self.assertEqual(observe(f.p,f.vm_id)['status'],'observed')
+        # The early strict check and publication revalidation read atomic
+        # files without admission; the final current-target/gate is locked.
+        self.assertEqual(checks,[False,False,True])
+        self.assertEqual(locks,['admission'])
+
     def test_admission_reuse_keeps_strict_record_and_run_json_types(self):
         f=self.f;f.start();validate=ReadContext.validate_one
         paths=((f.directory/'instance.json','vcpus'),
@@ -66,9 +97,11 @@ class DriveBindingTest(unittest.TestCase):
                         path.write_text(json.dumps(value))
                     return validate(context,identity)
                 try:
+                    commands=list(f.xen.calls)
                     with patch.object(ReadContext,'validate_one',change):
                         with self.assertRaisesRegex(PlatformError,'binding changed'):
                             observe(f.p,f.vm_id)
+                    self.assertEqual(f.xen.calls,commands)
                 finally:path.write_bytes(saved)
 
     def test_admission_reuse_still_rejects_current_boot_admission_change(self):
