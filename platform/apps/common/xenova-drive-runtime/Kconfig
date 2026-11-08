@@ -57,8 +57,9 @@ config XENOVA_AUTO_DELAY_INJECTION
 	default n
 	help
 	  Subscribes drive-v1 to the VM command topic for bounded auto_delay demo
-	  commands, adds a busy-wait after the real AUTO calculation, and reports
-	  five consecutive deadline misses as a VM trust event. This is a test fault
+	  commands and adds a busy-wait after the real AUTO calculation. The existing
+	  calculation health/lifecycle restricts the affected app; this injector
+	  does not declare a VM trust failure. This is a test fault
 	  injector, not an operating driving policy, and is excluded from normal builds.
 
 config XENOVA_RESOURCE_STRESS_INJECTION
@@ -81,16 +82,22 @@ config XENOVA_RESOURCE_STRESS_CPU_PRIORITY
 	  those tasks can preempt it. The worker uses a 10ms duty-cycle period.
 
 config XENOVA_RESOURCE_STRESS_MEMORY_THRESHOLD_PERCENT
-	int "System heap pressure threshold percent"
+	int "Legacy heap pressure threshold compatibility value"
 	depends on XENOVA_RESOURCE_STRESS_INJECTION
 	range 50 99
 	default 85
+	help
+	  Retained so existing test configuration files still parse. Heap occupancy
+	  is reported by Diagnostics/Telemetry and does not declare VM distrust.
 
 config XENOVA_RESOURCE_STRESS_CONSECUTIVE_SAMPLES
-	int "Consecutive resource samples before distrust"
+	int "Legacy heap pressure sample-count compatibility value"
 	depends on XENOVA_RESOURCE_STRESS_INJECTION
 	range 2 20
 	default 5
+	help
+	  Retained for existing test configuration compatibility. It does not
+	  count warning samples or authorize VM distrust or recovery.
 
 config XENOVA_DRIVE_WARM
 	bool "Explicit warm-drive-1 app lifecycle profile"

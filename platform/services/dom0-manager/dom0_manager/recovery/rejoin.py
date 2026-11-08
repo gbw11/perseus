@@ -8,13 +8,14 @@ from __future__ import annotations
 import fcntl,importlib,logging,os,queue,stat,threading,time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from xenova_mqtt.drive_binding import BindingCache,atomic_json,canonical,private_json
+from xenova_mqtt.drive_binding import BindingCache,app_instance,atomic_json,canonical,private_json
 from xenova_mqtt.readiness import parse as parse_readiness
 
 log=logging.getLogger(__name__)
 CONTEXT=('vm_id','host_boot_id','execution_id','domid','xen_unique_id')
 
 def valid_vm_trust_payload(payload):
+    """Validate the legacy FW32 envelope, not permission for VM recovery."""
     if not isinstance(payload,dict) or payload.get('trust')!='UNTRUSTED':return False
     command_id=payload.get('command_id')
     if not isinstance(command_id,str) or not command_id or len(command_id)>128:return False
@@ -114,6 +115,7 @@ class RejoinCoordinator:
         self._published_rows=None
         self._reports=queue.Queue(maxsize=64)
         self._trust_reports=queue.Queue(maxsize=16)
+        self._legacy_faults={}  # bounded by the two configured VMs and two legacy reasons
         self.path=Path(config['receipt_dir'])/'rejoin.json';self.path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
         if self.path.parent.resolve()!=self.path.parent or self.path.parent.stat().st_uid!=uid or self.path.parent.stat().st_mode&0o077:
             raise ValueError('canonical private receipt directory required')
@@ -271,15 +273,38 @@ class RejoinCoordinator:
         except queue.Full:pass  # Dropped evidence expires; it never renews readiness.
 
     def on_trust(self,message):
-        """Capture a binding-verified vm.trust callback without blocking MQTT."""
+        """Keep FW32 advisory evidence without promoting it to VM-wide failure.
+
+        Heap occupancy does not prove a required allocation failed. AUTO
+        deadline misses restrict that function; its lifecycle is authoritative
+        for Gateway selection. Xen/fatal/liveness recovery keeps its own path.
+        """
         from xenova_mqtt import topics
         info=topics.parse(message.topic);payload=message.payload;now=self.clock()
         row=self.cache.current(info.vm_id,now)
         if (getattr(message,'retained',False) or message.type!='vm.trust' or info.app_id!='autonomous' or
             not valid_vm_trust_payload(payload) or row is None):return
+        env=message.envelope
+        if row['boot_id']!=env.get('boot_id') or app_instance(row,info.app_id)!=env.get('agent_instance_id'):return
+        scope='function' if payload['reason']=='AUTO_DEADLINE_MISS' else 'warning'
+        key=(info.vm_id,payload['reason']);previous=self._legacy_faults.get(key,{})
+        value={'vm_id':info.vm_id,'execution_id':row['execution_id'],'reason':payload['reason'],
+               'scope':scope,'command_id':payload['command_id'],'received_monotonic':message.received_monotonic,
+               'evidence':{key:payload[key] for key in ('trust','consecutive_misses','metric','used_percent',
+                           'threshold_percent','consecutive_samples') if key in payload},
+               'reports':min(previous.get('reports',0)+1,2**64-1)}
+        # One MQTT owner publishes a small immutable snapshot. Diagnostics never
+        # waits on the coordinator's receipt/fsync lock and creates no per-key cache.
+        self._legacy_faults={**self._legacy_faults,key:value}
         try:self._trust_reports.put_nowait({'vm_id':info.vm_id,'execution_id':row['execution_id'],
-            'command_id':payload['command_id'],'received_monotonic':message.received_monotonic})
+            'command_id':payload['command_id'],'scope':scope,'reason':payload['reason'],
+            'received_monotonic':message.received_monotonic})
         except queue.Full:pass
+
+    def legacy_fault_reports(self):
+        """Coordinator-lifetime bounded diagnostics; never grants recovery."""
+        snapshot=self._legacy_faults
+        return [{**value,'evidence':dict(value['evidence'])} for value in snapshot.values()]
 
     def trust_events(self):
         values=[]
