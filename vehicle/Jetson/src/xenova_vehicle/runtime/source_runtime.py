@@ -276,6 +276,7 @@ class MapperSource:
         self.active_probe=None;self._vehicle_head=None;self.counts=Counter()
         self._abort=None
         self._bootstrap_pending=OrderedDict();self._bootstrap_report=None;self._bootstrap_origin=None;self._bootstrap_started=False
+        self._pumping=False
 
     def offer_bootstrap_load(self,request):
         self._bootstrap_started=True
@@ -347,6 +348,25 @@ class MapperSource:
             self.counts['output_expired']+=1
             return None
 
+    def discard_outputs(self):
+        """미송신 World/summary만 철회한다. 원 identity/bootstrap·기한·송신 순번은 보존한다.
+
+        이미 실제 송신한 packet은 회수하지 않는다. partial/unknown pending은 기존
+        DataLink가 실패로 남기며 이를 정상 폐기나 native 정리로 바꾸지 않는다.
+        retry의 원 body/issued/E 기록도 유지해 폐기가 기한 재발급 입구가 되지 않게 한다.
+        """
+        kinds=('WORLD_CANDIDATE','SURVEY_SUMMARY')
+        original=self.link.pending
+        discarded=0
+        if original is not None and original.kind in kinds:
+            if not self.link.discard_pending(original):
+                raise RuntimeError('original pending output changed during same-owner discard')
+            discarded+=1
+        for kind in kinds:
+            if self._outputs.pop(kind,None) is not None:discarded+=1
+        self.counts['output_fenced']+=discarded
+        return discarded
+
     def offer_world(self,raw,*,publication_sha256,issued_us,expires_us):
         """현재 원 publication의 최신 world1개를 stage한다. 이미 선택된 packet은 바꾸지 않는다."""
         from xenova_drive_world import decode,schema
@@ -407,8 +427,27 @@ class MapperSource:
         self._outputs.clear()  # 옛 publication에 결박한 미선택 출력만 철회한다. 원 frame/관측은 유지한다.
         self.counts['publication_changed']+=1
 
-    def pump(self):
-        now=self.clock();self._flush()
+    def pump(self,*,before_outputs=None):
+        """같은 main owner에서 원 입력을 반영하고 출력 전 metadata/fence를 확인한다.
+
+        callback은 무인자이며 초기 flush 전과 이번 poll 전체 반영 후에 호출한다.
+        ingest/fence만 수행하고 pump에 재진입하지 않는다. 새 입력 수락 전 이미 시작한
+        송신의 recall은 아니다. None은 기존 순서이며 callback 예외는 그대로 전파한다.
+        """
+        if before_outputs is not None and not callable(before_outputs):
+            raise TypeError('before_outputs must be an optional zero-argument callable')
+        self.link.pending  # callback도 실제 endpoint의 원 owner에서만 실행한다.
+        if self.link.closed:raise EOFError('binary data endpoint is closed')
+        if self._pumping:raise RuntimeError('mapper source pump cannot be reentered')
+        self._pumping=True
+        try:return self._pump(before_outputs)
+        finally:self._pumping=False
+
+    def _pump(self,before_outputs):
+        now=self.clock()
+        if before_outputs is not None:
+            before_outputs();now=self.clock()
+        self._flush()
         for packet in self.link.poll():
             if not packet.issued_us<=now<packet.expires_us:
                 if packet.kind=='SOURCE_PUBLICATION':raise TimeoutError('original scene publication delivery expired')
@@ -490,6 +529,8 @@ class MapperSource:
                     self.tof[sensor]=delivery
                 else:self.scene=delivery
             else:raise ValueError('unsupported S source statement')
+        if before_outputs is not None:
+            before_outputs();now=self.clock()
         if self._bootstrap_pending:
             key=next(iter(self._bootstrap_pending));kind,body,request,issued,expires=self._bootstrap_pending[key]
             if not issued<=now<expires:raise TimeoutError('original bootstrap transport expired')
@@ -519,7 +560,7 @@ class MapperSource:
             break
 
     def context_bytes(self):
-        """시각/qualifier를 재발급하지 않는 immutable job context. 검산은 compute 책임이다."""
+        """원 시각의 immutable context다. 공개 dict 직접 갱신도 반영하므로 identity 캐시는 쓰지 않는다."""
         value=dict(version=1,publication=self.publication,source=self.source,origin=self.origin,
             context_sha256=self.context_sha256,active_probe_sha256=self.active_probe,
             storage_context=None if self.storage_context is None else self.storage_context.fields,

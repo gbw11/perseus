@@ -90,9 +90,9 @@ def stopping_region(spec,vehicle,pose,calibration,*,admission,frame_id,now_us,ma
     import numpy as np
     from .odometry import PoseEstimate
     from ..perception.calibration import CalibrationProfile
-    from ..transport.sensor_samples import SensorSamples,VehicleEvidence
+    from ..transport.sensor_samples import SensorSamples,FrozenSensorSamples,VehicleEvidence
     if type(spec) is not GridSpec or spec.width*spec.height>4096:raise ValueError('stopping region grid exceeds4096 cells')
-    if type(vehicle) is not VehicleEvidence or type(admission) is not SensorSamples or not admission.current_vehicle(vehicle,now_us):
+    if type(vehicle) is not VehicleEvidence or type(admission) not in (SensorSamples,FrozenSensorSamples) or not admission.current_vehicle(vehicle,now_us):
         raise ValueError('actual admitted current Vehicle evidence required')
     if type(calibration) is not CalibrationProfile or calibration.sha256!=admission.context.calibration.sha256:
         raise ValueError('stopping body/calibration differs from current source')

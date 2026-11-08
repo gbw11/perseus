@@ -138,6 +138,9 @@ class PerceptionPipeline:
         self.rgb_gate,self.depth_gate,self.nn_gate = SourceGate(),SourceGate(),SourceGate()
         self.grid = self.reference = self._context = None
         self._alignment = None
+        # 현재 match의 사용 기한과 다음 prior의 물리 전파 기준은 서로 다른 수명이다.
+        # 최초 수락 후보의 보수 변환만 고정해 fitted 오차를 매 frame 다시 누적하지 않는다.
+        self._propagation_anchor = None
         self._restore_pending = False
         self._domain_cache = None
         self._last_tape = self._last_road = self._last_rgb = None
@@ -345,16 +348,25 @@ class PerceptionPipeline:
                 clock_id=observation.rgb.stamp.clock_id,kind=observation.kind,free_ttl_us=self.profile.free_ttl_us)
             self.reference=None
             self._alignment=None
+            self._propagation_anchor=None
             self._free_scheduler=None
             self._context=context
         raw_pose=pose
+        registration_pose=pose
         alignment_invalid=False
         if pose is not None and self._alignment is not None:
             try:
-                pose=self._alignment.apply(pose)
+                anchor=self._propagation_anchor or self._alignment
+                if (localization_configured and (not anchor.has_metadata
+                        or (anchor.position_drift_mps,anchor.yaw_drift_rps)
+                            !=(localization_position_drift_mps,localization_yaw_drift_rps))):
+                    raise ValueError('propagation anchor cannot adopt a different physical drift policy')
+                registration_pose=anchor.apply(raw_pose)
+                pose=self._alignment.apply(raw_pose)
             except ValueError:
                 alignment_invalid=True
                 pose=None
+                registration_pose=None
         input_done=perf_counter_ns()
         step('INPUT_COMPLETED')
         evidence=None
@@ -394,7 +406,7 @@ class PerceptionPipeline:
         if pose is not None and rgb_new and geometry_qualified and self._last_tape is not None and self._last_tape.status=='VALID':
             points=self._features(self._last_tape,capture)
             if points and self.reference is not None and self.reference.segments and not unqualified_reference:
-                registration=register(points,self.reference,pose.prior,self.profile.registration,calibration_id=self.calibration.sha256)
+                registration=register(points,self.reference,registration_pose.prior,self.profile.registration,calibration_id=self.calibration.sha256)
                 if registration.status=='BOUNDED':
                     x,y,yaw=registration.representative
                     fitted=replace(pose.sample,x=x,y=y,yaw=yaw,
@@ -412,6 +424,7 @@ class PerceptionPipeline:
                         quarantined=True
                     else:
                         pose=candidate_pose;self._alignment=candidate_alignment;self._restore_pending=False
+                        if self._propagation_anchor is None:self._propagation_anchor=candidate_alignment
                         quarantined=False
                 else:
                     quarantined=True

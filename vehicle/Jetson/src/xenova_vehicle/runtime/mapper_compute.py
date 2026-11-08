@@ -176,6 +176,7 @@ class MapperInput:
     _clocks: bytes
     _sdk_lower_bounds: tuple | None
     _available_us: int
+    _sensor_snapshot: object | None
 
     def __init__(self, job_id, source_generation, sample, expires_us, *, parser_cap_us=None, context_bytes=b''):
         from .resident_samples import CaptureSample
@@ -237,10 +238,43 @@ class MapperInput:
                 byte_length=size + len(clocks) + len(context_bytes) + (0 if packet is None or packet.golden is None
                     else len(json.dumps(packet.golden, ensure_ascii=True).encode('ascii'))),
                 _sample=detached, _clocks=clocks, _sdk_lower_bounds=sdk_bounds,
+                _sensor_snapshot=None,
                 _available_us=max(sample.rgb.received_j_us, sample.depth.received_j_us,
                     0 if packet is None else packet.received_j_us,
                     0 if sample.nn_input is None else sample.nn_input.received_j_us)).items():
             object.__setattr__(self, name, value)
+
+    @property
+    def sensor_snapshot(self):
+        """M-main이 원 frame에 결합한 불변 admission이다. compute에서 다시 수락하지 않는다."""
+        return self._sensor_snapshot
+
+    def with_sensor_snapshot(self, snapshot, *, now_us=None):
+        """원 frame/job/E를 바꾸지 않고 한 번만 메타 참조를 결합한 새 입력을 만든다."""
+        from .mapper_sensor_state import SensorFrameSnapshot, MAX_SENSOR_SNAPSHOT_BYTES
+        if type(snapshot) is not SensorFrameSnapshot:
+            raise MapperComputeError('exact immutable sensor frame snapshot required')
+        if type(snapshot.byte_length) is not int or not 0 < snapshot.byte_length <= MAX_SENSOR_SNAPSHOT_BYTES:
+            raise MapperComputeError('whole immutable sensor proof exceeds its512KiB budget')
+        snapshot.validate_frame(job_id=self.job_id, source_generation=self.source_generation,
+            source_key=self.source_key, expires_us=self.expires_us, context_bytes=self.context_bytes,
+            now_us=now_us)
+        if self._sensor_snapshot is not None:
+            if self._sensor_snapshot is snapshot:
+                return self
+            raise MapperComputeError('original frame admission cannot be replaced')
+        from .resident_samples import CaptureSample
+        original = self._sample
+        detached = CaptureSample(original.rgb, original.depth, original.nn_input,
+            _packet_copy(original.nn_output), {})
+        result = object.__new__(MapperInput)
+        for name in self.__dataclass_fields__:
+            value = getattr(self, name)
+            if name == '_sensor_snapshot': value = snapshot
+            elif name == '_sample': value = detached
+            elif name == 'byte_length': value += snapshot.byte_length
+            object.__setattr__(result, name, value)
+        return result
 
     @property
     def sample(self):
@@ -304,6 +338,8 @@ class MapperCompute:
         self._maintenance=maintenance
         self._generation = _generation(source_generation)
         self._serial = 1
+        self._admission_fence = 0
+        self._admission_fence_reason = 'INITIAL_ADMISSION'
         self._owner = threading.current_thread()
         self._condition = threading.Condition(adoption_lock)
         self._pending = {'RAW': None, 'NN': None}
@@ -372,7 +408,9 @@ class MapperCompute:
                 if key != kind and value is not None)
             if self._active is not None:
                 used += self._active['item'].byte_length
-            if used > MAX_OWNED_BYTES:
+            # 입력 세 칸과 동시에 존재할 수 있는 결과1의 최대 bytes도 예약한다.
+            # snapshot 메타를 추가해도 기존8MiB 소유 한도를 넘겨서는 안 된다.
+            if used + MAX_RESULT_BYTES > MAX_OWNED_BYTES:
                 self._counts['owned_budget_rejected'] += 1
                 return False
             self._counts['pending_replaced'] += int(previous is not None)
@@ -389,9 +427,32 @@ class MapperCompute:
                 raise MapperComputeError('source cannot be replaced')
             self._generation = source_generation
             self._serial += 1
+            self._admission_fence = 0
+            self._admission_fence_reason = 'INITIAL_ADMISSION'
             self._pending = {'RAW': None, 'NN': None}
             self._result = None
             self._condition.notify_all()
+
+    def fence_admission(self, revision, *, reason='SENSOR_ADMISSION_REVOKED'):
+        """센서 유효성 철회는 geometry만 막는다. parser·채택 map·factory 수명은 유지한다."""
+        self._main()
+        _uint(revision)
+        if type(reason) is not str or not 1 <= len(reason) <= 64 or not reason.isascii():
+            raise MapperComputeError('bounded admission fence reason required')
+        with self._condition:
+            if revision < self._admission_fence:
+                raise MapperComputeError('admission fence cannot regress in the same source')
+            if revision == self._admission_fence:
+                return False
+            self._admission_fence = revision
+            self._admission_fence_reason = reason
+            self._pending['RAW'] = None
+            self._result = None
+            self._events = deque(replace(event, accepted=False, reason='ADMISSION_FENCE')
+                if event.kind == 'GEOMETRY_COMPLETED' else event for event in self._events)
+            self._counts['admission_fenced'] += 1
+            self._condition.notify_all()
+            return True
 
     def poll(self):
         self._main()
@@ -545,6 +606,10 @@ class MapperCompute:
         with self._condition:
             if self._stopping or active['serial'] != self._serial:
                 raise _Cancelled('STOP_OR_SOURCE_FENCE')
+            snapshot = active['item'].sensor_snapshot
+            if (active.get('metric_phase') and snapshot is not None
+                    and snapshot.fence_revision != self._admission_fence):
+                raise _Cancelled('ADMISSION_FENCE')
         if not active['item'].fresh(now):
             raise _Cancelled('SOURCE_EXPIRED')
         if active.get('parsing') and now >= active['parser_deadline']:
@@ -555,13 +620,32 @@ class MapperCompute:
             self._emit(self._event('PROGRESS', active, now, accepted=True, reason=phase))
         return now
 
+    def _sync_admission(self, processor, previous, serial):
+        """같은 compute의 현재 fence를 반영한다. main의 새 입력 선택과 maintenance 사이는 경합할 수 있다."""
+        with self._condition:
+            if serial != self._serial:return previous
+            revision,reason = self._admission_fence,self._admission_fence_reason
+        if revision != previous:
+            callback = getattr(processor, 'admission_fenced', None)
+            if callback is not None:callback(revision, reason)
+        return revision
+
     def _run(self):
         processor = None
         processor_serial = None
+        processor_admission_fence = None
         while True:
             with self._condition:
                 if self._stopping:return
-            if self._maintenance is not None:
+                processor_is_current = processor is None or processor_serial == self._serial
+            if processor is not None and processor_is_current:
+                try:
+                    processor_admission_fence = self._sync_admission(processor,processor_admission_fence,processor_serial)
+                except BaseException as error:
+                    with self._condition:
+                        self._terminal_error='ADMISSION_'+type(error).__name__
+                    return
+            if self._maintenance is not None and processor_is_current:
                 try:
                     # CP encode/hash도 이 compute owner에서만 한다. 원 job 없는 유지 작업은
                     # 카메라 입력/NN 준비/지도 계산의 진도나 완료 사건으로 세지 않는다.
@@ -590,6 +674,7 @@ class MapperCompute:
                 if processor is None or processor_serial != serial:
                     processor = self._factory(item.source_generation)
                     processor_serial = serial
+                    processor_admission_fence = self._sync_admission(processor,None,processor_serial)
                     self._check(active)
                 parsed = None
                 if item.nn_sequence is not None:
@@ -615,6 +700,10 @@ class MapperCompute:
                         active['parsing'] = False
                         # geometry가 느리거나 실패해도 NN의 실제 완료 사실은 먼저 전달한다.
                         self._emit(self._event('NN_COMPLETED', active, completed, accepted=True))
+                active['metric_phase'] = True
+                # main은 위 maintenance/NN parse 중 새 revision 입력을 넣을 수 있다.
+                # 최신 프레임이 건강해도 processor의 옛 revision으로 거절하지 않게 한다.
+                processor_admission_fence = self._sync_admission(processor,processor_admission_fence,processor_serial)
                 self._check(active)
                 value = processor.geometry(item, parsed, lambda phase=None: self._check(active, phase))
                 completed = self._check(active)
@@ -632,7 +721,8 @@ class MapperCompute:
                     self._counts['result_replaced'] += int(self._result is not None)
                     self._result = MapperResult(item.job_id, item.source_generation, serial, item.source_key,
                         active['started'], completed, item.expires_us, True, value)
-                self._emit(self._event('GEOMETRY_COMPLETED', active, completed, accepted=True))
+                    # 완료 참조와 사건은 같은 채택 경계다. fence 뒤 늦은 accepted 사건을 붙이지 않는다.
+                    self._emit(self._event('GEOMETRY_COMPLETED', active, completed, accepted=True))
             except _Cancelled as error:
                 with self._condition:
                     self._counts[str(error)] += 1
@@ -651,3 +741,6 @@ class MapperCompute:
                 with self._condition:
                     self._active = None
                     self._condition.notify_all()
+                # loop local이 idle 내내 끝난 frame/tensor를 숨은 네 번째 입력으로 잡지 않는다.
+                # 큰 후보의 마지막 참조 해제는 adoption lock 밖에서 수행한다.
+                active = item = parsed = value = None

@@ -84,7 +84,7 @@ class MapperProcessorMappingTests(unittest.TestCase):
         self.assertIsNotNone(processor._staged[3].pipeline.grid)
         processor.accepted(item)
         self.assertIs(processor._accepted,original)
-        self.assertEqual(processor._accepted_sensors.sensors.latest_vehicle.anchor.sequence,2)
+        self.assertEqual(self.fixture.sensor_owner.sensors.latest_vehicle.anchor.sequence,2)
         self.assertIs(self.mailbox.main_peek().request,pending)
         # 동일 원 예약을 완료한다. 새 원 UUID/nonce/TTL을 만들어 grant를 대신하지 않는다.
         dispatch=self.mailbox.main_take(current_context_sha256=self.context.sha256,now_us=self.fixture.now)
@@ -128,7 +128,7 @@ class MapperProcessorMappingTests(unittest.TestCase):
     def test_final_cancel_keeps_metric_gates_and_original_sensor_admissions_without_reoffering(self):
         self.grant();processor=self.processor
         item,summary=self.geometry();self.assertTrue(summary['mapping_ready']);processor.accepted(item)
-        accepted,sensors=processor._accepted,processor._accepted_sensors
+        accepted,sensors=processor._accepted,self.fixture.sensor_owner
         source=self.fixture.fixture.snapshot()
         third=encode(self.fixture.fixture.fixture.vehicle(3,1_120_000,.003))
         source['vehicles'].append(self.fixture.fixture.row(third,received=1_025_000))
@@ -138,9 +138,9 @@ class MapperProcessorMappingTests(unittest.TestCase):
         self.assertIs(processor._accepted,accepted)
         old_heads=dict(accepted.pipeline.rgb_gate._heads)
         processor.cancelled(item,'ORIGINAL_INPUT_EXPIRED')
-        self.assertIs(processor._accepted,accepted);self.assertIs(processor._accepted_sensors,sensors)
+        self.assertIs(processor._accepted,accepted);self.assertIs(self.fixture.sensor_owner,sensors)
         self.assertEqual(accepted.pipeline.rgb_gate._heads,old_heads)
-        self.assertNotIn(sha256(third).hexdigest(),sensors._seen_vehicle)
+        self.assertIn(sha256(third).hexdigest(),sensors._seen_vehicle)
         self.assertIsNone(processor._mapping._staged);self.assertIsNone(processor._staged)
         self.assertIsNone(self.mailbox.main_peek())
         processor.maintenance();self.assertIsNone(self.mailbox.main_peek())

@@ -15,7 +15,7 @@ from .wall_sensor import MAX_CAPTURE_LIFETIME_US
 
 
 class DevelopmentMotion:
-    """한 compute owner의 원 admission/HWM/PoseBuffer다. source 교체는 새 owner가 필요하다."""
+    """한 main owner의 원 admission/HWM/PoseBuffer다. compute에는 frame snapshot만 넘긴다."""
 
     def __init__(self,profile,raw_binding,clock_policy,*,sensor_context,mapper_worker,mapper_instance):
         if type(profile) is not DevelopmentMotionProfile:
@@ -38,10 +38,14 @@ class DevelopmentMotion:
 
     def _owned(self):
         if threading.get_ident()!=self._thread:
-            raise RuntimeError('development motion belongs to the original compute owner')
+            raise RuntimeError('development motion belongs to the original main owner')
 
-    def read(self,source_snapshot,observation,*,now_us,expires_j_us):
-        """원 RGB/depth hull을 보간한다. 불명·만료·bracket 부재는 기존 read가 pose None으로 남긴다."""
+    def ingest(self,source_snapshot,*,now_us):
+        """원 row를 도착 당시 현재 J로 수락한다. capture·GT·새 clock/trust를 만들지 않는다."""
+        self._owned()
+        return self.sensor_state.ingest(source_snapshot,now_us=now_us)
+
+    def _capture_stamp(self,observation,*,now_us,expires_j_us):
         self._owned()
         if (type(observation) is not PerceptionInput or observation.kind!='SYNTHETIC'
                 or observation.calibration_id!=self.profile.bound_calibration.sha256
@@ -58,7 +62,19 @@ class DevelopmentMotion:
             raise ValueError('original development capture lifetime expired or differs')
         available=max(observation.rgb.stamp.available_us,
             0 if observation.depth is None else observation.depth.stamp.available_us)
-        stamp=replace(observation.rgb.stamp,captured_us=full,available_us=available)
+        return replace(observation.rgb.stamp,captured_us=full,available_us=available)
+
+    def frame_snapshot(self,observation,*,now_us,expires_j_us,job_id,source_generation,source_key):
+        """원 frame job의 query만 고정한다. 늦은 Vehicle 재-admission이나 E 갱신은 없다."""
+        stamp=self._capture_stamp(observation,now_us=now_us,expires_j_us=expires_j_us)
+        if source_generation!=self.raw.sha256 or source_key!=observation.rgb.stamp.key:
+            raise ValueError('original development RAW generation and RGB source key required')
+        return self.sensor_state.frame_snapshot(stamp,now_us=now_us,expires_us=expires_j_us,
+            job_id=job_id,source_generation=source_generation,source_key=source_key)
+
+    def read(self,source_snapshot,observation,*,now_us,expires_j_us):
+        """software fixture용 legacy ingest+query다. 실제 main은 ingest/frame_snapshot을 분리한다."""
+        stamp=self._capture_stamp(observation,now_us=now_us,expires_j_us=expires_j_us)
         return self.sensor_state.read(source_snapshot,stamp,now_us=now_us)
 
     def original_pose_bracket(self,pose):

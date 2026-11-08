@@ -12,7 +12,7 @@ import math
 from threading import get_ident
 
 from .scene import MapperScene,SurveyProfile,SurveyObservation,SceneEvidenceScope,SceneError,_codec
-from .mapper_sensor_state import MapperSensorState
+from .mapper_sensor_state import MapperSensorState,SensorFrameSnapshot
 from ..mapping.alignment import MapOdomAlignment
 from ..mapping.odometry import PoseEstimate
 from ..mapping.registration import FrozenReference
@@ -38,14 +38,14 @@ class SceneStationWitness:
 
     @classmethod
     def from_frame(cls,sensors,observation,context,profile,*,now_j_us):
-        if (type(sensors) is not MapperSensorState or type(observation) is not SurveyObservation
+        if (type(sensors) not in (MapperSensorState,SensorFrameSnapshot) or type(observation) is not SurveyObservation
                 or type(context) is not StorageContext or type(profile) is not SurveyProfile):
             raise SceneError('actual SensorState/capture/context/profile required')
         bracket=sensors.original_pose_bracket(observation.raw_pose)
         if bracket.pose is not observation.raw_pose:raise SceneError('original PoseBuffer capture was replaced')
         capture=observation.raw_pose.captured_us;first_limit=capture[0]-profile.station_window_us
         if first_limit<0:raise SceneError('whole stationary window has not elapsed')
-        rows=tuple(sensors._vehicle_admissions.values())
+        rows=sensors.vehicle_admissions
         if len(rows)>256:raise SceneError('original Vehicle window exceeds capacity')
         matching=sorted((row for row in rows if row.evidence.pose_sample.context==observation.raw_pose.sample.context
             and row.evidence.pose_sample.at_us<=bracket.pose.bracket_us[1]),key=lambda row:row.evidence.pose_sample.at_us)
@@ -212,7 +212,7 @@ class SceneCoordinator:
         from .mapper_mapping import MappingFrameDraft
         self._owner();uint(now_j_us)
         if (self._draft is not None or type(mapping) is not MappingFrameDraft or type(result) is not PerceptionResult
-                or mapping.result is not result or type(sensors) is not MapperSensorState):
+                or mapping.result is not result or type(sensors) not in (MapperSensorState,SensorFrameSnapshot)):
             raise SceneError('one actual finalized Mapping draft/result/SensorState required')
         candidate=copy(self.scene);observed=False;station=None;reason='NEW_RGB_NOT_READY'
         if mapping.ready and mapping.context==candidate.context and mapping.frame is not None:

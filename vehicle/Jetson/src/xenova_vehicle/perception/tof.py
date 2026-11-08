@@ -155,11 +155,11 @@ def _motion(origin,direction,pose):
 
 def tof_evidence(evidence,leaf,calibration,*,admission,now_us,pose=None,motion_qualified=False):
     """검산된 원 complete frame을 처리한다. pose 부재는 frame-local 진단이며 지도/FREE 자격0이다."""
-    from ..transport.sensor_samples import SensorSamples,TofEvidence
+    from ..transport.sensor_samples import SensorSamples,FrozenSensorSamples,TofEvidence
     if type(evidence) is not TofEvidence or type(leaf) is not TofLeaf or type(calibration) is not CalibrationProfile:
         raise ValueError('exact admitted ToF evidence/leaf/local calibration required')
     _flag(motion_qualified)
-    if type(admission) is not SensorSamples or not admission.current_tof(evidence,now_us):raise ValueError('ToF original source/time qualification expired or was replaced')
+    if type(admission) not in (SensorSamples,FrozenSensorSamples) or not admission.current_tof(evidence,now_us):raise ValueError('ToF original source/time qualification expired or was replaced')
     if (evidence.leaf_sha256,evidence.sensor_id,evidence.sensor_config_revision,evidence.calibration_profile_sha256)!=(
             leaf.sha256,leaf.sensor_id,leaf.sensor_config_revision,calibration.sha256):raise ValueError('ToF source/leaf differs from admitted original')
     bound=_pose(evidence,calibration,pose,motion_qualified)

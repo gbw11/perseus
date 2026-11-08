@@ -15,7 +15,7 @@ from .map_checkpoint import MapCheckpointCollector,MapCheckpointNotReady,FrameEv
 from .mapper_catalogs import MapperCatalogs,CatalogNotReady
 from .mapper_compute import MapperInput
 from .mapper_profile import MapperProfile
-from .mapper_sensor_state import MapperSensorState,MetricInputs
+from .mapper_sensor_state import MapperSensorState,SensorFrameSnapshot,MetricInputs
 from .mapper_storage import MapperStorageMailbox,StorageAbort
 from .parking_bridge import WireProvenanceGrant
 from .raw_binding import RawBinding
@@ -450,7 +450,10 @@ class MapperMapping:
         if self._staged is not None:raise MappingNotReady('one original frame draft is unresolved')
         self._atlas_wait_reason=None
         if (type(item) is not MapperInput or type(pipeline) is not PerceptionPipeline or type(inputs) is not MetricInputs
-                or type(sensors) is not MapperSensorState or now_us>=item.expires_us):raise ValueError('actual current compute input required')
+                or type(sensors) not in (MapperSensorState,SensorFrameSnapshot) or now_us>=item.expires_us):raise ValueError('actual current compute input required')
+        if type(sensors) is SensorFrameSnapshot:
+            sensors.validate_frame(job_id=item.job_id,source_generation=item.source_generation,
+                source_key=item.source_key,expires_us=item.expires_us,now_us=now_us,context_bytes=item.context_bytes)
         context=self.context_port.read();collector=None;frame=None;reason='PROVENANCE_NOT_READY'
         if self.collector is not None:collector=_fork_collector(self.collector,pipeline);collector._next=max(collector._next,self._cursor_floor)
         ready=False

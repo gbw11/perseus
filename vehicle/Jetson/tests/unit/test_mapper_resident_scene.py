@@ -56,6 +56,9 @@ class MapperResidentSceneTests(unittest.TestCase):
 
     def adopt(self, number, *, snapshot=None):
         item = self.runtime.item(number, snapshot=snapshot)
+        revision=item.sensor_snapshot.fence_revision
+        self.publications.fence_admission(revision)
+        self.processor.admission_fenced(revision,'SOFTWARE_SENSOR_VALIDITY')
         result = json.loads(self.processor.geometry(item, None, checkpoint))['latest']
         self.processor.accepted_at(item, self.runtime.now)
         return item, result

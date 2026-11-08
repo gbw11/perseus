@@ -105,6 +105,48 @@ def relay_publications(port, source, *, clock=j_us):
     return accepted_count
 
 
+def mapper_sensor_owner(boot, binding):
+    """M-main에서 보정·센서 메타만 검산한다. CV core·DB·Device는 만들지 않는다."""
+    from .mapper_profile import MapperProfile
+    from .mapper_sensor_state import MapperSensorState
+    from ..perception.calibration import CalibrationProfile
+    config=MapperProfile.from_bytes(boot.mapper_profile_bytes)
+    calibration=CalibrationProfile.from_dict(json.loads(boot.perception_profile_bytes))
+    if calibration.kind=='SYNTHETIC' or binding.fields['calibration_bundle']!=calibration.sha256:
+        raise ValueError('live sensor owner requires the pinned physical/provisional calibration')
+    if boot.source_policy is None or boot.clock_policy is None:
+        raise ValueError('sensor owner requires the original source and clock policies')
+    boot.source_policy.check_profile(calibration)
+    config.check(calibration,vehicle_configuration=boot.source_policy.configuration,
+        vehicle_calibration=boot.source_policy.calibration)
+    limits=config.sensors
+    owner=MapperSensorState(calibration,binding,boot.clock_policy,
+        tof_leaves=limits.tof_leaves,vehicle_max_age_us=limits.vehicle_max_age_us,tof_max_age_us=limits.tof_max_age_us,
+        max_speed_mps=limits.max_speed_mps,max_yaw_rate_rps=limits.max_yaw_rate_rps,
+        max_gap_us=limits.max_gap_us,capacity=limits.capacity,mapper_worker=boot.peer.worker_instance,
+        mapper_instance=boot.mapper_instance)
+    return config,owner
+
+
+def attach_sensor_snapshot(item, owner, timing, *, now_us):
+    """원 RGB·depth capture hull만 계산해 결합한다. pixel/NN decode나 지연 수락은 없다."""
+    from dataclasses import replace
+    from ..perception.adapters import from_capture_sample
+    from .mapper_sensor_state import SensorSnapshotUnavailable
+    observation=from_capture_sample(item.sample,owner.raw.fields,owner.calibration,
+        timing=timing,include_nn=False)
+    available=max(observation.rgb.stamp.available_us,
+        observation.rgb.stamp.available_us if observation.depth is None else observation.depth.stamp.available_us)
+    hull=replace(observation.rgb.stamp,captured_us=observation.capture_interval,available_us=available)
+    try:
+        snapshot=owner.frame_snapshot(hull,now_us=now_us,expires_us=item.expires_us,job_id=item.job_id,
+            source_generation=item.source_generation,source_key=item.source_key)
+    except SensorSnapshotUnavailable:
+        # proof cap/원E 실패는 metric 미준비다. parser 입력과 원 capture를 다시 찍지 않는다.
+        return item
+    return item.with_sensor_snapshot(snapshot,now_us=now_us)
+
+
 def _exception_message(error, limit=1024):
     """원 args의 유한 텍스트만 남긴다. SDK payload repr/임의 __str__를 호출하지 않는다."""
     parts = []
@@ -189,7 +231,16 @@ class _Actor:
         self.last_actual_sent = None
         self.deferred = deque()
         self.sent_observer=None
+        self.idle_hook=None
+        self._idle_busy=False
         self._hello()
+
+    def service_idle(self):
+        """제어 송신 대기 중에도 main의 작은 수신·수락을 진행한다. STOP 뒤에는 호출하지 않는다."""
+        if self.stop is not None or self.idle_hook is None or self._idle_busy:return
+        self._idle_busy=True
+        try:self.idle_hook()
+        finally:self._idle_busy=False
 
     def _hello(self):
         p = self.boot.peer
@@ -264,6 +315,7 @@ class _Actor:
             self.deferred.extend(packets)
             if not allow_stop and self.stop is not None:
                 raise _StopWork()
+            self.service_idle()
             time.sleep(0.005)
 
     def poll(self):
@@ -336,6 +388,7 @@ class _Actor:
             self.deferred.extend(packets)
             if self.stop is not None:
                 raise _StopWork()
+            self.service_idle()
             actual = self.last_actual_sent
             if actual is not None and actual.packet is packet:
                 if actual.completed_us >= deadline:
@@ -639,6 +692,7 @@ def mapper_main(endpoint, boot):
     storage_client=storage_mailbox=None
     bootstrap=None;bootstrap_request=None
     mapping_port=publication_port=None;mapping_material=mapping_context=mapping_scene=None
+    sensor_config=sensor_owner=None;sensor_fence=0
     processor_ref=[None]
     failed = False
     try:
@@ -676,6 +730,9 @@ def mapper_main(endpoint, boot):
             publication_port=MapperPublicationPort(mapping_port)
             bootstrap=MapperBootstrap(storage_mailbox,mapper_worker=boot.peer.worker_instance,
                 mapper_instance=boot.mapper_instance,cap_us=boot.startup_deadline_us,clock_us=j_us)
+        if boot.mapper_profile_bytes is not None:
+            if source is None:raise ValueError('operational sensors require the registered source channel')
+            sensor_config,sensor_owner=mapper_sensor_owner(boot,bind.binding)
         def processor_factory(generation):
             processor=ResidentMapperProcessor(boot.perception_profile_bytes,bind.binding,
                 mapper_profile_bytes=boot.mapper_profile_bytes,source_policy=boot.source_policy,clock_policy=boot.clock_policy,
@@ -697,22 +754,45 @@ def mapper_main(endpoint, boot):
         compute.start()
         control=MapperControl(actor,compute,parser_deadline,
             nn_stall_us=int(boot.profile.nn_stall_timeout_s*1_000_000))
+        def publish_inputs():
+            nonlocal mapping_material,mapping_context,mapping_scene
+            if mapping_port is None:return
+            if source.material is not None and source.material is not mapping_material:
+                from .mapper_bootstrap import material_bytes
+                mapping_port.publish(source.storage_context,material=material_bytes(source.material))
+                mapping_material=source.material
+            elif source.storage_context is not mapping_context:
+                mapping_port.publish(source.storage_context)
+            mapping_context=source.storage_context
+            if source.scene is not mapping_scene:
+                from ..storage.contracts import canonical
+                mapping_port.publish_scene(None if source.scene is None else canonical(source.scene))
+                # 새 원 grant를 compute가 소비할 때까지 이전 미송신 보고는 다시 쓰지 않는다.
+                if publication_port is not None:publication_port.discard_pending()
+                source.discard_outputs()
+                mapping_scene=source.scene
+        def apply_sensor_fence():
+            nonlocal sensor_fence
+            if sensor_owner is None:return
+            revision=sensor_owner.fence_revision
+            if revision!=sensor_fence:
+                compute.fence_admission(revision)
+                if publication_port is not None:publication_port.fence_admission(revision)
+                source.discard_outputs()
+                sensor_fence=revision
+        def ingest_inputs():
+            # busy-idle도 새 publication을 즉시 게시해 old-context 최종 채택을 fence한다.
+            publish_inputs()
+            if sensor_owner is None or actor.stop is not None:return
+            sensor_owner.ingest(source.context_bytes(),now_us=j_us())
+            apply_sensor_fence()
+        def pump_inputs():
+            if source is not None and actor.stop is None:source.pump(before_outputs=ingest_inputs)
+        actor.idle_hook=pump_inputs
         acquire = None
         while True:
             incoming = actor.poll()
-            if source is not None:source.pump()
-            if mapping_port is not None:
-                if source.material is not None and source.material is not mapping_material:
-                    from .mapper_bootstrap import material_bytes
-                    mapping_port.publish(source.storage_context,material=material_bytes(source.material))
-                    mapping_material=source.material
-                elif source.storage_context is not mapping_context:
-                    mapping_port.publish(source.storage_context)
-                mapping_context=source.storage_context
-                if source.scene is not mapping_scene:
-                    from ..storage.contracts import canonical
-                    mapping_port.publish_scene(None if source.scene is None else canonical(source.scene))
-                    mapping_scene=source.scene
+            pump_inputs()
             if bootstrap is not None and source.publication is None and source.material is not None:
                 bootstrap.offer_material(source.material)
             if storage_client is not None:
@@ -775,9 +855,14 @@ def mapper_main(endpoint, boot):
                     lower=min(int(clock['sdk_host_timestamp_j_bracket_us'][0])
                               for clock in sample.clocks.values())
                     expires=min(2**64-1,lower+500_000)
+                    pump_inputs()
                     item=MapperInput(str(uuid.uuid4()),bind.binding.sha256,sample,expires,
                         parser_cap_us=None if control.ready else parser_deadline.expires_us,
                         context_bytes=b'' if source is None else source.context_bytes())
+                    if sensor_owner is not None:
+                        item=attach_sensor_snapshot(item,sensor_owner,sensor_config.capture_timing,now_us=j_us())
+                        # query 도중 현재 clock/Vehicle이 만료돼도 같은 main revision으로 제출한다.
+                        apply_sensor_fence()
                     # 실제 native 반환과 RELEASE 송신이 끝난 owned bytes만 넘긴다.
                     compute.submit(item)
                     item=sample=None
@@ -797,6 +882,7 @@ def mapper_main(endpoint, boot):
         except (EOFError, OSError):
             pass
     finally:
+        actor.idle_hook=None
         actor.state = 'QUIESCING'
         if bootstrap is not None:bootstrap.cancel('STOP')
         if compute is not None:

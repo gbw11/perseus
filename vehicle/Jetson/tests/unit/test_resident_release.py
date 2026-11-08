@@ -43,6 +43,9 @@ class ResidentReleaseTests(unittest.TestCase):
         self.actor.last_filled_sent = None
         self.actor.last_actual_sent = None
         self.actor.stop = None
+        self.actor.idle_hook = None
+        self.actor._idle_busy = False
+        self.actor.sent_observer = None
         self.actor.deferred = deque()
         self.actor.state = 'WAIT_CLOCK'
         self.actor.last_progress = None

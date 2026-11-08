@@ -228,6 +228,11 @@ class SensorSamples:
         self.context=context;self.leaves=inventory;self.vehicle_age=vehicle_max_age_us;self.tof_age=tof_max_age_us
         self.speed=float(max_speed_mps);self.yaw_rate=float(max_yaw_rate_rps)
         self.latest_vehicle=None;self._sensors={};self._resets={}
+        self.fence_revision=0
+
+    def freeze(self):
+        """현재 원 evidence 참조만 고정한다. mutable HWM/retired registry는 공유하지 않는다."""
+        return FrozenSensorSamples._from_owner(self)
 
     def _origin(self,sample,*,vehicle=False):
         c=self.context;source=c.source
@@ -275,6 +280,15 @@ class SensorSamples:
         return value
 
     def accept_tof(self,raw,clock_lease,now_us):
+        before=tuple((sensor,self.latest_tof(sensor)) for sensor in (0,1))
+        revision=self.fence_revision
+        try:return self._accept_tof(raw,clock_lease,now_us)
+        finally:
+            if self.fence_revision==revision and any(evidence is not None and self.latest_tof(sensor) is None
+                    for sensor,evidence in before):
+                self.fence_revision=_uint(self.fence_revision+1)
+
+    def _accept_tof(self,raw,clock_lease,now_us):
         sample=_decode(raw,'TofObservation');self._origin(sample)
         leaf=self.leaves.get(sample.sensor_id)
         if leaf is None or (sample.calibration,sample.sensor_config_revision)!=(leaf.sha256,leaf.sensor_config_revision):raise SampleRejected('unsupported ToF sensor or unapproved leaf/configuration')
@@ -290,6 +304,7 @@ class SensorSamples:
                 if len(old.retired)>=64:raise SampleRejected('ToF source inventory exhausted; no silent eviction')
                 retired=old.retired|{old.instance}
                 self._resets[sample.sensor_id]=SensorReset(sample.sensor_id,old.instance,old.generation,instance,sample.sensor_generation,sha256(raw).hexdigest())
+                self.fence_revision=_uint(self.fence_revision+1)
                 old=_Sensor(instance,sample.sensor_generation,retired);self._sensors[sample.sensor_id]=old
             elif sample.source_sample==old.source_sample:
                 if raw!=old.wire:raise SampleRejected('ToF source sequence conflict')
@@ -334,3 +349,52 @@ class SensorSamples:
         if not evidence.j_interval[1]<=now_us<evidence.valid_until_j_us:return False
         try:return evidence.clock_lease.pi_interval_to_j(evidence.pi_interval,now_us)==evidence.j_interval
         except ValueError:return False
+
+
+@dataclass(frozen=True,slots=True,init=False)
+class FrozenSensorSamples:
+    """원 snapshot 당시 latest identity와 고정 age/lease를 읽는 불변 view다.
+
+    context는 frozen SensorContext이고 calibration의 provenance/source는 내부 bytes다.
+    이후 owner의 새 sample을 전역 latest라고 주장하지 않으며 원 수명을 늘리지 않는다.
+    """
+    context: SensorContext
+    latest_vehicle: VehicleEvidence | None
+    _tofs: tuple
+    _leaves: tuple
+    vehicle_age: int
+    tof_age: int
+    speed: float
+    yaw_rate: float
+    fence_revision: int
+
+    def __init__(self,*args,**kwargs):
+        raise TypeError('FrozenSensorSamples is produced only by SensorSamples.freeze')
+
+    @classmethod
+    def _from_owner(cls,owner):
+        if type(owner) is not SensorSamples:raise SampleRejected('exact original sensor owner required')
+        result=object.__new__(cls)
+        values=dict(context=owner.context,latest_vehicle=owner.latest_vehicle,
+            _tofs=tuple((sensor,owner.latest_tof(sensor)) for sensor in (0,1)),
+            _leaves=tuple(sorted(owner.leaves.items())),vehicle_age=owner.vehicle_age,tof_age=owner.tof_age,
+            speed=owner.speed,yaw_rate=owner.yaw_rate,fence_revision=owner.fence_revision)
+        for name,value in values.items():object.__setattr__(result,name,value)
+        return result
+
+    @property
+    def leaves(self):return dict(self._leaves)
+
+    def latest_tof(self,sensor_id):
+        _uint(sensor_id,1)
+        return next(value for sensor,value in self._tofs if sensor==sensor_id)
+
+    def current_vehicle(self,evidence,now_us):
+        return SensorSamples.current_vehicle(self,evidence,now_us)
+
+    def current_tof(self,evidence,now_us):
+        return SensorSamples.current_tof(self,evidence,now_us)
+
+    def __copy__(self):return self
+
+    def __deepcopy__(self,memo):return self

@@ -118,7 +118,16 @@ class DevelopmentMotionTests(unittest.TestCase):
         with self.assertRaises(SampleRejected):production.read(canonical(f.snapshot()),stamp,now_us=f.now)
 
     def test_full_capture_uses_original_wire_admissions_and_nonoracle_motion_tube(self):
-        f=MotionFixture();owner=f.owner();observation=f.observation();result=f.read(owner,observation=observation)
+        f=MotionFixture();owner=f.owner();observation=f.observation()
+        owner.ingest(canonical(f.snapshot()),now_us=f.now)
+        arguments=dict(now_us=f.now,expires_j_us=1_499_800,job_id=identifier(99),
+            source_generation=f.raw.sha256,source_key=observation.rgb.stamp.key)
+        frame=owner.frame_snapshot(observation,**arguments);result=frame.metric_inputs
+        self.assertIsNone(frame.p4_evidence);self.assertIsNone(result.clock_lease.completed_pi_us)
+        self.assertEqual(frame.capture_stamp.captured_us,observation.capture_interval)
+        for change in (dict(source_generation='foreign'),dict(source_key=('foreign',))):
+            with self.subTest(change=change),self.assertRaises(ValueError):
+                owner.frame_snapshot(observation,**dict(arguments,**change))
         self.assertIsNotNone(result.pose);self.assertEqual(result.pose.captured_us,(999_800,1_000_200))
         self.assertEqual(result.pose.bracket_us,(990_000,1_010_000))
         self.assertEqual(result.pose.sample.origin,'SYNTHETIC_ODOMETRY')
@@ -126,6 +135,7 @@ class DevelopmentMotionTests(unittest.TestCase):
         self.assertEqual(result.pose.sample.calibration_id,f.profile.bound_calibration.sha256)
         self.assertEqual(result.reasons,());self.assertEqual(result.tof,())
         bracket=owner.original_pose_bracket(result.pose)
+        self.assertIs(frame.original_pose_bracket(result.pose),bracket)
         self.assertEqual(tuple(row.evidence.wire for row in bracket.originals),f.vehicles)
         self.assertEqual(tuple(row.received_j_us for row in bracket.originals),(1_015_000,1_015_001))
         self.assertIs(owner.validate_vehicle_admission(bracket.originals[1]),result.vehicle)
