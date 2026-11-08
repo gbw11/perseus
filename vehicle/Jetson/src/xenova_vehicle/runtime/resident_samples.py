@@ -11,6 +11,7 @@ from ..oak.frames import RawFrame
 from ..oak.observations import ClockEvidence, ObservationTracker
 from ..oak.yolop_association import YolopAssociation
 from ..oak.yolop_frames import NNInputStamp, NNPacket, RuntimeTensor
+from .raw_binding import RawBinding
 from .raw_slot import METADATA_BYTES, OwnedSlot, P0Context, encode_owned
 
 
@@ -39,9 +40,16 @@ def _stamp(item, stream_id, clock, *, nn=False):
                 exposure_us=None if nn else item.exposure_us, capture_j_interval_us=None)
 
 
+def p0_stream_ids(binding):
+    """전체 승인 binding의 P0 표만 복사한다. JPEG는 별도 소유 bytes 통로를 쓴다."""
+    if type(binding) is not RawBinding:
+        raise ValueError('P0 stream subset requires the original validated RawBinding')
+    return {name: value for name, value in binding.fields['stream_instances'].items() if name != 'jpeg'}
+
+
 def encode_sample(sample, write_key, binding):
     """실제 grant key와 전체 binding의 hash에 원 payload를 결박한다. 아직 copy/post 사실은 아니다."""
-    streams = binding.fields['stream_instances']
+    streams = p0_stream_ids(binding)
     configured = 'nn_input0' in streams
     if write_key.scope.raw_binding_sha256 != binding.sha256:
         raise ValueError('write grant differs from accepted raw binding')

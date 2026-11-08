@@ -154,6 +154,10 @@ capture 준비는 실제 RGB/depth 30쌍, NN 준비는 M의 fresh parser 결과 
 
 반복 기동은 [systemd 배포 안내](deploy/systemd/README.md)의 고정 unit/slice에서 `--service-scope systemd`로 실행한다. `--output-root`는 기존 관리 디렉터리 아래 service UUID별 결과를 만들며 `--output`과 함께 지정할 수 없다. `resource-set.json`이 inventory·회복 counter의 정본이고 실행 기록은 해당 invocation을 식별하는 불변 anchor다. 설치 과정과 실제 검증 결과는 `Jetson-drive-docs/making-reports`에서 관리한다.
 
+`runtime`에 `--http-host 127.0.0.1 --http-port 8080`을 추가하면 A의 같은 RGB graph에 MJPEG encoder를 분기하고 S-http 한 스레드가 `GET /camera/stream.mjpg`, `GET /camera/snapshot.jpg`를 제공한다. HTTP는 기본 OFF이며 포트 생략 시8080이다. 벤치 profile의 `jpeg_enabled=false`는 유지하고, 선택한 상주 graph/format manifest에 JPEG 사용을 별도로 고정한다. 시청자 최대2명·각5Hz·원 JPEG256KiB·원 age500ms·전송250ms를 적용하며 느린 시청자와 영상 채널 오류는 영상 참조만 회수한다. HTTP 선택 시 직접 thread는8개이고, 원 RAW/NN/Device는 접속마다 새로 만들지 않는다. [영상 계약](docs/runtime-video.md)에 별도 통로와 종료 규칙을 설명한다.
+
+`--jio-profile`을 선택한 실행은 `xenova/v1/mapper/{device}/runtime`의 `mapper.runtime` 진단을 1Hz/QoS0/non-retained로 제공한다. 원 progress 시각과 현재 capture 준비를 구분하며, 아직 생산되지 않는 metric predicate와 NN 실행 시각은 미확인 상태로 남긴다. topic의 배포 ACL과 기존 공통 MQTT package 경로가 필요하다. [상태 계약](docs/runtime-status.md)의 `METRIC_UNASSESSED`는 주행 허가가 아니다.
+
 ## RGB·native depth 벤치 수집
 
 `capture`는 승인한 OAK 한 대의 RGB NV12 640×360과 RIGHT 기준 native depth 640×480을 원본으로 기록한다. 깊이는 little-endian uint16, mm 단위이며0은 invalid다. RGB 정렬·구멍 채우기·빈공간 판정을 하지 않는다. 고정15Hz는 요청값이며 실제 수신률과 누락 수는 결과에서 확인한다.

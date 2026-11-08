@@ -99,6 +99,7 @@ class MapperRuntimeProfileTests(unittest.TestCase):
             def runtime(name,policy):
                 value=resident_runtime._Runtime.__new__(resident_runtime._Runtime)
                 value.output=Path(directory)/name; value.output_owned=False; value.profile=self.yolop
+                value.http_address=None
                 value.perception_profile_bytes=self.calibration_bytes
                 value.mapper_profile_bytes=json.dumps(self.fields,indent=2).encode('ascii')
                 value.jio_profile=SimpleNamespace(source_policy=policy)
