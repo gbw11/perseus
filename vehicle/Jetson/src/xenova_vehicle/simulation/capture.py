@@ -137,13 +137,20 @@ def _ground_raster(scene):
     thickness = max(1, round(.025 / resolution))
     for edge in (left, right):
         cv2.polylines(raster, [pixels(edge)], True, (245, 245, 245), thickness)
-    # 원 코스의 divider 주기 .5m/on .25m와 입구 edge 지우기 순서를 재사용한다.
+    # 누적 arc의 ON 구간과 교차한 부분만 칠한다. raster/선 두께의 끝점 양자화는 남는다.
     station = 0.0
     for a, b in zip(center, np.roll(center, -1, axis=0)):
         distance = float(np.linalg.norm(b - a))
-        if station % .5 < .25:
-            cv2.line(raster, tuple(pixels(a)), tuple(pixels(b)), (245, 245, 245), thickness)
-        station += distance
+        end = station + distance
+        period = math.floor(station / .5)
+        while period * .5 < end:
+            lo, hi = max(station, period * .5), min(end, period * .5 + .25)
+            if hi > lo:
+                first = a + (b - a) * ((lo - station) / distance)
+                last = a + (b - a) * ((hi - station) / distance)
+                cv2.line(raster, tuple(pixels(first)), tuple(pixels(last)), (245, 245, 245), thickness)
+            period += 1
+        station = end
     paved = np.zeros((height, width), np.uint8)
     for polygon in layout['paved_areas']:
         cv2.fillPoly(paved, [pixels(polygon)], 1)

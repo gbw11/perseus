@@ -61,10 +61,29 @@ class SensorContext:
     gateway_instance: str
     pi_session: str
     device_session: str
+    _development: bool
 
     def __init__(self,calibration,current_source,*,pi_host_boot,gateway_instance,pi_session,device_session):
         if type(calibration) is not CalibrationProfile or calibration.kind=='SYNTHETIC' or calibration.vehicle_bundle_sha256 is None:
             raise SampleRejected('physical profile must declare the approved whole vehicle bundle')
+        self._assign(calibration,current_source,pi_host_boot,gateway_instance,pi_session,device_session,False)
+
+    @classmethod
+    def for_development(cls,profile,current_source,*,pi_host_boot,gateway_instance,pi_session,device_session):
+        """명시 개발 manifest만 SYNTHETIC odom에 결합한다. 기본 physical 입구는 그대로다."""
+        from ..simulation.motion_profile import DevelopmentMotionProfile
+        if type(profile) is not DevelopmentMotionProfile:
+            raise SampleRejected('exact explicit development motion profile required')
+        calibration=profile.bound_calibration;identity=profile.fields['identity']
+        if (type(current_source) is not dict or current_source.get('vehicle')!=identity['vehicle']
+                or current_source.get('configuration')!=identity['configuration']
+                or calibration.kind!='SYNTHETIC' or calibration.vehicle_bundle_sha256!=profile.sha256):
+            raise SampleRejected('development source/model/whole bundle differs')
+        result=object.__new__(cls)
+        result._assign(calibration,current_source,pi_host_boot,gateway_instance,pi_session,device_session,True)
+        return result
+
+    def _assign(self,calibration,current_source,pi_host_boot,gateway_instance,pi_session,device_session,development):
         if type(current_source) is not dict or set(current_source)!=SOURCE_FIELDS:raise SampleRejected('exact current S source required')
         for key in ('mapper_boot','mapper_instance','clock_epoch','map_epoch','frame_epoch','odom_epoch'):_uuid(current_source[key])
         for key in ('vehicle','device','configuration'):_label(current_source[key])
@@ -73,9 +92,18 @@ class SensorContext:
         for name,value in (('pi_host_boot',pi_host_boot),('gateway_instance',gateway_instance),('pi_session',pi_session),('device_session',device_session)):
             _uuid(value);object.__setattr__(self,name,value)
         object.__setattr__(self,'calibration',calibration);object.__setattr__(self,'_source',canonical(current_source))
+        object.__setattr__(self,'_development',development)
 
     @property
     def source(self):return json.loads(self._source)
+
+    @property
+    def domain(self):return 'DEVELOPMENT_SYNTHETIC' if self._development else 'PRODUCTION'
+
+    @property
+    def pose_clock_id(self):
+        epoch=self.source['clock_epoch']
+        return 'jetson-monotonic:'+epoch if self._development else epoch
 
 
 @dataclass(frozen=True,slots=True)
@@ -200,6 +228,11 @@ class SensorSamples:
         self.context=context;self.leaves=inventory;self.vehicle_age=vehicle_max_age_us;self.tof_age=tof_max_age_us
         self.speed=float(max_speed_mps);self.yaw_rate=float(max_yaw_rate_rps)
         self.latest_vehicle=None;self._sensors={};self._resets={}
+        self.fence_revision=0
+
+    def freeze(self):
+        """현재 원 evidence 참조만 고정한다. mutable HWM/retired registry는 공유하지 않는다."""
+        return FrozenSensorSamples._from_owner(self)
 
     def _origin(self,sample,*,vehicle=False):
         c=self.context;source=c.source
@@ -237,8 +270,9 @@ class SensorSamples:
         yaw=math.nextafter(sample.heading_error_rad+math.nextafter(self.yaw_rate*half,math.inf),math.inf)
         if yaw>math.pi:raise SampleRejected('Vehicle time/heading uncertainty exceeds supported pose tube')
         source=self.context.source
-        pose=PoseSample(sample.odom_epoch,source['clock_epoch'],self.context.calibration.sha256,middle,
-            sample.odom_pose.x,sample.odom_pose.y,sample.odom_pose.yaw,position,yaw,'ODOMETRY')
+        pose=PoseSample(sample.odom_epoch,self.context.pose_clock_id,self.context.calibration.sha256,middle,
+            sample.odom_pose.x,sample.odom_pose.y,sample.odom_pose.yaw,position,yaw,
+            'SYNTHETIC_ODOMETRY' if self.context.domain=='DEVELOPMENT_SYNTHETIC' else 'ODOMETRY')
         anchor=VehicleAnchor(sample.sequence,sample.source_sample,sample.source_us,sample.pi_sample_us,sample.odom_epoch,
             (sample.odom_pose.x,sample.odom_pose.y,sample.odom_pose.yaw),sample.calibration)
         value=VehicleEvidence(raw,sha256(raw).hexdigest(),anchor,pi,interval,pose,clock_lease,(sample.device_session,sample.source_sample,sample.source_us),interval[0]+self.vehicle_age)
@@ -246,6 +280,15 @@ class SensorSamples:
         return value
 
     def accept_tof(self,raw,clock_lease,now_us):
+        before=tuple((sensor,self.latest_tof(sensor)) for sensor in (0,1))
+        revision=self.fence_revision
+        try:return self._accept_tof(raw,clock_lease,now_us)
+        finally:
+            if self.fence_revision==revision and any(evidence is not None and self.latest_tof(sensor) is None
+                    for sensor,evidence in before):
+                self.fence_revision=_uint(self.fence_revision+1)
+
+    def _accept_tof(self,raw,clock_lease,now_us):
         sample=_decode(raw,'TofObservation');self._origin(sample)
         leaf=self.leaves.get(sample.sensor_id)
         if leaf is None or (sample.calibration,sample.sensor_config_revision)!=(leaf.sha256,leaf.sensor_config_revision):raise SampleRejected('unsupported ToF sensor or unapproved leaf/configuration')
@@ -261,6 +304,7 @@ class SensorSamples:
                 if len(old.retired)>=64:raise SampleRejected('ToF source inventory exhausted; no silent eviction')
                 retired=old.retired|{old.instance}
                 self._resets[sample.sensor_id]=SensorReset(sample.sensor_id,old.instance,old.generation,instance,sample.sensor_generation,sha256(raw).hexdigest())
+                self.fence_revision=_uint(self.fence_revision+1)
                 old=_Sensor(instance,sample.sensor_generation,retired);self._sensors[sample.sensor_id]=old
             elif sample.source_sample==old.source_sample:
                 if raw!=old.wire:raise SampleRejected('ToF source sequence conflict')
@@ -305,3 +349,52 @@ class SensorSamples:
         if not evidence.j_interval[1]<=now_us<evidence.valid_until_j_us:return False
         try:return evidence.clock_lease.pi_interval_to_j(evidence.pi_interval,now_us)==evidence.j_interval
         except ValueError:return False
+
+
+@dataclass(frozen=True,slots=True,init=False)
+class FrozenSensorSamples:
+    """원 snapshot 당시 latest identity와 고정 age/lease를 읽는 불변 view다.
+
+    context는 frozen SensorContext이고 calibration의 provenance/source는 내부 bytes다.
+    이후 owner의 새 sample을 전역 latest라고 주장하지 않으며 원 수명을 늘리지 않는다.
+    """
+    context: SensorContext
+    latest_vehicle: VehicleEvidence | None
+    _tofs: tuple
+    _leaves: tuple
+    vehicle_age: int
+    tof_age: int
+    speed: float
+    yaw_rate: float
+    fence_revision: int
+
+    def __init__(self,*args,**kwargs):
+        raise TypeError('FrozenSensorSamples is produced only by SensorSamples.freeze')
+
+    @classmethod
+    def _from_owner(cls,owner):
+        if type(owner) is not SensorSamples:raise SampleRejected('exact original sensor owner required')
+        result=object.__new__(cls)
+        values=dict(context=owner.context,latest_vehicle=owner.latest_vehicle,
+            _tofs=tuple((sensor,owner.latest_tof(sensor)) for sensor in (0,1)),
+            _leaves=tuple(sorted(owner.leaves.items())),vehicle_age=owner.vehicle_age,tof_age=owner.tof_age,
+            speed=owner.speed,yaw_rate=owner.yaw_rate,fence_revision=owner.fence_revision)
+        for name,value in values.items():object.__setattr__(result,name,value)
+        return result
+
+    @property
+    def leaves(self):return dict(self._leaves)
+
+    def latest_tof(self,sensor_id):
+        _uint(sensor_id,1)
+        return next(value for sensor,value in self._tofs if sensor==sensor_id)
+
+    def current_vehicle(self,evidence,now_us):
+        return SensorSamples.current_vehicle(self,evidence,now_us)
+
+    def current_tof(self,evidence,now_us):
+        return SensorSamples.current_tof(self,evidence,now_us)
+
+    def __copy__(self):return self
+
+    def __deepcopy__(self,memo):return self

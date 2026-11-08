@@ -88,6 +88,24 @@ class MapperPublicationPortTests(unittest.TestCase):
             self.assertTrue(self.port.acknowledge(original))
         self.assertIsNone(self.port.peek('WORLD_CANDIDATE', 150))
 
+    def test_admission_fence_discards_original_heads_and_rejects_late_compute_offer(self):
+        world=report(self.context);survey=report(self.context,kind='SURVEY_SUMMARY')
+        self.assertTrue(self.port.offer(world));self.assertTrue(self.port.offer(survey))
+        self.assertFalse(self.port.fence_admission(0))
+        self.assertTrue(self.port.fence_admission(1))
+        for kind in ('WORLD_CANDIDATE','SURVEY_SUMMARY'):self.assertIsNone(self.port.peek(kind,150))
+        self.assertFalse(self.port.offer(world));self.assertFalse(self.port.offer(survey,admission_revision=0))
+        self.assertEqual((world.issued_us,world.expires_us),(100,200))
+        self.assertEqual((survey.issued_us,survey.expires_us),(100,200))
+        # 작은 opaque bytes의 port 수명만 검사한다. 실제 관측/World 수락 증거가 아니다.
+        current=report(self.context,raw=b'current-original-control',issued=120,expires=190)
+        self.assertTrue(self.port.offer(current,admission_revision=1))
+        self.assertEqual(self.port.discard_pending('WORLD_CANDIDATE'),(current,))
+        self.assertEqual(self.port.discard_pending(),())
+        self.assertFalse(self.port.acknowledge(current))
+        with self.assertRaises(ValueError):self.port.fence_admission(0)
+        with self.assertRaises(ValueError):self.port.offer(world,admission_revision=True)
+
 
 class MapperPublicationProcessorTests(unittest.TestCase):
     def setUp(self):
@@ -150,7 +168,7 @@ class MapperPublicationProcessorTests(unittest.TestCase):
         owner.grant()
         candidate = report(owner.context, issued=owner.fixture.now, expires=owner.fixture.now+100)
         prepared = []
-        def prepare(_sensors):
+        def prepare(_sensors,_frame_state=None):
             prepared.append(candidate)
             return candidate, 'READY'
         def checkpoint(*_):

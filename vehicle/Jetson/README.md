@@ -604,3 +604,15 @@ PYTHONPATH=src python -m unittest discover -s tests/unit -v
 PYTHONPATH=src python -m unittest discover -s tests/integration -v
 PYTHONPATH=src python -m unittest discover -s tests/replay -v
 ```
+
+Gateway와 결합하는 paired codec·peer·개발 FD 시험 17개는 기본 discovery에서 `NOT_SELECTED`로 skip한다. 이는 paired 시험의 PASS가 아니다. 해당 시험은 하나의 동결 source에서 Gateway·공용 codec·MQTT package를 함께 제공한 뒤 명시적으로 선택한다. flag가 `1`이면 빠진 package/API는 오류이며 다른 구현으로 대체하지 않는다.
+
+```bash
+B08_SOURCE=/absolute/path/to/coherent-b08-source
+XENOVA_TEST_PAIRED_GATEWAY=1 PYTHONPATH="src:tests/unit:tests/integration:$B08_SOURCE/platform/services/gateway:$B08_SOURCE/platform/apps/drive/world/python:$B08_SOURCE/platform/services/vm-agent/mqtt-client" python -m unittest -v \
+  test_simulation_feedback.PairedFeedback3CodecTests \
+  test_sim_steering_sensor.PairedMeasuredSteeringCodecTests \
+  test_simulation_motion.PairedGatewayMotionTests \
+  test_sim_feedback_peer.SimFeedbackPeerTests \
+  test_sim_fd_motion.SimFdMotionTests
+```

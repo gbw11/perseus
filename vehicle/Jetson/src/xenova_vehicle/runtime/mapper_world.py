@@ -17,7 +17,7 @@ from ..mapping.road_basis import RoadBasisSnapshot
 from ..perception.calibration import CalibrationProfile
 from ..perception.pipeline import PerceptionResult
 from ..storage.contracts import StorageContext, json_bytes
-from ..transport.sensor_samples import SensorSamples, VehicleEvidence
+from ..transport.sensor_samples import SensorSamples, FrozenSensorSamples, VehicleEvidence
 from ..transport.world_adapter import (WorldBuildError, WorldSource, build_world,
     lane_model_from_road, _f32, _f32_up)
 
@@ -167,7 +167,7 @@ def build_mapping_world(draft, catalog_state, basis, *, context, source, calibra
                         scene_draft=None,hazard_draft=None,atlas_owner=None):
     """원 채택 후보를 build_world에 전달한다. None은 원 자료/기한/표현의 NOT_READY다.
 
-    sensors는 같은 compute 회차의 실제 admission owner다. 외부 source 교체 여부와
+    sensors는 원 admission의 frozen read-view 또는 기존 owner다. 외부 source 교체 여부와
     sequence의 단조 채택은 caller가 최종 lock에서 다시 판단한다. 자기 시각을 읽거나
     원 source/정합 기한을 갱신하지 않는다. retained-static은 원 freeze와 현재 Scene 후보를
     추가 검산한 별도 snapshot에서만 표현하며 LIVE grid는 변경하지 않는다.
@@ -176,7 +176,7 @@ def build_mapping_world(draft, catalog_state, basis, *, context, source, calibra
         return None
     if (type(draft) is not MappingFrameDraft or type(catalog_state) is not MappingState
             or type(basis) is not RoadBasisSnapshot or type(context) is not StorageContext
-            or type(calibration) is not CalibrationProfile or type(sensors) is not SensorSamples
+            or type(calibration) is not CalibrationProfile or type(sensors) not in (SensorSamples,FrozenSensorSamples)
             or type(current_vehicle) is not VehicleEvidence):
         raise WorldBuildError('actual mapping/catalog/basis/context/calibration/sensor originals required')
     _uint(sequence, positive=True); _uint(completed_j_us); _uint(published_j_us)

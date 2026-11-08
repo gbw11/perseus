@@ -149,8 +149,8 @@ def _verify_alignment_clock(value,alignment,record,context):
 
 def _reference_vehicle(scope,vehicle,admission,valid_for,now_us):
     if vehicle is None and admission is None and valid_for is None:return
-    from ..transport.sensor_samples import VehicleEvidence,SensorSamples
-    if type(vehicle) is not VehicleEvidence or type(admission) is not SensorSamples or not admission.current_vehicle(vehicle,now_us):
+    from ..transport.sensor_samples import VehicleEvidence,SensorSamples,FrozenSensorSamples
+    if type(vehicle) is not VehicleEvidence or type(admission) not in (SensorSamples,FrozenSensorSamples) or not admission.current_vehicle(vehicle,now_us):
         raise MapCheckpointNotReady('actual current reference Vehicle/admission required')
     origin=scope.context.geometry_origin_fields;message=vehicle.message()
     if ((message.host_boot,message.gateway_instance,message.pi_session,message.device_session,message.odom_epoch,message.calibration,message.vehicle)
@@ -228,8 +228,8 @@ class FrameEvidence:
             if PROVENANCE.unpack(parent.payload)[5]!=UUID(context.pi_host_boot).bytes:raise MapCheckpointNotReady('foreign original parent Pi host')
             scope.record_sources(parent,by_sha[parent.context_sha256])
         if pose_bracket is not None or sensor_state is not None:
-            from .mapper_sensor_state import MapperSensorState,VehicleBracket
-            if (type(sensor_state) is not MapperSensorState or type(pose_bracket) is not VehicleBracket
+            from .mapper_sensor_state import MapperSensorState,SensorFrameSnapshot,VehicleBracket
+            if (type(sensor_state) not in (MapperSensorState,SensorFrameSnapshot) or type(pose_bracket) is not VehicleBracket
                     or sensor_state.original_pose_bracket(pose_bracket.pose) is not pose_bracket
                     or pose_bracket.pose.captured_us!=observation.capture_interval
                     or pose_bracket.pose.sample.context[:3]!=(context.odom_epoch,raw['clock_epoch'],scope.calibration.sha256)):
@@ -249,8 +249,8 @@ class FrameEvidence:
 
     @classmethod
     def from_tof(cls,scope,evidence,*,admission,parents,contexts,observation_sequence,now_us,ancestry=()):
-        from ..transport.sensor_samples import TofEvidence,SensorSamples
-        if (type(scope) is not SceneEvidenceScope or type(evidence) is not TofEvidence or type(admission) is not SensorSamples
+        from ..transport.sensor_samples import TofEvidence,SensorSamples,FrozenSensorSamples
+        if (type(scope) is not SceneEvidenceScope or type(evidence) is not TofEvidence or type(admission) not in (SensorSamples,FrozenSensorSamples)
                 or not admission.current_tof(evidence,now_us) or evidence.calibration_profile_sha256!=scope.calibration.sha256
                 or evidence.odom_epoch!=scope.context.odom_epoch or evidence.stamp.captured_us is None):
             raise MapCheckpointNotReady('actual admitted ToF source/clock required')
@@ -311,6 +311,7 @@ class MapCheckpointCollector:
         self.scope,self.grant=scope,grant;self._next=grant.start_inclusive
         self._cells={};self._records={};self._contexts={};self._unresolved=set();self._last=None;self._grid=None
         self._rgb_refs={};self._vehicle_refs={};self._alignment_record=None;self._frame_cache=None
+        self._propagation_anchor_record=None
         self._reference_geometry={}
         self._alignment_clock=None
         self._durable_tiles={};self._durable_catalog=();self._tile_revision_head=0;self._pending=None;self._retained=None
@@ -362,6 +363,7 @@ class MapCheckpointCollector:
         for tile in self._durable_tiles.values():pending.extend(tile.provenance_ids)
         pending.extend(record.provenance_id for record in self._durable_catalog)
         if self._alignment_record is not None:pending.append(self._alignment_record[1])
+        if self._propagation_anchor_record is not None:pending.append(self._propagation_anchor_record[1])
         records={}
         while pending:
             identity=pending.pop()
@@ -382,7 +384,40 @@ class MapCheckpointCollector:
             *(parents+(0,)*(4-len(parents))),raw.ljust(128,b'\0'),0,bytes(16)))
         self._records[identity]=record;return identity
 
+    def _require_propagation_ancestor(self,roots,identity):
+        pending=list(roots);visited=set()
+        while pending:
+            parent=pending.pop()
+            if parent in visited:continue
+            record=self._records.get(parent)
+            if record is None:raise MapCheckpointNotReady('original propagation anchor parent closure missing')
+            visited.add(parent)
+            if len(visited)>16384:raise MapCheckpointNotReady('original propagation anchor closure exceeds capacity')
+            pending.extend(record.parents)
+        if identity not in visited:raise MapCheckpointNotReady('original reference closure lost propagation anchor')
+
     def _frame_roots(self,frame,pipeline,raw_pose=None):
+        alignment=None if pipeline is None else pipeline._alignment
+        alignment_key=None if alignment is None else sha256(canonical(alignment.fields())).hexdigest()
+        anchor=None if pipeline is None else pipeline._propagation_anchor
+        anchor_key=None if anchor is None else sha256(canonical(anchor.fields())).hexdigest()
+        pin=self._propagation_anchor_record
+        if alignment is not None:
+            if anchor_key is None:raise MapCheckpointNotReady('actual propagation anchor is missing')
+            if pin is None:
+                if anchor_key!=alignment_key or self._alignment_record is not None:
+                    raise MapCheckpointNotReady('historical propagation anchor has no original registration pin')
+            else:
+                if (type(pin) is not tuple or len(pin)!=3 or type(pin[0]) is not str
+                        or type(pin[1]) is not int or not 0<pin[1]<2**63 or type(pin[2]) is not str):
+                    raise MapCheckpointNotReady('immutable original propagation anchor registration pin required')
+                record=self._records.get(pin[1])
+                if (pin[0]!=anchor_key or record is None or record.provenance_id!=pin[1]
+                        or PROVENANCE.unpack(record.payload)[2]!=5 or sha256(record.payload).hexdigest()!=pin[2]):
+                    raise MapCheckpointNotReady('original propagation anchor registration pin changed')
+                if self._alignment_record is None or self._alignment_record[0]!=alignment_key:
+                    # 기존 GEOMETRY→REGISTRATION 경로만 검산한다. 새 부모나 시각을 발급하지 않는다.
+                    self._require_propagation_ancestor(self._reference_geometry.values(),pin[1])
         parents=tuple(item.provenance_id for item in frame.parents)
         for item in frame.contexts:self._contexts[item.sha256]=item
         for item in (*frame.parents,*frame.ancestry):
@@ -393,8 +428,6 @@ class MapCheckpointCollector:
             for identity in parents:mask|=self._records[identity].source_mask
             interval=(min(self._records[i].pi_lower for i in parents),max(self._records[i].pi_upper for i in parents))
             parents=(self._record(frame,parents,mask,4,pi_interval=interval),)
-        alignment=None if pipeline is None else pipeline._alignment
-        alignment_key=None if alignment is None else sha256(canonical(alignment.fields())).hexdigest()
         if self._frame_cache is not None and self._frame_cache[0] is frame and self._frame_cache[1]==alignment_key:
             return self._frame_cache[2]
         rgb_id=None
@@ -457,6 +490,7 @@ class MapCheckpointCollector:
                     UUID(self.scope.context.pi_host_boot).bytes,*frame.pi_interval,frame.observation_sequence,
                     *(actual_parents+(0,)*(4-len(actual_parents))),body,0,bytes(16)))
                 self._contexts[context.sha256]=context;self._records[identity]=record;self._alignment_record=(alignment_key,identity)
+                if pin is None:self._propagation_anchor_record=(anchor_key,identity,sha256(record.payload).hexdigest())
                 self._alignment_clock=_alignment_clock(frame) if alignment.has_metadata else None
                 parents=tuple(dict.fromkeys((*parents,identity)))
         self._frame_cache=(frame,alignment_key,parents)
@@ -464,8 +498,8 @@ class MapCheckpointCollector:
 
     def vehicle_parent(self,vehicle,*,admission,now_us):
         """실제 수락 Vehicle 원본으로 PI_ODOM SENSOR parent를 같은 내구 range에서 만든다."""
-        from ..transport.sensor_samples import VehicleEvidence,SensorSamples
-        if (type(vehicle) is not VehicleEvidence or type(admission) is not SensorSamples or not admission.current_vehicle(vehicle,now_us)
+        from ..transport.sensor_samples import VehicleEvidence,SensorSamples,FrozenSensorSamples
+        if (type(vehicle) is not VehicleEvidence or type(admission) not in (SensorSamples,FrozenSensorSamples) or not admission.current_vehicle(vehicle,now_us)
                 or admission.context.calibration.sha256!=self.scope.calibration.sha256
                 or admission.context.source['odom_epoch']!=self.scope.context.odom_epoch
                 or admission.context.device_session!=self.scope.context.geometry_origin_fields['device_session']):
@@ -482,8 +516,8 @@ class MapCheckpointCollector:
 
     def vehicle_admission_parent(self,original,*,sensor_state):
         """원 수락 당시의 보간 endpoint다. historical sample을 현재 latest로 승격하지 않는다."""
-        from .mapper_sensor_state import MapperSensorState
-        if type(sensor_state) is not MapperSensorState:raise MapCheckpointNotReady('original sensor owner required')
+        from .mapper_sensor_state import MapperSensorState,SensorFrameSnapshot
+        if type(sensor_state) not in (MapperSensorState,SensorFrameSnapshot):raise MapCheckpointNotReady('original sensor owner required')
         vehicle=sensor_state.validate_vehicle_admission(original);message=vehicle.message()
         origin=self.scope.context.geometry_origin_fields
         if (sensor_state.calibration.sha256!=self.scope.calibration.sha256
@@ -539,6 +573,7 @@ class MapCheckpointCollector:
         used={p.context_sha256 for p in self._records.values()}
         self._contexts={c.sha256:c for c in complete.evidence.contexts if c.sha256 in used}
         self._reference_geometry=dict(state['reference_provenance']);self._rgb_refs={};self._vehicle_refs={};self._alignment_record=None
+        self._propagation_anchor_record=None
         self._alignment_clock=None
         head=state['tile_revision_highwater'];uint(head)
         self._tile_revision_head=max(head,max((t.revision for t in complete.tiles),default=0))
@@ -1157,7 +1192,7 @@ def restore_pipeline(pipeline,complete,current_scope):
     if window is not None:
         from ..mapping.rolling_grid import configure_grid
         configure_grid(grid,window)
-    pipeline.grid=grid;pipeline.reference=reference;pipeline._alignment=None;pipeline._free_scheduler=None
+    pipeline.grid=grid;pipeline.reference=reference;pipeline._alignment=None;pipeline._propagation_anchor=None;pipeline._free_scheduler=None
     pipeline._restore_pending=not identity
     pipeline._context=('LIVE',pipeline.calibration.sha256,grid.clock_id,grid.frame_id)
     pipeline._restored_checkpoint_ref=complete.checkpoint_ref

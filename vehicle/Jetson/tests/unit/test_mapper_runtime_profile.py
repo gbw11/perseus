@@ -60,6 +60,10 @@ class MapperRuntimeProfileTests(unittest.TestCase):
         src=f.fixture.source
         self.source_policy=SourcePolicy(src['vehicle'],src['configuration'],src['calibration'],src['primitive'],self.calibration.sha256)
         self.yolop=YolopBenchProfile('FAKE',Path('assets'),Path('manifest.json'))
+        _,self.sensor_owner=resident_workers.mapper_sensor_owner(SimpleNamespace(
+            mapper_profile_bytes=self.config.canonical_bytes,perception_profile_bytes=self.calibration_bytes,
+            source_policy=self.source_policy,clock_policy=f.policy,
+            peer=SimpleNamespace(worker_instance=f.mapper_worker),mapper_instance=f.mapper_instance),self.raw)
 
     def processor(self, *, config=True, source_policy=None):
         return ResidentMapperProcessor(self.calibration_bytes,self.raw,clock=lambda:self.now,
@@ -67,7 +71,7 @@ class MapperRuntimeProfileTests(unittest.TestCase):
             source_policy=self.source_policy if source_policy is None else source_policy,
             clock_policy=self.fixture.policy,mapper_worker=self.fixture.mapper_worker,mapper_instance=self.fixture.mapper_instance)
 
-    def item(self, number=1, *, snapshot=None):
+    def item(self, number=1, *, snapshot=None, capture_timing='PROFILE'):
         shift=(number-1)*2000
         rgb=RawFrame('rgb_video',number,800050+shift,900050+shift,self.now,640,360,'NV12',
             bytes(640*360)+bytes([128])*(640*360//2),100)
@@ -76,8 +80,11 @@ class MapperRuntimeProfileTests(unittest.TestCase):
             sdk_host_timestamp_j_bracket_us=[str(end),str(end)])
             for name,end in (('rgb_video',1000050+shift),('depth_right',1000100+shift))}
         sample=CaptureSample(rgb,depth,None,None,clocks)
-        return MapperInput(uid(number),self.raw.sha256,sample,self.now+150000,
+        item=MapperInput(uid(number),self.raw.sha256,sample,self.now+150000,
             context_bytes=canonical(self.fixture.snapshot() if snapshot is None else snapshot))
+        self.sensor_owner.ingest(item.context_bytes,now_us=self.now)
+        return resident_workers.attach_sensor_snapshot(item,self.sensor_owner,
+            self.config.capture_timing if capture_timing=='PROFILE' else capture_timing,now_us=self.now)
 
     def test_cli_passes_original_mapper_file_to_runtime_without_implicitly_enabling_diagnostics(self):
         from xenova_vehicle import cli
@@ -132,7 +139,7 @@ class MapperRuntimeProfileTests(unittest.TestCase):
         processor=self.processor(config=False); item=self.item()
         with patch('xenova_vehicle.perception.geometry.perf_counter_ns',side_effect=AssertionError('diagnostics auto-enabled')):
             result=json.loads(processor.geometry(item,None,checkpoint))
-        self.assertIsNone(processor._config); self.assertIsNone(processor._accepted_sensors)
+        self.assertIsNone(processor._config); self.assertFalse(hasattr(processor,'_accepted_sensors'))
         self.assertEqual(processor._accepted.pipeline.targets,())
         self.assertIsNone(result['latest']['captured_us']); self.assertNotIn('mapper_profile_sha256',result['latest'])
         self.assertNotIn('diagnostic_timings',result['latest']); self.assertFalse(result['latest']['world_valid'])
@@ -163,7 +170,7 @@ class MapperRuntimeProfileTests(unittest.TestCase):
         self.assertFalse(summary['localization_configured']);self.assertEqual(summary['free_cells_applied'],0)
         self.assertFalse(summary['world_valid']); self.assertNotIn('diagnostic_timings',summary)
         processor.accepted(item)
-        self.assertIs(processor._accepted.pipeline,core); self.assertEqual(processor._accepted_sensors.sensors.latest_vehicle.anchor.sequence,2)
+        self.assertIs(processor._accepted.pipeline,core); self.assertEqual(self.sensor_owner.sensors.latest_vehicle.anchor.sequence,2)
 
     def test_explicit_localization_limits_reach_real_core_without_creating_an_initial_anchor(self):
         # 명시 software bound 전달 시험이다. 설치용 drift/validity 수락값이 아니다.
@@ -187,7 +194,9 @@ class MapperRuntimeProfileTests(unittest.TestCase):
         processor=self.processor(); first=self.item(); processor.geometry(first,None,checkpoint); processor.accepted(first)
         before=processor._accepted.pipeline; old=before.grid.snapshot(self.now,clock_id=before.grid.clock_id)
         source=self.fixture.snapshot(); source['probes']={}; source['active_probe_sha256']=None
-        item=self.item(2,snapshot=source); summary=json.loads(processor.geometry(item,None,checkpoint))['latest']
+        item=self.item(2,snapshot=source)
+        processor.admission_fenced(self.sensor_owner.fence_revision,'SOFTWARE_CLOCK_LOSS')
+        summary=json.loads(processor.geometry(item,None,checkpoint))['latest']
         self.assertTrue(summary['preserved_metric_map']); self.assertIn('PI_J_CLOCK_UNAVAILABLE',summary['metric_input_reasons'])
         processor.accepted(item)
         after=processor._accepted.pipeline; current=after.grid.snapshot(self.now,clock_id=after.grid.clock_id)
@@ -197,26 +206,26 @@ class MapperRuntimeProfileTests(unittest.TestCase):
         self.assertIsNot(processor._diagnostic.pipeline,after)
         self.assertNotEqual(processor._diagnostic.pipeline.grid.frame_id,after.grid.frame_id)
 
-    def test_cancelled_candidate_does_not_adopt_new_sensor_highwater_or_core(self):
+    def test_cancelled_geometry_preserves_fresh_main_sensor_highwater_and_accepted_core(self):
         processor=self.processor(); first=self.item(); processor.geometry(first,None,checkpoint); processor.accepted(first)
-        accepted,sensors=processor._accepted,processor._accepted_sensors
+        accepted,sensors=processor._accepted,self.sensor_owner
         snapshot=self.fixture.snapshot(); third=encode(self.fixture.fixture.vehicle(3,1_120_000,.003))
         snapshot['vehicles'].append(self.fixture.row(third,received=1_025_000))
         item=self.item(2,snapshot=snapshot); processor.geometry(item,None,checkpoint)
-        self.assertIs(processor._accepted,accepted); self.assertIs(processor._accepted_sensors,sensors)
-        self.assertEqual(sensors.sensors.latest_vehicle.anchor.sequence,2)
+        self.assertIs(processor._accepted,accepted); self.assertIs(self.sensor_owner,sensors)
+        self.assertEqual(sensors.sensors.latest_vehicle.anchor.sequence,3)
         self.assertEqual(processor._staged[2].sensors.latest_vehicle.anchor.sequence,3)
         processor.cancelled(item,'ORIGINAL_INPUT_EXPIRED')
-        self.assertIs(processor._accepted,accepted); self.assertIs(processor._accepted_sensors,sensors)
-        self.assertIsNone(processor._staged); self.assertEqual(sensors.sensors.latest_vehicle.anchor.sequence,2)
-        self.assertNotIn(sha256(third).hexdigest(),sensors._seen_vehicle)
+        self.assertIs(processor._accepted,accepted); self.assertIs(self.sensor_owner,sensors)
+        self.assertIsNone(processor._staged); self.assertEqual(sensors.sensors.latest_vehicle.anchor.sequence,3)
+        self.assertIn(sha256(third).hexdigest(),sensors._seen_vehicle)
 
     def test_missing_capture_timing_remains_diagnostic_without_a_fabricated_zero_pose(self):
         value=deepcopy(self.fields); value['capture_timing']=None; config=MapperProfile(value)
         processor=ResidentMapperProcessor(self.calibration_bytes,self.raw,clock=lambda:self.now,
             mapper_profile_bytes=config.canonical_bytes,source_policy=self.source_policy,clock_policy=self.fixture.policy,
             mapper_worker=self.fixture.mapper_worker,mapper_instance=self.fixture.mapper_instance)
-        result=json.loads(processor.geometry(self.item(),None,checkpoint))['latest']
+        result=json.loads(processor.geometry(self.item(capture_timing=None),None,checkpoint))['latest']
         self.assertIsNone(result['captured_us']); self.assertIsNone(result['mapped_pose'])
         self.assertIn('FULL_CAPTURE_POSE_UNAVAILABLE',result['metric_input_reasons'])
         self.assertIsNone(processor._staged[1].pipeline.grid); self.assertIsNotNone(processor._staged[3].pipeline.grid)

@@ -12,6 +12,7 @@ from ..storage.contracts import StorageContext, digest, uint
 
 
 _CAPS = {'WORLD_CANDIDATE': 32768, 'SURVEY_SUMMARY': 512}
+_UNSET_SCENE = object()
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +51,7 @@ class MapperPublicationPort:
             raise ValueError('actual shared mapping context port required')
         self._context_port = context_port
         self._slots = {kind: None for kind in _CAPS}
+        self._admission_revision = 0
 
     @property
     def context_port(self):
@@ -59,13 +61,39 @@ class MapperPublicationPort:
     def adoption_lock(self):
         return self.context_port.adoption_lock
 
-    def offer(self, report):
+    def offer(self, report, *, admission_revision=0, scene_row=_UNSET_SCENE):
         """같은 원 context일 때만 참조를 바꾼다. 최종 compute guard 안에서 재진입 가능하다."""
         if type(report) is not PublicationReport:
             raise ValueError('actual immutable publication report required')
+        uint(admission_revision)
+        if scene_row is not _UNSET_SCENE and scene_row is not None and type(scene_row) is not bytes:
+            raise ValueError('original immutable scene row required')
         with self.adoption_lock:
-            if self.context_port.read() is not report.context: return False
+            if (self.context_port.read() is not report.context
+                    or admission_revision != self._admission_revision
+                    or scene_row is not _UNSET_SCENE and self.context_port.read_scene() is not scene_row): return False
             self._slots[report.kind] = report
+            return True
+
+    def discard_pending(self, kind=None):
+        """유효성 철회로 미송신 참조만 버린다. 실제 송신 ACK나 새 terminal은 만들지 않는다."""
+        if kind is not None and (type(kind) is not str or kind not in _CAPS):
+            raise ValueError('unsupported publication kind')
+        with self.adoption_lock:
+            kinds = tuple(_CAPS) if kind is None else (kind,)
+            original = tuple(self._slots[key] for key in kinds if self._slots[key] is not None)
+            for key in kinds: self._slots[key] = None
+            return original
+
+    def fence_admission(self, revision):
+        """같은 source의 센서 철회 번호다. 늦은 compute offer가 옛 후보를 되살리지 못한다."""
+        uint(revision)
+        with self.adoption_lock:
+            if revision < self._admission_revision:
+                raise ValueError('admission revision cannot regress')
+            if revision == self._admission_revision: return False
+            self._admission_revision = revision
+            self.discard_pending()
             return True
 
     def peek(self, kind, now_us):

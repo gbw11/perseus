@@ -8,6 +8,7 @@ accepted()에서 참조만 교체한다. 취소는 후보만 버리며 기존 ma
 from copy import deepcopy
 from dataclasses import dataclass,replace
 import json
+from threading import get_ident
 
 from .resident_transport import j_us
 
@@ -18,6 +19,7 @@ class _FrameCandidate:
     sequence: int
     scene: object=None
     hazard: object=None
+    scene_row: bytes | None=None
 
 
 class ResidentMapperProcessor:
@@ -39,12 +41,14 @@ class ResidentMapperProcessor:
                     or publication_port.context_port is not mapping_context_port):
                 raise ValueError('publication and mapping must share the original context port')
         self._publication_port=publication_port;self._world_sequence=0
+        self._owner_thread=get_ident();self._admission_revision=0
         self._scene=self._hazard=self._scene_draft=self._hazard_draft=None
         self._frame_sequence=0;self._scene_status='DISABLED'
         self._latest_source_inputs=None;self._scene_row=self._scene_delivery=None
         self._scene_summary_sent=None;self._scene_freeze_request=None
         self._scene_freeze_attempt=None
         self._scene_freeze_prequeue=None
+        self._scene_freeze_prequeue_fenced=False
         self._scene_restore_archive=None
         self.clock=clock
         if checkpoint_interval_us is not None:
@@ -54,11 +58,11 @@ class ResidentMapperProcessor:
         self._mapping_context_port,self._mapping_mailbox=mapping_context_port,mapping_mailbox
         self._mapping=self._mapping_draft=None;self._mapping_status='DISABLED' if mapping_context_port is None else 'WAIT_MATERIAL'
         self._retired=None
-        self._config=self._accepted_sensors=self._diagnostic=None
+        self._config=self._diagnostic=None
         self._profile_bytes,self._binding=profile_bytes,binding
         if mapper_profile_bytes is not None:
             from .mapper_profile import MapperProfile
-            from .mapper_sensor_state import MapperSensorState
+            from ..storage.contracts import uuid
             self._config=MapperProfile.from_bytes(mapper_profile_bytes)
             self._accepted=ResidentPerception(profile_bytes,binding,pipeline_profile=self._config.pipeline,
                 targets=self._config.targets,rolling_policy=self._config.rolling_roi)
@@ -66,16 +70,37 @@ class ResidentMapperProcessor:
             source_policy.check_profile(self._accepted.calibration)
             self._config.check(self._accepted.calibration,vehicle_configuration=source_policy.configuration,
                                vehicle_calibration=source_policy.calibration)
-            limits=self._config.sensors
-            self._accepted_sensors=MapperSensorState(self._accepted.calibration,binding,clock_policy,
-                tof_leaves=limits.tof_leaves,vehicle_max_age_us=limits.vehicle_max_age_us,tof_max_age_us=limits.tof_max_age_us,
-                max_speed_mps=limits.max_speed_mps,max_yaw_rate_rps=limits.max_yaw_rate_rps,
-                max_gap_us=limits.max_gap_us,capacity=limits.capacity,mapper_worker=mapper_worker,mapper_instance=mapper_instance)
+            # 센서 HWM/history는 main 소유다. compute에는 원 등록 identity만 고정한다.
+            self._mapper_worker,self._mapper_instance=uuid(mapper_worker),uuid(mapper_instance)
         else:
             self._accepted=(None if profile_bytes is None else ResidentPerception(profile_bytes,binding))
         self._staged=None
         self._bootstrap_source=self._durable_source=None
         self._restore_attempt=None
+
+    def admission_fenced(self,revision,reason):
+        """같은 compute owner에서만 원 admission 철회를 소비한다. map/parser는 유지한다.
+
+        실제 queued D job은 원 terminal을 기다린다. 미게시 freeze도 원 job/E를 남기고
+        같은 grant의 자동 재발급만 막는다. main은 Scene 객체를 직접 변경하지 않는다.
+        """
+        from ..storage.contracts import uint
+        if get_ident()!=self._owner_thread:raise RuntimeError('admission fence belongs to original compute owner')
+        uint(revision)
+        if type(reason) is not str or not 1<=len(reason)<=64 or not reason.isascii():
+            raise ValueError('bounded original admission fence reason required')
+        if revision<self._admission_revision:raise ValueError('admission fence revision regressed')
+        if revision==self._admission_revision:return False
+        self._admission_revision=revision
+        retiring=(self._staged,self._latest_source_inputs)
+        self._cancel_mapping_draft();self._staged=None
+        self._latest_source_inputs=None;self._scene_summary_sent=None
+        if self._scene_freeze_prequeue is not None:self._scene_freeze_prequeue_fenced=True
+        self._scene_status='ADMISSION_FENCED'
+        if self._scene is not None:self._scene.revoke('SOURCE',now_j_us=self.clock())
+        reports=() if self._publication_port is None else self._publication_port.discard_pending()
+        self._retired=(retiring,reports)
+        return True
 
     def maintenance(self):
         """compute만 원 material/D 요청을 처리한다. dirty 일정은 caller가 명시한 경우만 켠다."""
@@ -228,6 +253,10 @@ class ResidentMapperProcessor:
         attempt=(coordinator.scene.grant_bytes,owner._revision,hazard)
         if attempt==self._scene_freeze_attempt:return
         pending=self._scene_freeze_prequeue
+        if self._scene_freeze_prequeue_fenced:
+            if pending is not None and pending[0]==coordinator.scene.grant_bytes:
+                self._scene_status='SCENE_FREEZE_ADMISSION_FENCED';return
+            self._scene_freeze_prequeue_fenced=False
         if pending is None or pending[0]!=coordinator.scene.grant_bytes:
             trust=decode(coordinator.scene._lease.trust_bytes,schema.WorldTrust)
             expires=min(now+owner._job_lifetime,grant.survey_deadline_pi_us-trust.upper_offset_us,
@@ -300,7 +329,8 @@ class ResidentMapperProcessor:
         if key==self._scene_summary_sent:return
         report=PublicationReport(context,'SURVEY_SUMMARY',snapshot.summary,snapshot.completed_j_us,expires,
             sha256(context.source_binding).hexdigest(),snapshot.grant_sha256)
-        if self._publication_port.offer(report):self._scene_summary_sent=key
+        if self._publication_port.offer(report,admission_revision=self._admission_revision,
+                scene_row=self._scene_row):self._scene_summary_sent=key
 
     def queue_mapping_checkpoint(self,job,*,now_us=None,scene=None,subsystem_state=None,scene_at_snapshot=None):
         """명시 원 job을 compute 유지 단계에서 고정한다. 호출 자체는 외부 D offer가 아니다."""
@@ -377,15 +407,45 @@ class ResidentMapperProcessor:
 
     def _metric(self,item,parsed,candidate,checkpoint):
         from .resident_perception import ResidentPerception
+        from .mapper_sensor_state import SensorFrameSnapshot,MetricInputs
         from ..mapping.free_schedule import stopping_region
-        config=self._config;sensors=deepcopy(self._accepted_sensors)
+        config=self._config;sensors=item.sensor_snapshot
         observation=candidate.prepare(item.sample,nn_candidates=parsed,timing=config.capture_timing)
         available=max(observation.rgb.stamp.available_us,
                       observation.rgb.stamp.available_us if observation.depth is None else observation.depth.stamp.available_us)
         hull=replace(observation.rgb.stamp,captured_us=observation.capture_interval,available_us=available)
-        inputs=sensors.read(item.context_bytes,hull,now_us=self.clock())
-        # 원 clock/source 자료는 metric 채택과 별개다. 센서 HWM/core 참조는 최종 채택까지 후보다.
-        self._latest_source_inputs=inputs
+        now=self.clock()
+        if sensors is None:
+            inputs=MetricInputs(None,None,None,None,None,(),(),(),('SENSOR_SNAPSHOT_UNAVAILABLE',))
+        else:
+            if type(sensors) is not SensorFrameSnapshot:raise ValueError('original frozen sensor snapshot required')
+            if sensors.fence_revision!=self._admission_revision:
+                from .mapper_compute import MapperCancelled
+                raise MapperCancelled('ADMISSION_FENCE')
+            sensors.validate_frame(job_id=item.job_id,source_generation=item.source_generation,
+                source_key=item.source_key,expires_us=item.expires_us,capture_stamp=hull,
+                now_us=now,context_bytes=item.context_bytes)
+            inputs=sensors.metric_inputs
+            if (sensors.calibration.sha256!=candidate.calibration.sha256
+                    or inputs.storage_context is not None and (
+                        inputs.storage_context.mapper_worker,inputs.storage_context.origin_mapper_instance)
+                        !=(self._mapper_worker,self._mapper_instance)):
+                raise ValueError('snapshot changed registered mapper/calibration')
+            # 원 admission은 다시 만들지 않는다. 계산 시작 시 현재 lease/age만 단축 검사한다.
+            reasons=list(inputs.reasons);lease=inputs.clock_lease
+            if lease is not None:
+                try:lease.pi_interval_to_j((lease.probe_pi_send_us,lease.probe_pi_send_us),now)
+                except ValueError:lease=None
+            vehicle=inputs.vehicle
+            if vehicle is not None and not sensors.sensors.current_vehicle(vehicle,now):
+                vehicle=None;reasons.append('VEHICLE_UNAVAILABLE')
+            tofs=tuple(value for value in inputs.tof if sensors.sensors.current_tof(value,now))
+            if lease is None:
+                inputs=replace(inputs,clock_lease=None,pose=None,vehicle=None,tof=(),
+                    reasons=tuple(dict.fromkeys((*reasons,'PI_J_CLOCK_UNAVAILABLE'))))
+            else:inputs=replace(inputs,vehicle=vehicle,tof=tofs,reasons=tuple(dict.fromkeys(reasons)))
+        # main history는 frame 취소/채택과 무관하다. 이 참조는 Scene 유지의 원 조회일 뿐이다.
+        self._latest_source_inputs=None if sensors is None else inputs
         restore_attempt,restore_issue=self._restore(candidate,inputs)
         checkpoint()
         diagnostic=self._diagnostic;mapping_enabled=self._mapping_context_port is not None
@@ -410,6 +470,7 @@ class ResidentMapperProcessor:
                 if not adopt_metric:self._cancel_mapping_draft()
         diagnostic_only=inputs.pose is None or restore_issue is not None or mapping_enabled and not adopt_metric
         if diagnostic_only:
+            adopt_metric=False
             # 일시적인 clock/pose 부재가 이미 채택한 odom 지도를 frame-local 지도로
             # 교체하지 않게 한다. 진단 코어는 별도로 원 age와 HWM을 보존한다.
             diagnostic=(ResidentPerception(self._profile_bytes,self._binding,pipeline_profile=config.pipeline,targets=())
@@ -488,16 +549,17 @@ class ResidentMapperProcessor:
     def _prepare_frame_state(self,sensors):
         """원 frame의 후보 상태다. negative hazard는 채택 취소로 철회되지 않는다."""
         draft=self._mapping_draft
-        if draft is None or not draft.ready:return _FrameCandidate(self._frame_sequence)
+        scene_row=None if self._mapping_context_port is None else self._mapping_context_port.read_scene()
+        if draft is None or not draft.ready:return _FrameCandidate(self._frame_sequence,scene_row=scene_row)
         updated=draft.result.summary.get('rgb_updated') is True
         sequence=self._frame_sequence+int(updated)
         if sequence>=2**63:raise OverflowError('original observation sequence exhausted')
-        if self._config.survey is None:return _FrameCandidate(sequence)
+        if self._config.survey is None:return _FrameCandidate(sequence,scene_row=scene_row)
         from .mapper_hazard import MapperHazard
         from .scene import SceneError
         if self._hazard is None:self._hazard=MapperHazard(complete=self._durable_source)
         now=self.clock();hazard=self._hazard.prepare(draft,now_us=now);self._hazard_draft=hazard
-        if self._scene is None:return _FrameCandidate(sequence,hazard=hazard)
+        if self._scene is None:return _FrameCandidate(sequence,hazard=hazard,scene_row=scene_row)
         try:
             if not hazard.ready:
                 self._scene.revoke('RESOURCE',now_j_us=now);self._scene_status=hazard.reason
@@ -509,7 +571,7 @@ class ResidentMapperProcessor:
                 self._scene_status=self._scene_draft.reason
         except SceneError:
             self._scene.revoke('ALIGNMENT',now_j_us=now);self._scene_status='SCENE_FRAME_NOT_READY'
-        return _FrameCandidate(sequence,self._scene_draft,hazard)
+        return _FrameCandidate(sequence,self._scene_draft,hazard,self._scene_row)
 
     def parse(self, item, checkpoint):
         from ..perception.yolop import decode_yolop
@@ -534,7 +596,7 @@ class ResidentMapperProcessor:
             # profile의 유한 RGB/graph/grid/cache만 복사한다. mailbox/Lock/controller는 복사하지 않는다.
             candidate=deepcopy(self._accepted)
             checkpoint()
-            sensors=self._accepted_sensors;diagnostic=self._diagnostic;restore_attempt=self._restore_attempt;adopt_metric=True
+            sensors=None;diagnostic=self._diagnostic;restore_attempt=self._restore_attempt;adopt_metric=True
             if self._config is None:
                 summary=candidate.consume(item.sample,now_us=self.clock(),nn_candidates=parsed,
                     checkpoint=checkpoint,completed_clock=self.clock)
@@ -557,7 +619,7 @@ class ResidentMapperProcessor:
                 raise ValueError('mapper summary exceeds immutable result budget')
             checkpoint()
             # 최종 참조 교환 때의 큰 dict/array 해제도 다음 compute 유지 단계로 미룬다.
-            retiring=(self._accepted,self._accepted_sensors,self._diagnostic,
+            retiring=(self._accepted,None,self._diagnostic,
                 None if self._mapping is None else self._mapping.collector,
                 None if self._mapping is None or self._mapping.catalogs is None else self._mapping.catalogs._accepted,
                 None if self._scene is None else self._scene.scene,
@@ -592,6 +654,8 @@ class ResidentMapperProcessor:
                     or scene.version!=self._scene._version
                     or not scene.prepared_j_us<=checked_j_us<scene.expires_j_us):
                 raise MapperCancelled('SCENE_FENCED_OR_EXPIRED')
+            if self._mapping_context_port.read_scene() is not state.scene_row:
+                raise MapperCancelled('SCENE_INPUT_CHANGED')
         if state.hazard is not None and state.hazard is not self._hazard._staged:
             from .mapper_compute import MapperCancelled
             raise MapperCancelled('HAZARD_FENCED')
@@ -599,10 +663,11 @@ class ResidentMapperProcessor:
         if state.hazard is not None:self._hazard.accept(state.hazard)
         if state.scene is not None:self._scene.accept(state.scene,now_j_us=checked_j_us)
         self._frame_sequence=state.sequence
-        if staged[8] is not None and self._publication_port.offer(staged[8]):self._world_sequence=state.sequence
+        if staged[8] is not None and self._publication_port.offer(staged[8],admission_revision=self._admission_revision,
+                scene_row=state.scene_row):self._world_sequence=state.sequence
         self._retired=staged
         if staged[6]:self._accepted=staged[1]
-        self._accepted_sensors,self._diagnostic=staged[2:4]
+        self._diagnostic=staged[3]
         if staged[6]:self._restore_attempt=staged[4]
         self._staged=self._mapping_draft=self._scene_draft=self._hazard_draft=None
 

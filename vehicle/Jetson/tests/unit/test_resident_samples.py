@@ -202,6 +202,8 @@ class ResidentControlDraftTests(unittest.TestCase):
         actor = object.__new__(resident_workers._Actor)
         actor.link = Mock()
         actor.stop = None
+        actor.idle_hook = None
+        actor._idle_busy = False
         actor.deferred = deque()
         actor.drain_sent = Mock()
         actor._receive = Mock(return_value=[])
