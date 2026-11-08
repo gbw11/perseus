@@ -49,3 +49,25 @@ def test_new_geometry_remains_closed_to_crossings_and_revisited_station(probe,ki
         for target,(x,y) in zip(value.reference,points):target.x,target.y=x,y
     with pytest.raises(ValueError):encode(value)
     assert product(probe,value.SerializeToString())['result']=='GEOMETRY'
+
+
+@pytest.mark.parametrize('points',[((1.,1.),(2.,1.),(1.,1.)),((1.,1.),(3.,1.),(2.,1.))])
+def test_two_adjacent_edges_cannot_close_or_retrace_station(probe,points):
+    value=world(11)
+    for field in ('reference','left_boundary','right_boundary'):value.ClearField(field)
+    for (x,y),boundary_x in zip(points,(0.,2.,4.)):
+        value.reference.add(x=x,y=y)
+        value.left_boundary.add(x=boundary_x,y=4.)
+        value.right_boundary.add(x=boundary_x,y=0.)
+    with pytest.raises(ValueError):encode(value)
+    assert product(probe,value.SerializeToString())['result']=='GEOMETRY'
+
+
+def test_forward_collinear_stations_are_preserved(probe):
+    value=world(11)
+    for field in ('reference','left_boundary','right_boundary'):value.ClearField(field)
+    for x,boundary_x in zip((1.,2.,3.),(0.,2.,4.)):
+        value.reference.add(x=x,y=1.)
+        value.left_boundary.add(x=boundary_x,y=4.)
+        value.right_boundary.add(x=boundary_x,y=0.)
+    assert product(probe,encode(value))['result']=='OK'

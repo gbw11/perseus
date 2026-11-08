@@ -94,6 +94,14 @@ def _simple(points,closed=False):
             if _intersects(a,b,*edges[j]):raise ValueError('self-intersecting geometry')
 
 
+def _open_basis(points):
+    _simple(points)
+    if math.dist(points[0],points[-1])<1e-6:raise ValueError('closed road basis')
+    for a,b,c in zip(points,points[1:],points[2:]):
+        if abs(_cross(a,b,c))<1e-6 and (b[0]-a[0])*(c[0]-b[0])+(b[1]-a[1])*(c[1]-b[1])<0:
+            raise ValueError('adjacent road basis retraces a station')
+
+
 def _convex(points):
     if len(points)!=4:raise ValueError('four corners required')
     _simple(points,True)
@@ -267,7 +275,7 @@ def _validate_one(message):
         new=message.required_features in (11,15)
         if new and message.minor!=2:raise ValueError('world minor2 required')
         if new:
-            _simple([_xy(p) for p in message.reference])
+            _open_basis([_xy(p) for p in message.reference])
             _simple([_xy(p) for p in message.left_boundary]+[_xy(p) for p in reversed(message.right_boundary)],True)
         for field,required in (('lane_model',bool(message.required_features&LANE_MODEL)),
                 ('localization',bool(message.required_features&LOCALIZATION_BOUNDS)),

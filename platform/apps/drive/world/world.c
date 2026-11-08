@@ -48,6 +48,15 @@ static bool simple(const dw_point *points,size_t count,bool closed){
  }
  return true;
 }
+static bool open_basis(const dw_point *points,size_t count){
+ if(!simple(points,count,false)||hypotf(points[0].x-points[count-1].x,points[0].y-points[count-1].y)<1e-6f)return false;
+ for(size_t i=1;i+1<count;i++){
+  dw_point a=points[i-1],b=points[i],c=points[i+1];
+  /* 인접 edge는 단순성 검사에서 공유 endpoint를 허용하지만 구간 되돌림은 station을 중복시킨다. */
+  if(fabsf(cross(a,b,c))<1e-6f&&((b.x-a.x)*(c.x-b.x)+(b.y-a.y)*(c.y-b.y))<0)return false;
+ }
+ return true;
+}
 static bool convex4(const dw_point *points){
  if(!simple(points,4,true))return false;
  bool positive=true,negative=true;
@@ -152,7 +161,7 @@ static bool road_simple(const dw_world *w){
  size_t n=w->reference_count,edges=2*n;
  if(w->required_features&DW_LANE_MODEL){
   /* 새 basis는 station 축이며 hard domain의 두 chain은 차선의 좌우 대응점이 아니다. */
-  if(!simple(w->reference,n,false))return false;
+  if(!open_basis(w->reference,n))return false;
  }else{
   for(size_t k=0;k<n;k++){
    dw_point a=w->reference[k?k-1:0],b=w->reference[k?k:1];
