@@ -78,3 +78,30 @@ codec/cache/순번/clock/media/화면과 제품 수명 분리/offline/표시 변
 ```powershell
 & ".\vehicle\Jetson\build\streamlit-viewer-env\Scripts\python.exe" -m unittest discover -s vehicle/Jetson/tools/streamlit_viewer/tests -v
 ```
+
+## 실험 완료 사본의 파일 export
+
+[SimObservationExporter](../../tests/integration/sim_observation_export.py)는 실제 `MapperMotionObservation.fields`를 한 번 고정한 JSON bytes와 같은 결과의 `capture.observation`을 받습니다. 실험이 `finish_capture()`를 완료한 뒤 별도 diagnostic owner에서 호출합니다. helper는 제품·SDK·renderer를 import하지 않고 thread·queue·네트워크 전송이나 제품 loop의 동기 I/O hook을 만들지 않습니다.
+
+```python
+import json
+from sim_observation_export import SimObservationExporter
+
+original = json.dumps(actual_result.fields, sort_keys=True,
+                      separators=(",", ":"), ensure_ascii=True,
+                      allow_nan=False).encode("ascii")
+with SimObservationExporter(explicit_dedicated_directory) as exporter:
+    receipt = exporter.export(original, actual_result.capture.observation)
+```
+
+`sim_observation_export`는 실험 harness의 integration 모듈 경로에서 import합니다. 관측마다 원 JSON bytes를 한 번만 고정하고 retry에도 같은 bytes를 사용합니다. 이 JSON은 진단 projection이며 MCU/protobuf 원 wire가 아닙니다. 출력 폴더를 PC에 전달하고 viewer에서 선택합니다. 자동 원격 전송은 제공하지 않습니다.
+
+원 NV12·RAW16·FrameStamp·capture 구간·완료/E·순번·SHA를 유지합니다. 두 고정 슬롯의 media/원 JSON을 먼저 완성하고 snapshot을 마지막에 원자 교체합니다. 같은 원 관측은 `UNCHANGED`이며 파일·시각·순번을 갱신하지 않습니다. 다른 source epoch는 새 전용 폴더를 사용합니다. 정상 종료 후 같은 폴더 재개는 원 게시 파일/HWM을 검사하며 crash lock이나 첫 게시 전 미완성 폴더를 자동 인수하지 않습니다. fsync·무손실 전송 보장은 없습니다.
+
+source kind는 `OFFLINE_SYNTHETIC`이므로 HISTORICAL로 표시합니다. 원 odometry 위치만 해당 `ODOMETRY:<epoch>`의 ESTIMATE 한 점으로 보존하며 MAP 경로를 만들지 않습니다. 입력에 없는 NN·grid·운영 값은 UNKNOWN입니다. GT는 기본 OFF이며 `display_gt_layers`에 명시한 같은 frame의 표시 층만 받습니다. 원 clock과 PC 수신 시각을 섞어 지연을 계산하지 않습니다.
+
+순수 export/reader 의미시험은 제품·SDK·Streamlit 서버를 시작하지 않습니다.
+
+```powershell
+& ".\vehicle\Jetson\build\streamlit-viewer-env\Scripts\python.exe" -m unittest discover -s vehicle/Jetson/tests/integration -p test_sim_observation_export.py -v
+```
