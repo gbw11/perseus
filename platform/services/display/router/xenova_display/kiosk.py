@@ -106,7 +106,7 @@ class Kiosk:
         args = ["--ozone-platform=x11", "--force-device-scale-factor=1", "--no-first-run",
                 f"--window-position={output.x},{output.y}", f"--window-size={output.width},{output.height}",
                 "--disable-translate", "--disable-features=Translate", "--lang=ko-KR",
-                f"--app={self.config.feed_origin}{output.page_path}"]
+                f"--app={self.config.page_url(output)}"]
         if self.config.backend == "x11": args.append("--kiosk")
         if self.test_no_sandbox: args.append("--no-sandbox")
         # Chromium never receives the service token via argv, extra headers or page JS.
@@ -134,12 +134,14 @@ class Kiosk:
                         ignore_default_args=["about:blank"],
                         chromium_sandbox=not self.test_no_sandbox)
         self.contexts[output.output_id] = context
-        await self.renew(context)
+        if not self.config.ui_origin:
+            # 414: a page served by the display domU never gets a dom0 feed session.
+            await self.renew(context)
         page = context.pages[0] if context.pages else await context.new_page()
         self.pages[output.output_id] = page
         for other in list(context.pages):
             if other is not page: await other.close()
-        await page.goto(f"{self.config.feed_origin}{output.page_path}", timeout=15000)
+        await page.goto(self.config.page_url(output), timeout=15000)
         cdp = await context.new_cdp_session(page)
         window = await cdp.send("Browser.getWindowForTarget")
         await cdp.send("Browser.setWindowBounds", {"windowId": window["windowId"], "bounds": {"windowState":"normal"}})
@@ -282,6 +284,12 @@ class Kiosk:
                     raise RuntimeError("browser is outside configured output")
                 state["renderer_verified_monotonic"] = time.monotonic()
                 self.states[identity] = state
+                if self.config.ui_origin:
+                    # 414: the domU-served page has no feed session and posts no acks to dom0.
+                    state["feed_status"] = "not_used"
+                    state["ui_origin"] = self.config.ui_origin
+                    self.states[identity] = state
+                    return
                 try:
                     if time.monotonic() - self.renewed[identity] > 3600:
                         await self.renew(self.contexts[identity])

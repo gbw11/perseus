@@ -1,0 +1,7 @@
+{
+  "guest": null,
+  "guest_data_token_file": "/etc/xenova/guest-display/guest-data.token",
+  "data_bind": "192.168.77.1",
+  "data_port": 8085,
+  "feed_port": 8082
+}

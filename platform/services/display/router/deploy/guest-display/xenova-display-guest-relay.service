@@ -1,5 +1,5 @@
 [Unit]
-Description=Xenova Plan B guest display relay (display domU frames -> dom0 HDMI)
+Description=Xenova guest display data for the display domU (Plan A; Plan B also relays frames)
 Wants=xenova-display-feed.service
 After=network.target xenova-display-feed.service
 ConditionPathExists=/etc/xenova/guest-display.json

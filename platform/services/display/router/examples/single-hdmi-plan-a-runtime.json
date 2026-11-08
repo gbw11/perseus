@@ -1,0 +1,18 @@
+{
+  "backend": "x11",
+  "display": ":5",
+  "feed_origin": "http://127.0.0.1:8082",
+  "ui_origin": "http://192.168.77.20:8086",
+  "outputs": [
+    {
+      "output_id": "monitor-1",
+      "connector": "HDMI-1",
+      "edid_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "x": 0,
+      "y": 0,
+      "width": 1280,
+      "height": 720,
+      "page": "/display/mobile"
+    }
+  ]
+}

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import ipaddress
 import json
 from pathlib import Path, PurePosixPath
 import re
@@ -56,6 +57,31 @@ class RuntimeConfig(BaseModel):
     guest_relay_token_file: str | None = Field(default=None, min_length=1, max_length=4096)
     frame_decoder: Literal['turbojpeg', 'ffmpeg'] = 'turbojpeg'
     guest_stale_ms: int = Field(default=2000, ge=500, le=5000)
+    # 414 Plan A: the web UI is served from the display domU (VM3 guest_app) and this
+    # dom0 Chromium only renders it. Default None keeps pages on the local feed.
+    ui_origin: str | None = Field(default=None, min_length=1, max_length=64)
+
+    @model_validator(mode="after")
+    def validate_ui_origin(self):
+        if self.ui_origin is None:
+            return self
+        if self.renderer != 'chromium':
+            raise ValueError('ui_origin is for the Chromium renderer')
+        origin = urlparse(self.ui_origin)
+        try:
+            host = ipaddress.IPv4Address(origin.hostname or "")
+        except ValueError:
+            raise ValueError('ui_origin needs an IPv4 address on the Xen bridge') from None
+        if (origin.scheme != "http" or origin.port is None or host.is_unspecified or host.is_multicast
+                or not (host.is_private or host.is_loopback)):
+            raise ValueError('ui_origin must be http://<private IPv4>:<port>')
+        if origin.username or origin.password or origin.query or origin.fragment or origin.path not in {"", "/"}:
+            raise ValueError('ui_origin cannot include credentials or paths')
+        self.ui_origin = f"http://{host}:{origin.port}"
+        return self
+
+    def page_url(self, output):
+        return f"{self.ui_origin or self.feed_origin}{output.page_path}"
 
     @model_validator(mode="after")
     def validate_guest_frames(self):
