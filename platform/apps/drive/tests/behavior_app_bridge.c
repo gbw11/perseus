@@ -52,14 +52,36 @@ int xm_zclient_init(struct xm_zclient *c,const char *vm,const char *events,const
 void xm_zclient_close(struct xm_zclient *c){c->socket_open=c->connected=false;}
 int xm_zclient_subscribe(struct xm_zclient *c,const char *topic,int qos){(void)c;(void)topic;(void)qos;return 0;}
 int xm_zclient_poll(struct xm_zclient *c,int timeout){(void)c;(void)timeout;return 0;}
-static void print_hex(const void *data,size_t count){const uint8_t *p=data;for(size_t k=0;k<count;k++)printf("%02x",p[k]);}
+static void print_hex(const void *data,size_t count){
+ static const char digits[]="0123456789abcdef";const uint8_t *p=data;char chunk[512];size_t used=0;
+ for(size_t k=0;k<count;k++){
+  chunk[used++]=digits[p[k]>>4];chunk[used++]=digits[p[k]&15];
+  if(used==sizeof(chunk)){if(fwrite(chunk,1,used,stdout)!=used)abort();used=0;}
+ }
+ if(used&&fwrite(chunk,1,used,stdout)!=used)abort();
+}
 int mqtt_publish(struct mqtt_client *c,const struct mqtt_publish_param *p){
  (void)c;printf("WIRE %.*s ",(int)p->message.topic.topic.size,p->message.topic.topic.utf8);
  print_hex(p->message.payload.data,p->message.payload.len);putchar('\n');return 0;
 }
 static int unhex(const char *text,uint8_t *out,size_t cap){
  size_t n=strcspn(text,"\r\n");if(n%2||n/2>cap)return -EINVAL;
- for(size_t k=0;k<n/2;k++){unsigned value;if(sscanf(text+2*k,"%2x",&value)!=1)return -EINVAL;out[k]=(uint8_t)value;}return (int)(n/2);
+ /* The fixture's text envelope is not part of the product clock exchange.
+  * sscanf on every suffix can scan the remaining string repeatedly; keep this
+  * declared transport leaf linear without changing original clock bounds/E. */
+ for(size_t k=0;k<n/2;k++){
+  unsigned value=0;
+  for(unsigned j=0;j<2;j++){
+   unsigned char c=(unsigned char)text[2*k+j];unsigned digit;
+   if(c>='0'&&c<='9')digit=c-'0';
+   else if(c>='a'&&c<='f')digit=c-'a'+10;
+   else if(c>='A'&&c<='F')digit=c-'A'+10;
+   else return -EINVAL;
+   value=value*16+digit;
+  }
+  out[k]=(uint8_t)value;
+ }
+ return (int)(n/2);
 }
 static void lifecycle(void){
  struct drive_result selected;struct xm_span control={bridge_inputs.control.payload,(uint16_t)bridge_inputs.control.length};

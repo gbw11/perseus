@@ -72,6 +72,7 @@ def test_actual_c_initial_none_then_registered_episode_full_state(world,app_brid
     # the pre-existing fixture clock must not freeze between pipe turns.
     w.r._clock=current_pi_clock;w.w.m.clock=current_pi_clock;w.io.clock=current_pi_clock
     plant_sequence=0;calculation=0;seen=[];confirmed=[];first_state=None;first_request=None;admitted_phase=None;selected_drive=None
+    negative_observation=None
     with (tmp_path/'actual-c.stderr').open('wb') as errors:
         app=App(app_bridge_binary,errors)
         queue=[]
@@ -137,15 +138,21 @@ def test_actual_c_initial_none_then_registered_episode_full_state(world,app_brid
                 outgoing=[(key,w.io.pending.pop(key)) for key in tuple(w.io.pending) if key[0]==inbound(w.peer[0])]
             for key,value in outgoing:
                 clock()
+                sent_clock=None
                 if isinstance(value,OwnedPreparedClock):
                     wire=value.stamp(w.o.now)
                     parent=decode(wire,schema.DriveLink).clock.vehicle
                     assert parent.HasField('estimated_steering_rad') is steering_available
                     assert not parent.HasField('measured_steering_rad')
                     if steering_available:assert parent.steering_error_rad>0
-                    w.io.clock_completions.put_nowait(SentClock(value.peer,value.generation,wire));provider.tick()
+                    sent_clock=SentClock(value.peer,value.generation,wire)
                 else:wire=value
                 command('link '+wire.hex())
+                if sent_clock is not None:
+                    # Like DriveLinkIo: stamp immediately before the transport,
+                    # then notify the actor after the original bytes were sent.
+                    # Actor work between P2 and the pipe inflated clock width.
+                    clock();w.io.clock_completions.put_nowait(sent_clock);provider.tick()
         try:
             binding=w.r.bindings.current(w.peer[0],w.w.t)
             # The envelope below uses the exact C bootstrap/binding identity.
@@ -159,13 +166,27 @@ def test_actual_c_initial_none_then_registered_episode_full_state(world,app_brid
                 # assigned to skip a failed clock or slow real planner result.
                 refresh();command('step 32');exchange()
                 calculation+=1;command('calc '+str(calculation));command('io');exchange()
+                if not steering_available and calculation%4==0:
+                    command('meta')
+                    observed=next(row[1] for row in reversed(seen) if row[0]=='meta')
+                    # Record the veto while its original input preconditions coexist.
+                    # A later diagnostic can outlive facts; it must not replace this
+                    # actual observation or refresh any producer's original E.
+                    if (observed['clock_rc']==0 and observed['clock_acknowledged']
+                            and observed['clock_probe_sequence']>0 and observed['maps_published']>0
+                            and observed['map_current']>=0 and observed['has_grant']
+                            and observed['facts_current'] and observed['search_reason_name']=='INPUT_INVALID'):
+                        negative_observation=dict(observed)
+                        break
                 time.sleep(.003)
             command('meta');command('life')
             (tmp_path/'actual-c.transcript.json').write_text(json.dumps(app.transcript,indent=2))
             (tmp_path/'actor-observations.json').write_text(json.dumps(seen,indent=2))
             assert confirmed and all(sequence>0 for sequence,_ in confirmed),seen[-12:]
             if not steering_available:
-                meta=next(row[1] for row in reversed(seen) if row[0]=='meta')
+                assert negative_observation is not None,seen[-12:]
+                meta=negative_observation
+                (tmp_path/'actual-missing-steering-veto.json').write_text(json.dumps(meta,indent=2))
                 assert meta['clock_rc']==0 and meta['clock_acknowledged'] and meta['clock_probe_sequence']>0
                 assert meta['maps_published']>0 and meta['map_current']>=0 and meta['has_grant'] and meta['facts_current']
                 assert meta['search_reason_name']=='INPUT_INVALID',meta
