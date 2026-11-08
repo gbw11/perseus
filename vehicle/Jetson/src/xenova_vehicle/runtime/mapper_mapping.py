@@ -82,6 +82,8 @@ class MappingFrameDraft:
     reason: str
     catalog_draft: object=None
     result: object=None
+    roi_reframe: object=None
+    atlas_draft: object=None
 
 
 @dataclass(frozen=True)
@@ -105,6 +107,7 @@ def _fork_collector(owner,pipeline):
     for name,value in vars(owner).items():
         if type(value) is dict:setattr(result,name,dict(value))
         elif type(value) is set:setattr(result,name,set(value))
+    if getattr(owner,'_atlas_proof',None) is not None:result._atlas_proof=owner._atlas_proof.fork()
     result._grid=pipeline.grid
     return result
 
@@ -160,6 +163,10 @@ class MapperMapping:
         self.collector=self.catalogs=None;self._context=self._scope=self._pipeline=None
         self._pending=self._range_request=self._terminal=self._staged=None
         self._revision=0;self._cursor_floor=0;self._fenced=False
+        self._atlas=None
+        self._atlas_wait_reason=None
+        self._atlas_requested_loads=()
+        self._atlas_load_request=self._atlas_load_expected=None
         self._restore_done=False;self._head_ready=False;self._head_load=None;self._head_offered=False
         self._checkpoint_ref=None if complete is None else complete.checkpoint_ref
 
@@ -278,6 +285,12 @@ class MapperMapping:
             lane_profile=self.profile.pipeline.registration)
         if self._complete is not None:scope=catalogs.restore_complete(self._complete,current_scope=scope,now_us=now_us);collector.rebind_scope(scope)
         self.collector,self.catalogs,self._scope=collector,catalogs,scope
+        if self.profile.rolling_roi is not None and self._complete is None:
+            from .mapper_atlas import MapperAtlas
+            # 최대4 LIVE+4 EVIDENCE pack과 후보/진단 ROI 배열의 명시 data workspace다.
+            self._atlas=MapperAtlas(self._context.map_epoch,self.profile.pipeline.grid,self.profile.rolling_roi,
+                reserved_workspace_bytes=4*1024*1024)
+            collector._atlas_owner=self._atlas
         if self._complete is not None and self._head_load is None:
             self._head_load=LoadRequest(StorageJob(self._context,str(uuid4()),now_us,now_us+self._job_lifetime),
                 self._complete.checkpoint_ref,canonical(dict(kind='CHECKPOINT_PAGE',cursor=0)))
@@ -307,6 +320,20 @@ class MapperMapping:
         elif pending.role=='HEAD_LOAD':
             if current and type(result) is LoadedCheckpoint:
                 self.catalogs.observe_heads(result.heads,pending.request.job,now_us=now_us);self._head_ready=True
+        elif pending.role=='ATLAS_LOAD':
+            from .mapper_atlas import MapperAtlasNotReady
+            from ..mapping.atlas import AtlasResource
+            if current and type(result) is LoadedCheckpoint:
+                try:self._atlas.install_loaded_tile(result,context=self._context,now_us=now_us)
+                except (ValueError,MapperAtlasNotReady,AtlasResource):current=False
+                else:
+                    key=self._atlas_load_expected[0]
+                    self._atlas_requested_loads=tuple(item for item in self._atlas_requested_loads if item[0]!=key)
+                    self._atlas_load_request=self._atlas_load_expected=None
+            elif type(result) is StorageAbort and result.reason=='SOURCE_REPLACED':
+                # 알려진 원 terminal 뒤 같은 기하의 새 문맥에서 실제 LOAD를 다시 선택할 수 있다.
+                self._atlas_load_request=self._atlas_load_expected=None
+            else:current=False
         self._terminal=MappingTerminal(pending.request,result,current,now_us);self._pending=None
         return True
 
@@ -332,6 +359,9 @@ class MapperMapping:
         """최종 frame 결정 뒤에만 호출한다. 같은 원 요청을 유지하고 실패 작업을 자동 재발행하지 않는다."""
         self._owner();uint(now_us)
         if self._staged is not None:raise MappingNotReady('original geometry draft is not terminal')
+        if self._atlas is not None:
+            self._atlas.drain_retired()
+            self._atlas.drain_owner_releases()
         if not self._qualified():return 'PROFILE_NOT_READY'
         bound=self._bind_context(now_us)
         self._retire_unoffered_catalog()
@@ -373,14 +403,32 @@ class MapperMapping:
             self._head_offered=True
             offered=self.mailbox.compute_offer(self._head_load,now_us=now_us)
             return 'HEAD_LOAD_OFFERED' if offered else 'WAIT_MAILBOX'
+        if self._atlas is not None and self._atlas_requested_loads:
+            needed=tuple(item for item in self._atlas_requested_loads if item in self._atlas.needs_load)
+            self._atlas_requested_loads=needed
+            if needed:
+                if self._atlas_load_request is not None:return 'ATLAS_ORIGINAL_LOAD_TERMINAL'
+                if self._checkpoint_ref is None:return 'ATLAS_LOAD_CHECKPOINT_REQUIRED'
+                key,reference=needed[0]
+                selection=canonical(dict(kind='TILE',map_epoch=self._context.map_epoch,
+                    tile_x=key[0],tile_y=key[1],tile_revision=str(reference[2])))
+                job=StorageJob(self._context,str(uuid4()),now_us,now_us+self._job_lifetime)
+                request=LoadRequest(job,self._checkpoint_ref,selection)
+                self._atlas_load_request=request;self._atlas_load_expected=needed[0]
+                self._pending=MappingPending('ATLAS_LOAD',request)
+                offered=self.mailbox.compute_offer(request,now_us=now_us)
+                return 'ATLAS_TILE_LOAD_OFFERED' if offered else 'WAIT_MAILBOX'
         arguments={} if catalog_arguments is None else catalog_arguments
         if type(arguments) is not dict:raise ValueError('explicit original catalog arguments required')
         return self.catalogs.maintenance(now_us=now_us,**arguments)
 
     def prepare_frame(self,item,pipeline,observation,inputs,sensors,now_us):
         """큰 frame/proof 작업은 compute에서만 한다. ready=False 후보는 metric 채택하면 안 된다."""
+        from .mapper_atlas import MapperAtlas,MapperAtlasNotReady
+        from ..mapping.atlas import AtlasResource
         self._owner();uint(now_us)
         if self._staged is not None:raise MappingNotReady('one original frame draft is unresolved')
+        self._atlas_wait_reason=None
         if (type(item) is not MapperInput or type(pipeline) is not PerceptionPipeline or type(inputs) is not MetricInputs
                 or type(sensors) is not MapperSensorState or now_us>=item.expires_us):raise ValueError('actual current compute input required')
         context=self.context_port.read();collector=None;frame=None;reason='PROVENANCE_NOT_READY'
@@ -394,7 +442,15 @@ class MapperMapping:
             try:
                 scope=self._make_scope(context,now_us=now_us,inputs=inputs,sensors=sensors);collector.rebind_scope(scope)
                 if self._complete is not None and not self._restore_done:
-                    collector.retain_complete(self._complete,pipeline,selected_bootstrap=json_bytes(self._material,2048)['bootstrap'])
+                    selected=json_bytes(self._material,2048)['bootstrap']
+                    collector.retain_complete(self._complete,pipeline,selected_bootstrap=selected)
+                    if self.profile.rolling_roi is not None:
+                        if self._atlas is None:
+                            self._atlas=MapperAtlas.from_complete(self._complete,pipeline=pipeline,current_scope=scope,
+                                selected_bootstrap=selected,now_us=now_us,reserved_workspace_bytes=4*1024*1024)
+                        collector._atlas_owner=self._atlas
+                        # 원 Complete는 pin으로 계속 계수한다. 별도 durable dict에는 본문을 중복 보유하지 않는다.
+                        collector._durable_tiles={(tile.tile_x,tile.tile_y):tile.reference for tile in self._complete.tiles}
                 bracket=sensors.original_pose_bracket(inputs.pose);originals=list(bracket.originals)
                 if inputs.vehicle is None:raise MappingNotReady('actual current registration reference Vehicle unavailable')
                 anchor=sensors.original_vehicle_admission(inputs.vehicle)
@@ -409,19 +465,63 @@ class MapperMapping:
                     clock_lease=inputs.clock_lease,now_us=now_us,reference_vehicle=inputs.vehicle,admission=sensors.sensors,
                     registration_valid_for_us=self.profile.localization.registration_valid_for_us,
                     pose_bracket=bracket,sensor_state=sensors)
+            except (MapperAtlasNotReady,AtlasResource):reason='ATLAS_RESTORE_NOT_READY'
             except (ValueError,MappingNotReady,MapCheckpointNotReady):reason='ORIGINAL_FRAME_PROOF_NOT_READY'
-            else:ready=True;reason='READY'
+            else:
+                ready=True;reason='READY'
+                if self.profile.rolling_roi is not None and self._atlas is None:
+                    ready=False;reason='ATLAS_RESTORE_NOT_READY'
         observer=None if collector is None else collector.frame_observer(frame,pipeline=pipeline)
-        self._staged=MappingFrameDraft(item,context,pipeline,collector,inputs,frame,observer,self._revision,ready,reason)
+        reframe=None
+        if ready and self._atlas is not None:
+            def reframe(original_pipeline,pose):
+                return self._reframe_atlas(original_pipeline,collector,pose)
+        self._staged=MappingFrameDraft(item,context,pipeline,collector,inputs,frame,observer,self._revision,ready,reason,
+            roi_reframe=reframe)
         return self._staged
 
+    def _reframe_atlas(self,pipeline,collector,pose):
+        """정합 뒤 mutation 전 같은 후보 창과 proof를 이동한다. 원 pool은 아직 바꾸지 않는다."""
+        from ..mapping.map_lattice import GridWindow
+        from ..mapping.rolling_grid import configure_grid,reframe_grid
+        from .atlas_proof import AtlasProofWindow
+        from .mapper_atlas import MapperAtlasNotReady
+        from ..mapping.atlas import AtlasResource
+        grid=pipeline.grid;policy=self.profile.rolling_roi
+        if (self._staged is None or self._staged.pipeline is not pipeline or self._staged.collector is not collector
+                or policy is None or self._atlas is None):raise MappingNotReady('original rolling frame owner required')
+        old=grid.rolling_window
+        if old is None:
+            old=GridWindow.from_spec(self.profile.pipeline.grid)
+            configure_grid(grid,old)
+        new=policy.window_for(old,(pose.sample.x,pose.sample.y),pose.sample.yaw)
+        try:
+            with self._atlas.read_tiles(new) as (live,reader):
+                proof=collector._atlas_proof
+                proof=(AtlasProofWindow(new,reader) if proof is None else
+                    proof.reframe(new,immutable_tile_reader=reader) if proof.window!=new else proof)
+                if new!=old:reframe_grid(grid,new,live)
+                collector._grid=grid;collector._atlas_owner=self._atlas
+                collector.reframe_atlas_proof(proof)
+        except MapperAtlasNotReady as error:
+            if error.needs_load:self._atlas_requested_loads=error.needs_load
+            self._atlas_wait_reason='ATLAS_TILE_OR_RESOURCE_NOT_READY'
+            return False
+        except AtlasResource:
+            self._atlas_wait_reason='ATLAS_TILE_OR_RESOURCE_NOT_READY'
+            return False
+        return new!=old
+
     def finish_frame(self,draft,result,*,now_us):
+        from ..mapping.atlas import AtlasResource
+        from .mapper_atlas import MapperAtlasNotReady
         self._owner();uint(now_us)
         if draft is not self._staged or type(result) is not PerceptionResult:raise ValueError('actual original frame draft/result required')
-        collector=draft.collector;catalog=None;ready=draft.ready;reason=draft.reason
+        collector=draft.collector;catalog=atlas=None;ready=draft.ready;reason=draft.reason
         try:
             if ready:
-                if result.summary.get('quarantined') is True:ready=False;reason='MAP_QUARANTINED'
+                if self._atlas_wait_reason is not None:ready=False;reason=self._atlas_wait_reason
+                elif result.summary.get('quarantined') is True:ready=False;reason='MAP_QUARANTINED'
                 else:
                     collector.observe_result(draft.frame,result,draft.pipeline,raw_pose=draft.inputs.pose)
                     capture=sha256(canonical(draft.frame.observation.rgb.stamp.key)).hexdigest()
@@ -442,10 +542,14 @@ class MapperMapping:
                         prior_qualified=result.summary.get('localization_qualified') is True,
                         metric_evidence=self.catalogs.metric_from_frame(draft.frame),lane_provenance_ids=(root,root),
                         base_evidence=evidence,now_us=now_us,roi_bounds=(x,y,x+spec.width*spec.resolution_m,y+spec.height*spec.resolution_m))
+                    if self._atlas is not None:
+                        atlas=self._atlas.prepare_frame(grid,collector._atlas_proof)
+        except AtlasResource:ready=False;reason='ATLAS_RESOURCE'
+        except MapperAtlasNotReady:ready=False;reason='ATLAS_NOT_READY'
         except (ValueError,MappingNotReady,MapCheckpointNotReady,CatalogNotReady):ready=False;reason='FRAME_OR_CATALOG_NOT_READY'
         finally:
             if collector is not None:self._cursor_floor=max(self._cursor_floor,collector._next)
-        self._staged=replace(draft,ready=ready,reason=reason,catalog_draft=catalog,result=result)
+        self._staged=replace(draft,ready=ready,reason=reason,catalog_draft=catalog,result=result,atlas_draft=atlas)
         return self._staged
 
     def accept(self,draft):
@@ -453,6 +557,7 @@ class MapperMapping:
         self._owner()
         if draft is not self._staged or draft.accepted_revision!=self._revision or draft.result is None or not draft.ready:
             raise ValueError('original finalized ready mapping draft required')
+        if draft.atlas_draft is not None:self._atlas.accept_frame(draft.atlas_draft)
         if draft.catalog_draft is not None:self.catalogs.accept(draft.catalog_draft)
         self.collector,self._pipeline=draft.collector,draft.pipeline;self._scope=draft.collector.scope
         self._restore_done|=self._complete is not None;self._revision+=1;self._staged=None
@@ -461,6 +566,7 @@ class MapperMapping:
         self._owner()
         if draft is not self._staged:raise ValueError('original staged mapping draft required')
         if draft.catalog_draft is not None:self.catalogs.discard(draft.catalog_draft)
+        if draft.atlas_draft is not None:self._atlas.cancel_frame(draft.atlas_draft)
         if draft.collector is not None:self._cursor_floor=max(self._cursor_floor,draft.collector._next)
         self._staged=None
 
@@ -480,9 +586,9 @@ class MapperMapping:
             request=self.collector.capture(self._pipeline,job,now_us=now_us,scene=scene,subsystem_state=state)
             self._pending=MappingPending('CHECKPOINT',request)
         else:
-            snapshot=self.collector.snapshot(self._pipeline,job,now_us=now_us,subsystem_state=state)
             metadata={} if scene is None else dict(scene)
             if 'mapper_state' in metadata:raise ValueError('original mapper snapshot owns its META reference')
+            snapshot=self.collector.snapshot(self._pipeline,job,now_us=now_us,subsystem_state=state)
             metadata['mapper_state']=snapshot.mapper_state_ref
             request=None
             try:

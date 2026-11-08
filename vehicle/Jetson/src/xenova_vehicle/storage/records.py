@@ -288,7 +288,7 @@ class CheckpointPayload:
             raise PersistenceError('scene commit nonce differs from original checkpoint job')
 
 
-@dataclass(frozen=True,slots=True)
+@dataclass(frozen=True,slots=True,weakref_slot=True)
 class LoadedCheckpoint:
     request: LoadRequest
     original_job: StorageJob

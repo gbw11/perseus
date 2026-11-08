@@ -45,6 +45,7 @@ def encode_mapper_state(state):
     from .records import ContextRecord
     raw=canonical(state)
     if not 0<len(raw)<=STATE_CAP:raise PersistenceError('mapper state exceeds bounded metadata capacity')
+    if type(state) is dict and 'atlas' in state:_validate_atlas_state(json_bytes(raw,STATE_CAP))
     compressed=zlib.compress(raw,6)
     if len(compressed)>CHUNK_BYTES*MAX_PAGES:raise PersistenceError('mapper-state compressed page capacity exceeded')
     key=sha256(raw).hexdigest();count=(len(compressed)+CHUNK_BYTES-1)//CHUNK_BYTES
@@ -89,7 +90,52 @@ def decode_mapper_state(scene,contexts):
                 or sha256(raw).hexdigest()!=ref['state_sha256']):
             raise PersistenceError('mapper-state decompression length/hash mismatch')
     except zlib.error as error:raise PersistenceError('corrupt mapper-state compressed bytes') from error
-    return json_bytes(raw,STATE_CAP),tuple(selected)
+    state=json_bytes(raw,STATE_CAP)
+    _validate_atlas_state(state)
+    return state,tuple(selected)
+
+
+def _validate_atlas_state(state):
+    """선택형 좌표 설명만 검사한다. body/proof ID나 source/Scene/복원 자격을 만들지 않는다."""
+    if type(state) is not dict or 'atlas' not in state:return
+    def exact(value,names):
+        return (type(value) is dict and len(value)==len(names)
+            and all(type(key) is str for key in value) and set(value)==names)
+    def number(value):
+        if type(value) not in (int,float):raise PersistenceError('finite native atlas number required')
+        if type(value) is int and not -(1<<63)<value<1<<63:
+            raise PersistenceError('native atlas integer exceeds canonical range')
+        try:valid=math.isfinite(value)
+        except OverflowError:valid=False
+        if not valid:raise PersistenceError('finite native atlas number required')
+        return value
+    def pair(value):
+        if type(value) is not list or len(value)!=2:raise PersistenceError('exact two-element atlas JSON array required')
+        return value
+    atlas=state['atlas'];spec=state.get('spec')
+    names={'profile','lattice_origin_xy_m','roi_origin_cell','tile_cells','live_restore','policy_sha256'}
+    if (type(state.get('profile')) is not str or state['profile']!='mapper-pipeline-state-1'
+            or not exact(atlas,names) or type(atlas['profile']) is not str or atlas['profile']!='atlas-rolling-1'
+            or type(atlas['tile_cells']) is not int or atlas['tile_cells']!=64
+            or type(atlas['live_restore']) is not str or atlas['live_restore']!='RETAINED_EVIDENCE_ONLY'):
+        raise PersistenceError('unsupported exact atlas metadata profile')
+    digest(atlas['policy_sha256'])
+    if not exact(spec,{'width','height','resolution_m','origin_xy'}):raise PersistenceError('exact original atlas grid spec required')
+    for size in (spec['width'],spec['height']):
+        if type(size) is not int or not 2<=size<=64:raise PersistenceError('atlas grid must fit2..64 cells per side')
+    resolution=number(spec['resolution_m'])
+    if not .005<=resolution<=1:raise PersistenceError('atlas resolution exceeds original grid profile')
+    anchor=tuple(number(value) for value in pair(atlas['lattice_origin_xy_m']))
+    offset=pair(atlas['roi_origin_cell'])
+    for value,size in zip(offset,(spec['width'],spec['height'])):
+        if (type(value) is not int or not -(1<<31)*64<=value
+                or value+size-1>(1<<31)*64-1):
+            raise PersistenceError('atlas window exceeds signed int32 tile address')
+    origin=tuple(number(value) for value in pair(spec['origin_xy']))
+    try:expected=tuple(math.fsum((value,index*resolution)) for value,index in zip(anchor,offset))
+    except (OverflowError,ValueError) as error:raise PersistenceError('atlas origin arithmetic is not finite') from error
+    if any(not math.isfinite(value) for value in expected) or origin!=expected:
+        raise PersistenceError('atlas ROI origin differs from the immutable shared lattice')
 
 
 def _road_basis_roots(value):
@@ -148,6 +194,7 @@ def mapper_state_roots(state):
     """명시 versioned META의 원 ID union만 반환한다. LOAD/geometry/현재성 승인은 아니다."""
     if state is None:return ()
     if type(state) is not dict:raise PersistenceError('mapper state must preserve an exact object')
+    _validate_atlas_state(state)
     if state.get('profile')!='mapper-pipeline-state-1':
         if {'reference_provenance','alignment_provenance'}&set(state):raise PersistenceError('unknown metadata proof-root profile')
         roots=[]

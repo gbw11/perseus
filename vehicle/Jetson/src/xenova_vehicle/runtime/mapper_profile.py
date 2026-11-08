@@ -12,6 +12,7 @@ import json
 import math
 
 from ..mapping.local_map import GridSpec
+from ..mapping.map_lattice import GridWindow,RollingPolicy
 from ..mapping.registration import RegistrationProfile
 from ..perception.adapters import CaptureTiming
 from ..perception.calibration import CalibrationProfile
@@ -27,7 +28,7 @@ from .scene import SurveyProfile
 
 MAX_BYTES = 65536
 TOP = frozenset(('schema_version','vehicle_configuration','calibration_profile_sha256','capture_timing',
-                 'localization','catalog_policy','survey','sensors','pipeline','targets','parking_aisles','stopping','motion_qualified'))
+                 'localization','catalog_policy','survey','rolling_roi','sensors','pipeline','targets','parking_aisles','stopping','motion_qualified'))
 
 
 class MapperProfileError(ValueError):
@@ -218,6 +219,7 @@ class MapperProfile:
     localization: LocalizationLimits | None
     catalog_policy: CatalogPolicy | None
     survey: SurveyProfile | None
+    rolling_roi: RollingPolicy | None
     sensors: SensorLimits
     pipeline: PipelineProfile
     targets: tuple
@@ -227,7 +229,7 @@ class MapperProfile:
 
     def __init__(self,value):
         own=_owned(value)
-        if type(own) is not dict or set(own)-TOP or TOP-{'capture_timing','localization','catalog_policy','survey'}-set(own) or type(own.get('schema_version')) is not int or own['schema_version']!=1:
+        if type(own) is not dict or set(own)-TOP or TOP-{'capture_timing','localization','catalog_policy','survey','rolling_roi'}-set(own) or type(own.get('schema_version')) is not int or own['schema_version']!=1:
             raise MapperProfileError('exact mapper-profile local schema1 required')
         own.setdefault('capture_timing',None)
         _label(own['vehicle_configuration']); _sha(own['calibration_profile_sha256'])
@@ -247,6 +249,10 @@ class MapperProfile:
         _label(data['permission_source'])
         try: pipeline=PipelineProfile(**{key:nested[key] if key in nested else _tuple(item) for key,item in data.items()})
         except (ValueError,TypeError,OverflowError) as error: raise MapperProfileError('invalid PipelineProfile') from error
+        rolling=None if own.get('rolling_roi') is None else _typed(RollingPolicy,own['rolling_roi'])
+        if rolling is not None:
+            try:rolling.check_window(GridWindow.from_spec(pipeline.grid))
+            except ValueError as error:raise MapperProfileError('rolling policy exceeds original grid') from error
         targets=own['targets']; aisles=own['parking_aisles']
         if type(targets) is not list or len(targets)>4 or type(aisles) is not list or len(aisles)>4:
             raise MapperProfileError('bounded targets4/parking aisles4 required')
@@ -268,7 +274,7 @@ class MapperProfile:
         raw=json.dumps(own,sort_keys=True,separators=(',',':'),ensure_ascii=True,allow_nan=False).encode('ascii')
         if len(raw)>MAX_BYTES: raise MapperProfileError('canonical mapper profile exceeds64KiB')
         for name,item in dict(canonical_bytes=raw,sha256=sha256(raw).hexdigest(),vehicle_configuration=own['vehicle_configuration'],
-                calibration_profile_sha256=own['calibration_profile_sha256'],capture_timing=timing,localization=localization,catalog_policy=catalog_policy,survey=survey,sensors=sensors,pipeline=pipeline,
+                calibration_profile_sha256=own['calibration_profile_sha256'],capture_timing=timing,localization=localization,catalog_policy=catalog_policy,survey=survey,rolling_roi=rolling,sensors=sensors,pipeline=pipeline,
                 targets=target_values,parking_aisles=aisle_values,stopping=stopping,declared_motion_qualified=own['motion_qualified']).items():
             object.__setattr__(self,name,item)
 

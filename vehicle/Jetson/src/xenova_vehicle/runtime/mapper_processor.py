@@ -58,7 +58,8 @@ class ResidentMapperProcessor:
             from .mapper_profile import MapperProfile
             from .mapper_sensor_state import MapperSensorState
             self._config=MapperProfile.from_bytes(mapper_profile_bytes)
-            self._accepted=ResidentPerception(profile_bytes,binding,pipeline_profile=self._config.pipeline,targets=self._config.targets)
+            self._accepted=ResidentPerception(profile_bytes,binding,pipeline_profile=self._config.pipeline,
+                targets=self._config.targets,rolling_policy=self._config.rolling_roi)
             if source_policy is None or clock_policy is None:raise ValueError('mapper requires the original source/clock policies')
             source_policy.check_profile(self._accepted.calibration)
             self._config.check(self._accepted.calibration,vehicle_configuration=source_policy.configuration,
@@ -197,7 +198,7 @@ class ResidentMapperProcessor:
             described=True
             request=owner.queue_checkpoint(job,now_us=now,scene=descriptor)
             coordinator.adopt_freeze(request,current_tile_references=refs,current_hazard_revision=hazard,
-                now_j_us=self.clock(),all_tiles=snapshot.all_tiles,mapper_state=snapshot.mapper_state_ref)
+                now_j_us=self.clock(),all_tiles=snapshot.full_tiles(),mapper_state=snapshot.mapper_state_ref)
         except (SceneError,MappingNotReady,CatalogNotReady,MapCheckpointNotReady,PersistenceError):
             if request is not None:
                 owner.cancel_unoffered_checkpoint(request,now_us=self.clock())
@@ -360,7 +361,8 @@ class ResidentMapperProcessor:
                 motion_qualified=config.motion_qualified and config.localization_configured,
                 needed_region_factory=needed,cycle_bound_us=config.stopping.cycle_bound_us,
                 completion_bound_us=config.stopping.completion_bound_us,
-                **({} if self._mapping_draft is None else dict(evidence_observer=self._mapping_draft.observer)),**localization)
+                **({} if self._mapping_draft is None else dict(evidence_observer=self._mapping_draft.observer,
+                    roi_reframe=self._mapping_draft.roi_reframe)),**localization)
             if self._mapping_draft is not None:
                 self._mapping_draft=self._mapping.finish_frame(self._mapping_draft,result,now_us=self.clock())
                 adopt_metric=self._mapping_draft.ready;mapping_reason=self._mapping_draft.reason
