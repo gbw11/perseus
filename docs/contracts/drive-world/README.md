@@ -176,7 +176,11 @@ Gateway binary relay가 보존하고, target은 경로 채택 후에만 근거�
 다른 도로 revision에서 경로 자체가 검증돼도 과거 revision의 통과 근거는 가져오지 않는다.
 
 새 feature11/15 profile의 `WorldSnapshot`은 major1/minor2이며,
-`DriveState`·`DriveLink`는 major2/state_features7이다.
+`DriveState`·`DriveLink`는 major2다. State의 기본 feature는7이며, tag33의 원 차로 의도·basis를 포함하면15다.
+legacy0/1의 NONE 전진 경로는 기존 전진 추종·종단 오차 합산과 정지 경로 검사를 유지한다.
+명시 signed 검색으로 만든 경로와 새 lane profile은 segment별 progress·전후진·방향 gate를
+사용한다. 이 호환 경로는 legacy AUTO에서 후진 State를 승인하거나 새 방향 권한을 만들지 않는다.
+
 nested `VehicleSample`·`MissionGrant`는 major1을 유지한다. A/B의 `lattice`·`engine`·`lattice_app`과 C/Python 생성물·공용 codec,
 이를 실제로 로드한 Gateway binary 수신 프로세스를 같은 지원 후보로 맞춘다. 옛 Gateway는
 모르는 선택 필드를 버리므로 새 통과 근거를 보존하는 혼합 실행은 지원하지 않는다.

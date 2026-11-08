@@ -152,7 +152,9 @@ int engine_state(void *pointer,uint8_t *out,size_t cap){
  if(p->merge_passed_reference_revision&&p->merge_passed_reference_revision==s->reference_revision){
   s->has_merge_passed_reference_revision=true;s->merge_passed_reference_revision=p->merge_passed_reference_revision;
  }
- s->vehicle_sequence=2;s->calculation_sequence=e->completed;s->tracker_index=e->tracker.index;s->complete=true;
+ dw_vehicle observed;
+ if(dw_vehicle_latest(&e->odometry,&observed)){free(s);(void)de_path_release(e,h);return -1;}
+ s->vehicle_sequence=observed.sequence;s->calculation_sequence=e->completed;s->tracker_index=e->tracker.index;s->complete=true;
  if(s->has_mission)s->mission.active_segment=e->tracker.segment;
  strcpy(s->message_id,"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");strcpy(s->calibration,"encoder-lab-1");
  strcpy(s->map_epoch,"33333333-3333-4333-8333-333333333333");s->observation_seq=1;
