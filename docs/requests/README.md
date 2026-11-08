@@ -22,12 +22,12 @@ Jetson의 별도 broker 자격 공급은 각 요청서의 현재 본문에서 �
 
 | 현재 요청서 | 담당 | 이번 최소 연결 밖의 주요 작업 |
 |---|---|---|
-| [Gateway 직접 구현·공동 연동](20261029-request-gateway.md) | 박신영 / 플랫폼·Gateway | G1 client/UDS·bounded 이력, G2 실제 lattice/path 연결, G3 선택 feedback-2·odom 제공. 실제 Worker·mapper·장치/차량 공동 수락 전 |
+| [Gateway 직접 구현·공동 연동](20261029-request-gateway.md) | 박신영 / 플랫폼·Gateway | G1 client/UDS·bounded 이력, G2 실제 lattice/path 연결, 신규 [feedback-3](../contracts/gateway-feedback-3.md) 원 clock/기한·encoder/STOP/HOLD. 실제 Worker·mapper·MCU/차량 공동 수락 전 |
 | [Recovery Worker](20261029-request-recovery-worker.md) | Worker·Engine | D01 건강 분류·episode 회복, D03 원 결과 수습·전체 복구 연동 |
 | [Linux·Agent](20261029-request-linux-agent.md) | Linux 엔지니어·Agent | D01-L01~L05 자원·서비스 진행·로컬 감독·설치 |
 | [HTTP·Spring·화면](20261029-request-http-spring-ui.md) | FastAPI·Spring·프론트 | Linux 준비 중 조회/실제 정지 연결, 원 key·pending 종단 연결, 수동 입력 세션·명시적 모드/복귀 |
 | [Jetson](20261029-request-jetson.md) | 인지·지도·영상 | 실제 센서·지도/위치·바이너리 snapshot·보존/복원·영상 분리 |
-| [ESP32·차량](20261029-request-esp32.md) | 장치·차량 제어 | 실제 피드백·적용/정지 확인·차량 보정·출력 연속성 |
+| [ESP32·차량](20261029-request-esp32.md) | 장치·차량 제어 | 신규 feedback-3 MCU 생산·원 cutoff/측정센서·보정·정지 수락. [계약](../contracts/gateway-feedback-3.md)/[고정 vector](../contracts/vectors/gateway-feedback-3.json) 제공, 실제 교차시험·MCU·차량 미수락 |
 
 후속 변경은 해당 문서의 현재 작업 카드를 개정하고, 바뀐 요구와 당시 결과는 이력에 옮깁니다. 이미 있는 요청 ID를 재발급하거나 같은 상세 계약을 여러 문서에 복제하지 않습니다. 아래 표는 원 요청의 상세 내용과 이력을 찾는 색인입니다.
 
