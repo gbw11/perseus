@@ -1,0 +1,2 @@
+# 별도 PC 진단 환경 전용. Jetson 제품 requirements에 합치지 않는다.
+streamlit==1.67.0
