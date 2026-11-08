@@ -9,6 +9,7 @@ from hashlib import sha256
 import importlib
 import json
 import math
+import os
 import unittest
 from uuid import UUID
 
@@ -145,6 +146,8 @@ class VirtualSteeringSensorTests(unittest.TestCase):
         self.assertGreater(ideal.sample(0.,source_sample=1,source_us=100).steering_error_mrad,0)
 
 
+@unittest.skipUnless(os.environ.get('XENOVA_TEST_PAIRED_GATEWAY') == '1',
+    'NOT_SELECTED: explicit coherent Gateway/common requires XENOVA_TEST_PAIRED_GATEWAY=1')
 class PairedMeasuredSteeringCodecTests(unittest.TestCase):
     """전체 B08 공통/codec 선택 전용이며 HOLDREADY FSM의 실제 수락을 시험하지 않는다."""
     def test_actual_codec_and_mapped_gateway_keep_virtual_measured_value_and_positive_error(self):

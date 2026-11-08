@@ -8,6 +8,7 @@ StructInjectedFeedbackTests의 packet은 COBS/CRC가 없는 시험 투영이다.
 from dataclasses import FrozenInstanceError
 import importlib
 import math
+import os
 import struct
 import unittest
 from uuid import UUID
@@ -219,6 +220,8 @@ class StructInjectedFeedbackTests(unittest.TestCase):
             owner.sensor_wire(ProjectedCodec, sample, clock_epoch=EPOCH, clock_sequence=7)
 
 
+@unittest.skipUnless(os.environ.get('XENOVA_TEST_PAIRED_GATEWAY') == '1',
+    'NOT_SELECTED: explicit coherent Gateway/common requires XENOVA_TEST_PAIRED_GATEWAY=1')
 class PairedFeedback3CodecTests(unittest.TestCase):
     """전체 B08 Gateway/common을 같이 제공한 선택 실행 전용이다. serial I/O는 없다."""
 

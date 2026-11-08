@@ -10,6 +10,7 @@ from copy import deepcopy
 from dataclasses import replace
 from hashlib import sha256
 import importlib
+import os
 import unittest
 from uuid import UUID
 
@@ -197,6 +198,8 @@ class DevelopmentMotionTests(unittest.TestCase):
         self.assertIsNone(again.pose);self.assertIsNone(again.vehicle)
 
 
+@unittest.skipUnless(os.environ.get('XENOVA_TEST_PAIRED_GATEWAY') == '1',
+    'NOT_SELECTED: explicit coherent Gateway/common requires XENOVA_TEST_PAIRED_GATEWAY=1')
 class PairedGatewayMotionTests(unittest.TestCase):
     """전체 coherent B08 Gateway/common 선택 전용. 실제 Device clock ACK는 별도다."""
     def test_actual_wheel_codec_and_gateway_odometry_feed_original_vehicle_and_capture_admission(self):
