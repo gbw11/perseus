@@ -197,6 +197,8 @@ message DriveLink {
     MissionGrant mission_grant = 7;
     MissionBudgetRequest budget_request = 8;
     MissionBudgetReply budget_reply = 9;
+    // The original Pi SceneGrant, including revocation and original expiry.
+    SceneGrant scene_grant = 10;
   }
 }
 

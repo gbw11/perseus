@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-/* Bounded binary inputs and immutable references. No socket, planner or authority. */
+/* Bounded binary inputs, immutable references and consumption of original authority. No socket or authority issuance. */
 #ifndef XENOVA_DRIVE_WORLD_H
 #define XENOVA_DRIVE_WORLD_H
 #include <stdint.h>
@@ -31,7 +31,7 @@ struct dw_clock { char epoch[37]; int64_t lower_offset_us,upper_offset_us;
  uint64_t expires_pi_us; uint32_t max_error_us; };
 struct dw_trust { char vehicle[65],mapper_boot[37],mapper_instance[37],map_epoch[37],frame_epoch[37],odom_epoch[37],configuration[65],
  calibration[65],primitive[65]; struct dw_clock clock; uint64_t max_live_age_us; };
-struct dw_snapshot { dw_world world; uint64_t received_us,observed_upper_age_us,valid_until_us; };
+struct dw_snapshot { dw_world world; uint64_t received_us,observed_upper_age_us,valid_until_us,scene_generation; };
 struct dw_handle { uint32_t generation; uint8_t slot; uint32_t lease; };
 struct dw_slot { struct dw_snapshot snapshot; atomic_uint generation,leases[8],readers; uint32_t source_revision; bool writing; };
 /* Payload occupancy is inside preallocated storage, never additional RAM.
@@ -39,13 +39,19 @@ struct dw_slot { struct dw_snapshot snapshot; atomic_uint generation,leases[8],r
 struct dw_memory { uint64_t reserved,capacity,used,peak,exhausted,contention; };
 struct dw_pool { atomic_flag lock; atomic_ullong contention; uint64_t exhausted; struct dw_slot slots[DW_MAP_SLOTS]; int current;
  struct dw_trust trust; bool authorized; uint32_t source_revision,next_lease;
- uint32_t next_generation; uint64_t published,rejected,busy,high_water; };
+ uint32_t next_generation;uint64_t published,rejected,busy,high_water;
+ /* Current authority stays separate from WorldTrust and original cell ages. */
+ atomic_bool scene_fenced;bool scene_seen,scene_available;uint64_t scene_generation;
+ xenova_drive_SceneGrant scene;struct dw_trust scene_source;
+ uint8_t scene_wire[1024];size_t scene_wire_size; };
 struct dw_odometry { atomic_flag lock; dw_vehicle samples[DW_ODOM_SLOTS]; size_t next,count,high_water; };
 
 enum dw_result dw_decode(const uint8_t *,size_t,const struct dw_trust *,uint64_t,struct dw_snapshot *);
 enum dw_result dw_vehicle_decode(const uint8_t *,size_t,dw_vehicle *);
 enum dw_result dw_state_decode(const uint8_t *,size_t,dw_state *);
 enum dw_result dw_link_decode(const uint8_t *,size_t,xenova_drive_DriveLink *);
+enum dw_result dw_scene_grant_validate(const xenova_drive_SceneGrant *);
+bool dw_world_retained(const dw_world *);
 /* Typed 입구도 wire와 같은 구조 경계를 검사한다. 현재 권위·시간 수락은 호출자 책임이다. */
 enum dw_result dw_state_validate(const dw_state *);
 enum dw_result dw_mission_grant_validate(const xenova_drive_MissionGrant *);
@@ -65,6 +71,18 @@ enum dw_result dw_pool_source(struct dw_pool *,const struct dw_trust *);
  * 다른 source/정책은 dw_pool_source와 같이 fence한다. 현재 시각의 lease
  * 수락과 clock drift 일관성은 호출자의 책임이며 이 함수는 구조만 검사한다. */
 enum dw_result dw_pool_refresh(struct dw_pool *,const struct dw_trust *);
+/* 입력 owner가 이미 검산한 두 source의 의미 신원 비교. lease 수치/기한은 제외한다. */
+bool dw_trust_same_source(const struct dw_trust *,const struct dw_trust *);
+/* Authenticated Pi state owner only. Duplicate bytes never refresh/revive authority.
+ * The caller checks actual Pi/Gateway identity; this layer binds current mapper trust. */
+enum dw_result dw_pool_scene(struct dw_pool *,const xenova_drive_SceneGrant *,uint64_t);
+void dw_scene_fence(struct dw_pool *);
+enum dw_result dw_pool_trust(struct dw_pool *,struct dw_trust *);
+/* Bounded nonblocking current authority checks. generation0 means live-only.
+ * Returned expiry is the original grant end; snapshot/cell age remains separate. */
+enum dw_result dw_scene_time(struct dw_pool *,const dw_world *,uint64_t,uint64_t *,uint64_t *);
+enum dw_result dw_scene_generation(struct dw_pool *,uint64_t,uint64_t,uint64_t *);
+
 enum dw_result dw_memory_read(struct dw_pool *,struct dw_memory *);
 enum dw_result dw_odom_memory_read(struct dw_odometry *,struct dw_memory *);
 enum dw_result dw_reserve(struct dw_pool *,struct dw_handle *,struct dw_snapshot **);

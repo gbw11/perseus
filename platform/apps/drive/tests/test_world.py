@@ -44,18 +44,20 @@ def test_frozen_protoc_golden_to_python_and_nanopb(probe):
     wire=bytes.fromhex(vector['wire_hex'])
     import hashlib
     assert hashlib.sha256(wire).hexdigest()==vector['sha256']
-    message=decode(wire)
+    # Preserve the old bytes as a historical retained vector, not a new LIVE input.
+    message=schema.WorldSnapshot();message.ParseFromString(wire)
     assert (message.width,message.height,message.sequence)==(4,4,2)
     assert message.occupancy==bytes(16) and message.cell_flags==bytes([3])*16
-    assert message.age_le32==b'\x80\xee\x36\x00'*16
-    assert encode(message)==wire
-    # 보존한 protoc golden은 당시 primitive revision이다. 새 생성기 산출물의
-    # 호환성을 임의 허용하지 않고 현재 asset 참조만 바꾼 정상 입력과 짝지어 확인한다.
-    assert product(probe,wire)['result']==('OK' if message.primitive==fixture.PRIMITIVE else 'CONFIGURATION')
+    assert message.age_le32==bytes.fromhex('80ee3600')*16
+    with pytest.raises(ValueError):decode(wire)
+    with pytest.raises(ValueError):encode(message)
+    assert product(probe,wire)['result']==('VERSION' if message.primitive==fixture.PRIMITIVE else 'CONFIGURATION')
     message.primitive=fixture.PRIMITIVE
-    assert product(probe,encode(message))['result']=='OK'
-    with pytest.raises(ValueError):decode(wire+b'\x08\x01')
-    assert product(probe,wire+b'\x08\x01')['result']=='DECODE'
+    assert product(probe,message.SerializeToString(deterministic=True))['result']=='VERSION'
+    live=fixture.world(width=4,height=4,sequence=2)
+    assert product(probe,encode(live))['result']=='OK'
+    with pytest.raises(ValueError):decode(wire+bytes.fromhex('0801'))
+    assert product(probe,wire+bytes.fromhex('0801'))['result']=='DECODE'
 
 
 @pytest.mark.parametrize('field,value,reason',[

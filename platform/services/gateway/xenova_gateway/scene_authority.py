@@ -64,7 +64,11 @@ def _source(value):
             any(type(item) is not str or not 1<=len(item)<=64 or not item.isascii() for item in value.values())):
         raise SceneAuthorityError('registered scene source')
     for name in ('mapper_boot','mapper_instance','clock_epoch','map_epoch','frame_epoch','odom_epoch'): _uuid(value[name])
-    _sha(value['calibration']); _sha(value['primitive'])
+    # calibration은 원 ClockPolicy/Vehicle/World와 exact-match하는 등록 bundle ID다.
+    # primitive/coverage/frozen 증거처럼 SHA256 형식인 필드와 구분한다.
+    if any(not 33<=ord(char)<=126 for char in value['calibration']):
+        raise SceneAuthorityError('registered calibration ID')
+    _sha(value['primitive'])
     return json.loads(_json(value))
 
 
@@ -101,6 +105,15 @@ class ScenePolicy:
         _uint(self.atlas_cell_capacity,1); _uint(self.summary_max_age_us,1)
         _finite(self.max_anchor_position_m); _finite(self.max_anchor_heading_rad)
         if type(self.stationary) is not StationaryPolicy: raise SceneAuthorityError('explicit stationary policy required')
+
+    @classmethod
+    def from_dict(cls, value):
+        """명시 설치 profile만 읽는다. 정지·오차의 실측 기본값을 만들어내지 않는다."""
+        if (type(value) is not dict or set(value) != set(cls.__dataclass_fields__)
+                or type(value['stationary']) is not dict
+                or set(value['stationary']) != set(StationaryPolicy.__dataclass_fields__)):
+            raise SceneAuthorityError('exact installed scene/stationary policy required')
+        return cls(**{**value, 'stationary': StationaryPolicy(**value['stationary'])})
 
 
 @dataclass(frozen=True)
@@ -276,7 +289,8 @@ class SceneAuthority:
         if type(policy) is not ScenePolicy or not callable(fence_stop): raise SceneAuthorityError('scene policy/fence port required')
         self._source=_source(source); self.policy=policy; self.host=_uuid(pi_host_boot); self.gateway=_uuid(gateway_instance)
         self._fence_stop=fence_stop; self._fence=0; self._pending=None; self._deferred=None
-        self._grant=None; self._published_grant=None; self._summary=None; self._requests=(); self._durable=journal_record
+        self._grant=None; self._published_grant=None; self._negative_grant=None
+        self._summary=None; self._requests=(); self._durable=journal_record
         self._eligible=False; self._commit_hold=False; self.state='NONE'; self.blocked_reason='NO_SCENE'
         self._start_peer=None; self._start_pi=None; self._base_summary=None; self._restart=journal_record is not None
         if journal_record is not None:
@@ -296,8 +310,26 @@ class SceneAuthority:
     @property
     def grant_bytes(self): return self._published_grant
 
+    @property
+    def negative_bytes(self):
+        """실제 RAM 철회의 원 negative event. 재전달은 revision/기한을 바꾸지 않는다."""
+        return self._negative_grant
+
     def _ram_fence(self, reason):
-        self._eligible=False; self._published_grant=None; self.blocked_reason=reason; self._fence+=1; self._fence_stop(reason)
+        published=self._published_grant
+        self._eligible=False; self._published_grant=None; self.blocked_reason=reason; self._fence+=1
+        try:
+            if self._grant is not None:
+                current=decode(self._grant,schema.SceneGrant)
+                # pending COMMIT 본문은 peer가 아직 모를 수 있다. 실제 전달한 원
+                # grant의 key/증거를 철회하고 lifecycle HWM만 pending보다 전진한다.
+                grant=decode(self._grant if published is None else published,schema.SceneGrant)
+                if grant.lifecycle_state not in (3,4):
+                    grant.lifecycle_revision=_uint(max(grant.lifecycle_revision,current.lifecycle_revision)+1,1)
+                    grant.lifecycle_state=3
+                    self._grant=self._negative_grant=encode(grant)
+        finally:
+            self._fence_stop(reason)
 
     def _gate(self, gate, request, now_us):
         if (type(gate) is not SceneGate or gate.generation!=request.expected_generation or gate.stop is None
@@ -309,6 +341,10 @@ class SceneAuthority:
 
     def _reserve(self, request):
         if type(request) is not SceneRequest: raise SceneAuthorityError('original operator reservation required')
+        if self._deferred is not None and self._deferred[0].key==request.key:
+            if self._deferred[0].fingerprint!=request.fingerprint:
+                raise SceneAuthorityError('scene key content conflict')
+            return False
         for row in self._requests:
             if row['key']==request.key:
                 if row['fingerprint']!=request.fingerprint: raise SceneAuthorityError('scene key content conflict')
@@ -325,9 +361,11 @@ class SceneAuthority:
         if len(raw)>4096: raise SceneAuthorityError('current scene4KiB capacity')
         return raw
 
-    def _queue(self, request, gate, grant, state, *, cancel_fence=None):
+    def _queue(self, request, gate, grant, state, *, cancel_fence=None, source_admission_revision=None):
         if self._pending is not None: raise SceneAuthorityError('one unresolved scene journal job')
         row=dict(key=request.key,fingerprint=request.fingerprint,nonce=request.nonce,action=request.action)
+        if source_admission_revision is not None:
+            row['source_admission_revision']=_uint(source_admission_revision,1)
         if not any(old['key']==request.key for old in self._requests): self._requests+=(row,)
         raw=self._record(grant,state)
         fence=gate.cancel_fence if type(gate) is SceneGate else _uint(cancel_fence)
@@ -383,8 +421,8 @@ class SceneAuthority:
             try: self._gate(gate,proposal.request,now_us)
             except SceneAuthorityError: current=False
         if self._deferred is not None:
-            request,cancel,raw=self._deferred; self._deferred=None
-            self._queue(request,None,raw,'REVOKED',cancel_fence=cancel); return None
+            request,cancel,raw,revision=self._deferred; self._deferred=None
+            self._queue(request,None,raw,'REVOKED',cancel_fence=cancel,source_admission_revision=revision); return None
         if not current:
             self._ram_fence('HISTORICAL_SCENE_COMMIT'); return None
         record=json.loads(proposal.record); self._grant=bytes.fromhex(record['grant'])
@@ -400,6 +438,12 @@ class SceneAuthority:
         self._ram_fence('PERSISTENCE_UNKNOWN' if unknown else 'PERSISTENCE_FAILED')
         if not unknown:
             self._pending=None; self.state='FAILED'; self._commit_hold=False
+            if self._deferred is not None:
+                # 알려진 미기록 실패는 _durable을 전진시키지 않는다. 이미 받은 원
+                # revoke를 그 CAS/원 기한으로 이어가며 UNKNOWN은 원 job째 유지한다.
+                request,cancel,raw,revision=self._deferred; self._deferred=None
+                self._queue(request,None,raw,'REVOKED',cancel_fence=cancel,
+                    source_admission_revision=revision)
 
     def _reply(self, raw, lease, now_us):
         if type(lease) is not ClockLease or lease.completed_pi_us is None or lease.source!=self._source or lease.pi_host_boot!=self.host:
@@ -488,15 +532,20 @@ class SceneAuthority:
         _uint(source_admission_revision,1); _uint(cancel_fence)
         if source_admission_revision<grant.source_admission_revision: raise SceneAuthorityError('source revision regressed')
         self._ram_fence('REVOKED'); self.state='REVOKED'; self._restart=True
-        grant.lifecycle_state=3; grant.lifecycle_revision+=1; grant.scene.admission_revision+=1
-        grant.source_admission_revision=source_admission_revision; grant.request_nonce=UUID(request.nonce).bytes
-        grant.survey_deadline_pi_us=min(request.expires_us,grant.valid_until_pi_us)
-        raw=encode(grant)
+        fenced=decode(self._grant,schema.SceneGrant)
+        # 새 operator 요청은 journal/전역 ledger의 별도 사건이다. wire는 peer가
+        # 알고 있는 원 survey key를 가리키며 그 nonce/ref/source/기한을 덮지 않는다.
+        if fenced.lifecycle_revision<=grant.lifecycle_revision:
+            fenced.lifecycle_revision=_uint(grant.lifecycle_revision+1,1)
+        grant=fenced
+        grant.lifecycle_state=3
+        raw=encode(grant); self._grant=self._negative_grant=raw
         # revoke는 STOP 선택이나 내구 기록을 위해 가짜 stationary/session을 만들지 않는다.
         if self._pending is not None:
             if self._deferred is not None: raise SceneAuthorityError('one original deferred revoke')
-            self._deferred=(request,cancel_fence,raw); return None
-        return self._queue(request,None,raw,'REVOKED',cancel_fence=cancel_fence)
+            self._deferred=(request,cancel_fence,raw,source_admission_revision); return None
+        return self._queue(request,None,raw,'REVOKED',cancel_fence=cancel_fence,
+            source_admission_revision=source_admission_revision)
 
     def source_changed(self, source):
         new=_source(source)

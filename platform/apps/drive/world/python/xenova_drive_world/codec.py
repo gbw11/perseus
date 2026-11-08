@@ -273,6 +273,8 @@ def _validate_one(message):
         if any(v>100 and v!=255 for v in message.occupancy) or any(v&~allowed for v in message.cell_flags):raise ValueError('cell encoding')
         if message.required_features&ROAD_PRIORITY and not any(v&CELL_ROAD for v in message.cell_flags):raise ValueError('missing preferred road')
         new=message.required_features in (11,15)
+        if not new and any(flags&2 for flags in message.cell_flags):
+            raise ValueError('legacy world supports live-only cells')
         if new and message.minor!=2:raise ValueError('world minor2 required')
         if new:
             _open_basis([_xy(p) for p in message.reference])

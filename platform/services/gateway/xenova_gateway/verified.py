@@ -62,6 +62,8 @@ class VerifiedDriveMachine(ControlMachine):
         self.untrusted={row['vm_id']:dict(row) for row in value.get('distrusted',[])}
         self._legacy_faults=deque(maxlen=64)
         self.continuous_handoff=False;self._handoff_grace_until=0.;self._resume_auto=False
+        self.durable_write_available=lambda:True
+        self._deferred_authority=None;self._authority_transition_deferred=False
         self._resume_vm=self.active_vm
         # Restart restores preference, never output permission, even if the last
         # process persisted an in-flight command with arm_after_apply=true.
@@ -218,20 +220,35 @@ class VerifiedDriveMachine(ControlMachine):
         if self.transport_ok and not connected:self.block('TRANSPORT_UNAVAILABLE',now)
         self.transport_ok=connected
 
+    def _save_or_defer(self,**fields):
+        """Scene fsync에 actor가 대기하지 않는다. RAM fence 뒤 원 실패시각만 보존한다."""
+        if self.durable_write_available():
+            self.authority.update(**fields);return True
+        old=self._deferred_authority
+        if old is not None and old[0]==self.generation:
+            fields={**fields,**old[1]}
+        self._deferred_authority=self.generation,fields
+        return False
+
     def block(self,reason,now):
         self.output_permitted=False;self._authorized=False;self._countdown=None;self._resume_requested.clear()
         for p in self.prepared.values():p.since=None;p.observed=None
-        try:self.authority.update(rearm_required=True)
+        try:self._save_or_defer(rearm_required=True)
         except AuthorityError:self.failure='AUTHORITY_STORAGE_UNCERTAIN'
         return [ForwardStop(self.generation),Measure('output_blocked',{'reason':reason,'gen':self.generation,'t':now})]
 
     def _fail(self,reason,now):
         self.output_permitted=False;self._authorized=False;self.failure=reason;self._countdown=None
-        try:self.authority.update(phase='FAILED',rearm_required=True,
+        try:self._save_or_defer(phase='FAILED',rearm_required=True,
             failure={'reason':reason,'generation':self.generation,'observed_monotonic_ms':int(now*1000)})
         except AuthorityError:self.failure='AUTHORITY_STORAGE_UNCERTAIN'
 
     def _change(self,mode,vm,reason,now,*,arm=False,manual=None,distrust=None):
+        if not self.durable_write_available():
+            # No control was accepted yet. Re-evaluate current qualifications next
+            # turn rather than replaying a stale transition or issuing a generation.
+            self._authority_transition_deferred=True
+            return [ForwardStop(self.generation)]
         cancelled=[] if reason=='resume_requested' else self._cancel_countdown(reason,now)
         self._countdown=None;self._resume_requested.clear()
         self.output_permitted=False
@@ -259,6 +276,7 @@ class VerifiedDriveMachine(ControlMachine):
         return actions
 
     def on_resume(self,t,requested_by=None,*,expected_generation=None,message_id=None):
+        if not self.durable_write_available():return False
         target=self.active_vm
         auto_return=self.mode is Mode.MANUAL and self.authority.value.get('manual_hold',False) and self.output_permitted
         if self.mode is Mode.SAFE_STOP:
@@ -301,6 +319,10 @@ class VerifiedDriveMachine(ControlMachine):
         return bool(track and track.last_command_t is not None and 0<=now-track.last_command_t<=self.timing.command_timeout_s)
 
     def _output(self,now):
+        if self._authority_transition_deferred:
+            if self._last_stop_t is None or now-self._last_stop_t>=self.timing.stop_resend_s:
+                self._last_stop_t=now;return [ForwardStop(self.generation)]
+            return []
         track=self.apps.get(self.active_app);pending=track.pending if track else None
         for tracks in self.nodes.values():
             for item in tracks.values():item.pending=None
@@ -316,6 +338,12 @@ class VerifiedDriveMachine(ControlMachine):
 
     def step(self,now):
         if not self._started:raise RuntimeError('start required')
+        if self.durable_write_available():
+            self._authority_transition_deferred=False
+            original=self._deferred_authority;self._deferred_authority=None
+            if original is not None and original[0]==self.generation:
+                try:self.authority.update(**original[1])
+                except AuthorityError:self._fail('AUTHORITY_STORAGE_UNCERTAIN',now)
         if self.authority.error:
             self.output_permitted=False;self._authorized=False;self.failure=self.authority.error
             return self._output(now)
@@ -327,6 +355,8 @@ class VerifiedDriveMachine(ControlMachine):
             pending=self.authority.value['pending']
             if pending['host_boot_id']!=self.authority.host or now*1000>=pending['deadline_ms']:
                 self._fail('CONTROL_PUBLISH_UNCONFIRMED' if not self.delivered else 'CONTROL_APPLY_UNCONFIRMED',now)
+            elif not self.durable_write_available():
+                return actions+self._output(now)
             elif self.delivered and app is None:
                 # SAFE_STOP has no app owner. This confirms only publication and
                 # disarmed Gateway state, never an absent guest's application.

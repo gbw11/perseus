@@ -459,7 +459,8 @@ J 네트워크 I/O는 child만 수행하고 Gateway의 MANUAL/ESP STOP은 이 cl
 패키지는 기존 world extra의 Paho2.1.0/protobuf와 내부 `xenova_drive_world`를 사용하며 자동 설치하지 않는다.
 
 private JSON은 같은 euid 소유·group/other 접근 불가·regular 단일 링크 파일(최대8192B)이다.
-정확한 top keys는 `version(1),clock,host,port,username,password,tof_profiles,tof_max_age_us`다.
+기본 top keys는 `version(1),clock,host,port,username,password,tof_profiles,tof_max_age_us`이며,
+선택적 `scene_policy`만 추가할 수 있다.
 계정/암호 파일은 저장소에 넣지 않는다. `host`는 numeric IPv4이고 J broker 인증/ACL·배포 전송 보호는
 운영자가 수락해야 한다. MQTT payload/topic 이름 자체를 publisher 인증 증거로 보지 않는다.
 
@@ -467,6 +468,9 @@ private JSON은 같은 euid 소유·group/other 접근 불가·regular 단일 �
 max_offset_width_us,lease_us,vehicle_max_age_us,lookback_us`다. 실제 등록 ID/보정과 수락한 오차 상한을
 넣어야 하며 코드 예시값을 물리 수락값으로 제공하지 않는다. `device`는 승인 topic component,
 primitive는 hex64다. lease≤1s, lookback≤1s이며 H는 원 Vehicle/ToF/카메라 history를 덮어야 한다.
+`calibration`은 차량 전체 보정 bundle의 등록 ASCII ID(1..64자)이며 SHA256 형식 강제 필드가 아니다.
+ClockPolicy·원 Vehicle·World·Scene의 같은 등록 ID를 exact-match한다. `encoder-lab-1` 같은
+native 시험 프로필은 합성 lab 등록이며 실제 OAK/차량 보정을 수락했다는 뜻이 아니다.
 `tof_profiles`는 최대2개의 `[sensor_id(0/1),leaf_sha256,config_revision]`이고 없는 센서는 빈 목록이다.
 ToF leaf를 전체 vehicle calibration ID와 같다고 가정하지 않는다.
 
@@ -486,3 +490,35 @@ clock owner는 원 nonce/P1/P4/200ms deadline, 동일 source의 연속2회와 in
 J의 returned-lease helper는 원 전체 source와 고정 지원 window만 검증하며 모르는 P4를 만들지 않는다.
 자동 child 재시작 정책은 추가하지 않았고, 명시 restart도 old 실제 종료 확인 후 통로/client만 교체한다.
 실제 broker/프로세스·장비 지연/오차의 운영 수락은 별도 검증한다.
+
+`scene_policy`를 명시하면 같은 Gateway actor에 `SceneAuthority`를 연결한다. exact fields는
+`coverage_profile_sha256,required_sensor_mask,atlas_cell_capacity,max_anchor_position_m,
+max_anchor_heading_rad,summary_max_age_us,stationary`이며, `stationary`는
+`window_us,max_gap_us,max_age_us,metres_per_tick,max_wheel_mps,max_yaw_rps,
+unobserved_wheel_mps,unobserved_yaw_rps`를 모두 요구한다. 설치된 보정·정지 상한을 넣어야 하며
+실측되지 않은 기본값을 제공하지 않는다. 기존 profile과 빈 `tof_profiles`는 그대로 지원한다.
+
+내부 `runner.submit_scene(SceneSubmission)`은 전역 operator 원장이 예약한 원
+`SceneRequest`와 실제 feedback3 ingress의 `SceneGate/MatchedStop`만 받는다. 반환 Future는
+actor 수락이며 fsync 성공·mapper 반영·이동 허가가 아니다. `update_scene_gate`도 원 STOP과
+센서 표본의 시각·식별자를 보존한다. 공개 MQTT/IPC 명령, 전역 operator2 원장과
+FOLLOW/주차 MissionGrant 발급자는 이 포트가 대신하지 않는다. 기존 feedback2/serial write를
+matched STOP으로 변환하지 않으므로 실제 feedback3 producer가 없으면 Scene 승인은 열리지 않는다.
+
+Scene journal은 기존 `AuthorityStore/control.json`에만 저장한다. 추가 thread는 journal worker
+하나, job/result 각 한 개이며 새 transport thread/socket/권위 파일은 없다. actor가 enqueue 전에
+busy를 세우고 worker가 기존 store lock을 반납한 뒤 내린다. 그 사이 provider/전환/내구 feedback은
+원 큐·원 기한으로 지연하고 RAM 철회·현재 입력과 명령 기한·STOP은 계속 처리한다. UNKNOWN/lost
+ack는 원 proposal/commit hold로 남으며 자동 성공이나 새 journal 재시도로 바꾸지 않는다.
+
+내구 완료 grant는 기존 `mapper/<device>/scene.pb`로, VM 사본은 기존 DriveLink state 연결의
+tag10/latest scene slot으로 전달한다. ADMITTED는 실제 원 Mapper APPLIED 뒤에만 VM에 제공한다.
+새 Scene/명시 복원·철회와 실제 RAM negative event는 clock owner의 source 의미 revision을 전진시킨다.
+clock 수학의 원 lease는 유지하고 다음 실제 probe가 새 revision을 확인하기 전 긍정 사용권을 열지 않는다.
+RAM negative는 철회할 원 fullRef/source revision/nonce/시각·frozen 증거를 보존하고 lifecycle revision만
+전진시켜 즉시 전달한다. 재접속·재전달은 revision이나 원 expiry를 연장하지 않는다.
+명시 operator revoke도 같은 원 grant key를 유지한다. 새 철회 요청의 nonce/fingerprint와 실제
+source 의미 revision은 기존 Authority journal의 원 requests row에 별도로 기록한다. pending
+COMMIT 중 철회는 peer에 실제 전달한 본문을 기준으로 하며 미반영 frozen 증거를 끼워 넣지 않는다.
+Scene에 결박된 임무·명령·held plan은 철회/만료 시 제한하되 일반 live-only·MANUAL·기존 A/B 복구는
+Scene 준비를 이유로 일괄 전환하거나 재arm하지 않는다.

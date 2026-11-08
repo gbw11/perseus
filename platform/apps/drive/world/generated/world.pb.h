@@ -462,21 +462,6 @@ typedef struct _xenova_drive_MissionBudgetReply {
     xenova_drive_MissionGrant grant;
 } xenova_drive_MissionBudgetReply;
 
-typedef struct _xenova_drive_DriveLink {
-    uint32_t major;
-    pb_size_t which_payload;
-    union {
-        xenova_drive_ClockProbe probe;
-        xenova_drive_ClockReply clock;
-        xenova_drive_DriveState snapshot;
-        xenova_drive_AcceptedState accepted;
-        xenova_drive_AppliedState applied;
-        xenova_drive_MissionGrant mission_grant;
-        xenova_drive_MissionBudgetRequest budget_request;
-        xenova_drive_MissionBudgetReply budget_reply;
-    } payload;
-} xenova_drive_DriveLink;
-
 typedef PB_BYTES_ARRAY_T(16) xenova_drive_MapperClockProbe_nonce_t;
 typedef struct _xenova_drive_MapperClockProbe {
     uint32_t major;
@@ -533,6 +518,23 @@ typedef struct _xenova_drive_SceneGrant {
     xenova_drive_SceneGrant_restore_checkpoint_sha256_t restore_checkpoint_sha256;
     uint64_t lifecycle_revision;
 } xenova_drive_SceneGrant;
+
+typedef struct _xenova_drive_DriveLink {
+    uint32_t major;
+    pb_size_t which_payload;
+    union {
+        xenova_drive_ClockProbe probe;
+        xenova_drive_ClockReply clock;
+        xenova_drive_DriveState snapshot;
+        xenova_drive_AcceptedState accepted;
+        xenova_drive_AppliedState applied;
+        xenova_drive_MissionGrant mission_grant;
+        xenova_drive_MissionBudgetRequest budget_request;
+        xenova_drive_MissionBudgetReply budget_reply;
+        /* The original Pi SceneGrant, including revocation and original expiry. */
+        xenova_drive_SceneGrant scene_grant;
+    } payload;
+} xenova_drive_DriveLink;
 
 typedef PB_BYTES_ARRAY_T(16) xenova_drive_SurveySummary_request_nonce_t;
 typedef PB_BYTES_ARRAY_T(16) xenova_drive_SurveySummary_survey_id_t;
@@ -990,15 +992,6 @@ extern "C" {
 #define xenova_drive_MissionBudgetReply_result_tag 4
 #define xenova_drive_MissionBudgetReply_reason_tag 5
 #define xenova_drive_MissionBudgetReply_grant_tag 6
-#define xenova_drive_DriveLink_major_tag         1
-#define xenova_drive_DriveLink_probe_tag         2
-#define xenova_drive_DriveLink_clock_tag         3
-#define xenova_drive_DriveLink_snapshot_tag      4
-#define xenova_drive_DriveLink_accepted_tag      5
-#define xenova_drive_DriveLink_applied_tag       6
-#define xenova_drive_DriveLink_mission_grant_tag 7
-#define xenova_drive_DriveLink_budget_request_tag 8
-#define xenova_drive_DriveLink_budget_reply_tag  9
 #define xenova_drive_MapperClockProbe_major_tag  1
 #define xenova_drive_MapperClockProbe_vehicle_tag 2
 #define xenova_drive_MapperClockProbe_device_tag 3
@@ -1037,6 +1030,16 @@ extern "C" {
 #define xenova_drive_SceneGrant_frozen_hazard_revision_tag 23
 #define xenova_drive_SceneGrant_restore_checkpoint_sha256_tag 24
 #define xenova_drive_SceneGrant_lifecycle_revision_tag 25
+#define xenova_drive_DriveLink_major_tag         1
+#define xenova_drive_DriveLink_probe_tag         2
+#define xenova_drive_DriveLink_clock_tag         3
+#define xenova_drive_DriveLink_snapshot_tag      4
+#define xenova_drive_DriveLink_accepted_tag      5
+#define xenova_drive_DriveLink_applied_tag       6
+#define xenova_drive_DriveLink_mission_grant_tag 7
+#define xenova_drive_DriveLink_budget_request_tag 8
+#define xenova_drive_DriveLink_budget_reply_tag  9
+#define xenova_drive_DriveLink_scene_grant_tag   10
 #define xenova_drive_SurveySummary_major_tag     1
 #define xenova_drive_SurveySummary_request_nonce_tag 2
 #define xenova_drive_SurveySummary_survey_id_tag 3
@@ -1339,7 +1342,8 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (payload,accepted,payload.accepted),   5) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (payload,applied,payload.applied),   6) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (payload,mission_grant,payload.mission_grant),   7) \
 X(a, STATIC,   ONEOF,    MESSAGE,  (payload,budget_request,payload.budget_request),   8) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (payload,budget_reply,payload.budget_reply),   9)
+X(a, STATIC,   ONEOF,    MESSAGE,  (payload,budget_reply,payload.budget_reply),   9) \
+X(a, STATIC,   ONEOF,    MESSAGE,  (payload,scene_grant,payload.scene_grant),  10)
 #define xenova_drive_DriveLink_CALLBACK NULL
 #define xenova_drive_DriveLink_DEFAULT NULL
 #define xenova_drive_DriveLink_payload_probe_MSGTYPE xenova_drive_ClockProbe
@@ -1350,6 +1354,7 @@ X(a, STATIC,   ONEOF,    MESSAGE,  (payload,budget_reply,payload.budget_reply), 
 #define xenova_drive_DriveLink_payload_mission_grant_MSGTYPE xenova_drive_MissionGrant
 #define xenova_drive_DriveLink_payload_budget_request_MSGTYPE xenova_drive_MissionBudgetRequest
 #define xenova_drive_DriveLink_payload_budget_reply_MSGTYPE xenova_drive_MissionBudgetReply
+#define xenova_drive_DriveLink_payload_scene_grant_MSGTYPE xenova_drive_SceneGrant
 
 #define xenova_drive_LaneGeometry_FIELDLIST(X, a) \
 X(a, STATIC,   REQUIRED, FIXED32,  lane_id,           1) \

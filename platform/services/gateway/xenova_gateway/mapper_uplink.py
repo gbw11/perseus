@@ -53,6 +53,7 @@ class UplinkProfile:
     password: str | None = field(repr=False)
     tof_profiles: tuple = ()
     tof_max_age_us: int = 500000
+    scene_policy: object = None
 
     def __post_init__(self):
         if type(self.policy) is not ClockPolicy or type(self.host) is not str or str(ipaddress.IPv4Address(self.host)) != self.host:
@@ -63,6 +64,10 @@ class UplinkProfile:
         if self.password is not None and (type(self.password) is not str or len(self.password) > 1024):
             raise ValueError('J_PROFILE_CREDENTIAL')
         integer(self.tof_max_age_us, 1, 1000000)
+        if self.scene_policy is not None:
+            from .scene_authority import ScenePolicy
+            if type(self.scene_policy) is not ScenePolicy:
+                raise ValueError('J_PROFILE_SCENE')
         if self.tof_profiles and self.policy.lookback_us < self.tof_max_age_us:
             raise ValueError('J_PROFILE_TOF_LOOKBACK')
         if type(self.tof_profiles) is not tuple or len(self.tof_profiles) > 2:
@@ -88,14 +93,16 @@ class UplinkProfile:
         from .ipc_contract import decode as private_json
         value = private_json(raw)
         keys = {'version', 'clock', 'host', 'port', 'username', 'password', 'tof_profiles', 'tof_max_age_us'}
-        if set(value) != keys or type(value['version']) is not int or value['version'] != 1:
+        if set(value) not in (keys, keys | {'scene_policy'}) or type(value['version']) is not int or value['version'] != 1:
             raise ValueError('J_PROFILE_FIELDS')
         if type(value['clock']) is not dict or set(value['clock']) != set(ClockPolicy.__dataclass_fields__):
             raise ValueError('J_PROFILE_CLOCK')
         if type(value['tof_profiles']) is not list or any(type(row) is not list for row in value['tof_profiles']):
             raise ValueError('J_PROFILE_TOF')
+        from .scene_authority import ScenePolicy
+        scene = None if value.get('scene_policy') is None else ScenePolicy.from_dict(value['scene_policy'])
         return cls(ClockPolicy(**value['clock']), value['host'], value['port'], value['username'], value['password'],
-            tuple(tuple(row) for row in value['tof_profiles']), value['tof_max_age_us'])
+            tuple(tuple(row) for row in value['tof_profiles']), value['tof_max_age_us'], scene)
 
 
 def frame(header, body):
@@ -386,6 +393,7 @@ class GatewayMapperUplink:
         self.closed = False
         self._tof_lock = threading.Lock()
         self._tof_inputs = {}
+        self.scene_reply = None
 
     def start(self):
         if not sys.platform.startswith('linux') or self.process is not None or self.closed:
@@ -473,16 +481,35 @@ class GatewayMapperUplink:
 
     def publish_scene_after_commit(self, raw):
         """현재 durable scene owner의 원 SceneGrant만 전달한다. 이 함수는 내구 승인 producer가 아니다."""
+        return self._publish_scene(raw)
+
+    def publish_scene_after_fence(self, raw):
+        """원 owner의 실제 RAM negative event. DB 성공이나 긍정 사용권을 발급하지 않는다."""
+        if decode(raw,schema.SceneGrant).lifecycle_state not in (3,4):
+            raise ValueError('J_SCENE_NEGATIVE_REQUIRED')
+        return self._publish_scene(raw)
+
+    def _publish_scene(self, raw):
         if type(raw) is not bytes or len(raw) > 1024:
             raise ValueError('J_SCENE_SIZE')
         value = decode(raw, schema.SceneGrant)
+        negative = value.lifecycle_state in (3,4)
         p = self.profile.policy
         if ((value.vehicle, value.pi_host_boot, value.gateway_instance, value.mapper_device) !=
                 (p.vehicle, self.host_boot, self.gateway_instance, p.device)
                 or (value.configuration, value.calibration, value.primitive) != (p.configuration, p.calibration, p.primitive)
-                or value.source_admission_revision != self.owner.source_revision
+                or not negative and value.source_admission_revision != self.owner.source_revision
                 or not value.issued_pi_us <= self.clock() < value.valid_until_pi_us):
             raise ValueError('J_SCENE_ORIGIN')
+        if negative and value.source_admission_revision != self.owner.source_revision:
+            # RAM 철회는 이미 전달한 원 권한을 가리킨다. 의미 counter의 전진이나
+            # numeric lease 상실은 그 exact negative event를 버릴 이유가 아니다.
+            if self.last_scene is None: raise ValueError('J_SCENE_NEGATIVE_PARENT')
+            parent=decode(self.last_scene[2],schema.SceneGrant)
+            expected=schema.SceneGrant();expected.CopyFrom(parent)
+            expected.lifecycle_state=value.lifecycle_state;expected.lifecycle_revision=value.lifecycle_revision
+            if (value.lifecycle_revision<parent.lifecycle_revision or encode(expected)!=raw):
+                raise ValueError('J_SCENE_NEGATIVE_PARENT')
         trust = self.owner.trust(self.clock())
         if value.lifecycle_state in (0, 1, 2) and (trust is None or (value.map_epoch, value.frame_epoch, value.odom_epoch)
                 != (trust.map_epoch, trust.frame_epoch, trust.odom_epoch)):
@@ -494,6 +521,15 @@ class GatewayMapperUplink:
             if value.lifecycle_revision == self.last_scene[1]:
                 return False
         self.last_scene = identity, value.lifecycle_revision, raw
+        return self._offer('scene', 'SCENE_GRANT', raw, value.valid_until_pi_us)
+
+    def republish_scene(self):
+        """원 SceneGrant를 재전달한다. 재접속이나 주기 전송은 원 기한을 갱신하지 않는다."""
+        if self.last_scene is None: return False
+        raw = self.last_scene[2]; value = decode(raw, schema.SceneGrant)
+        if (value.lifecycle_state not in (3,4) and value.source_admission_revision != self.owner.source_revision
+                or not value.issued_pi_us <= self.clock() < value.valid_until_pi_us):
+            return False
         return self._offer('scene', 'SCENE_GRANT', raw, value.valid_until_pi_us)
 
     def tick(self, provider):
@@ -529,6 +565,10 @@ class GatewayMapperUplink:
                     if lease is not None:
                         self.failure = None
                         provider.world_failure = None
+                        if self.scene_reply is not None:
+                            _, reply_raw, _ = parse_candidate(body)
+                            try: self.scene_reply(reply_raw, lease, now)
+                            except ValueError: self.counts['scene_reply_rejected'] += 1
                 except ValueError:
                     self.counts['clock_rejected'] += 1
             plan = self.owner.plan(now, self.uplink_instance)

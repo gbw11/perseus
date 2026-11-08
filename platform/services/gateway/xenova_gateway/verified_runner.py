@@ -36,6 +36,9 @@ class VerifiedGatewayRunner(GatewayRunner):
         self.provider=GatewayProvider(self)
         self.drive_link=None
         self.mapper_uplink=None
+        self.scene_runtime=None
+        self._durable_events=deque(maxlen=8);self._durable_feedback=deque(maxlen=64)
+        self.durable_event_dropped=self.durable_feedback_dropped=0
         self._pending_stop = None
         self._deferred_drive=None;self.serial_deferred=0
         self._manual_activation=None;self.manual_withheld=0;self._manual_stop_try=0.
@@ -59,6 +62,7 @@ class VerifiedGatewayRunner(GatewayRunner):
         return {'feedback_supported':False,'accepted':None,'applied':None,'physical_stop':None}
 
     def _provider_once(self):
+        if not self._durable_available():return
         import queue
         from .provider import ProviderError
         from .ipc_contract import VERSION
@@ -96,6 +100,7 @@ class VerifiedGatewayRunner(GatewayRunner):
         return result
 
     def _transition_once(self):
+        if not self._durable_available():return
         import queue
         try:action,request_id,arguments,result=self._transitions.get_nowait()
         except queue.Empty:return
@@ -172,6 +177,10 @@ class VerifiedGatewayRunner(GatewayRunner):
         elif (message.type in (RESUME_REQUESTED,RESUME_CANCEL_REQUESTED) and message.topic in (CONSOLE_RESUME,topics.app_events('interaction'))
               and not self._output_broken and self._control_message_id is not None
               and envelope.get('causation_id')==self._control_message_id):
+            if message.type==RESUME_REQUESTED and not self._durable_available():
+                if len(self._durable_events)==self._durable_events.maxlen:self.durable_event_dropped+=1
+                else:self._durable_events.append((t,message))
+                return
             handler=self.machine.on_resume if message.type==RESUME_REQUESTED else self.machine.on_cancel_resume
             requested_by=message.payload.get('requested_by')
             handler(t,requested_by if isinstance(requested_by,str) else None,
@@ -205,6 +214,7 @@ class VerifiedGatewayRunner(GatewayRunner):
         machine=WarmDriveMachine if self.readiness_profile=='warm-drive-1' else VerifiedDriveMachine
         self.machine=machine(vm_ids=self.pair,authority=self.authority,bindings=self.bindings,
             clock=self._clock,timing=self._timing)
+        self.machine.durable_write_available=self._durable_available
         self.machine.continuous_handoff=self.drive_link is not None
         retained=self._client.latest(topics.vehicle_control())
         if retained is not None:
@@ -337,6 +347,10 @@ class VerifiedGatewayRunner(GatewayRunner):
             return
         if isinstance(action,ForwardDrive):
             if not self.machine.output_permitted or action.generation!=self.machine.generation or not source:return
+            if self.scene_runtime is not None and not self.scene_runtime.command_allowed(source,int(now*1e6)):
+                self.serial_context_rejected+=1;self._deferred_drive=None
+                self._submit(ForwardStop(action.generation),wait_for_stop=False)
+                return
             row=self.bindings.current(source['vm_id'],now)
             if (not row or row['execution_id']!=source['execution_id'] or
                 not self.bindings.accepts(source['vm_id'],source['boot_id'],source['agent_instance_id'],now,app=source['app_id']) or
@@ -443,6 +457,10 @@ class VerifiedGatewayRunner(GatewayRunner):
         self._finish_stop()
         if self.drive_link is not None:self.drive_link.tick()
         if self.mapper_uplink is not None:self.mapper_uplink.tick(self.drive_link)
+        if self.scene_runtime is not None:self.scene_runtime.tick()
+        if self._durable_available():
+            for _ in range(len(self._durable_events)):
+                self._feed(*self._durable_events.popleft())
         import queue
         try:first=self._queue.get(timeout=timeout_s) if timeout_s>0 else self._queue.get_nowait()
         except queue.Empty:first=None
@@ -460,10 +478,37 @@ class VerifiedGatewayRunner(GatewayRunner):
             self._deferred_drive=None;self._submit(held[0])
         events=getattr(self._sink,'feedback_events',lambda:[])()
         self._manual_observe(events)
+        if not self._durable_available():
+            for event in events:
+                if len(self._durable_feedback)==self._durable_feedback.maxlen:self.durable_feedback_dropped+=1
+                else:self._durable_feedback.append(dict(event))
+            return
+        events=[*self._durable_feedback,*events];self._durable_feedback.clear()
         try:self.provider.capture(events)
         except AuthorityError:
             self.machine.output_permitted=False;self.machine._authorized=False
             self._submit(ForwardStop(self.machine.generation))
+
+    def _durable_available(self):
+        return self.scene_runtime is None or self.scene_runtime.durable_available
+
+    def configure_scene(self,policy):
+        """명시 설치 profile의 actual owner를 연결한다. 기본은 기존 live-only 동작이다."""
+        if self.scene_runtime is not None or self.readiness_profile!='warm-drive-1' or self.drive_link is None or self.mapper_uplink is None:
+            raise ValueError('one warm scene runtime with actual mapper/state owners required')
+        from .scene_runtime import GatewaySceneRuntime
+        self.scene_runtime=GatewaySceneRuntime(self,policy)
+        self.mapper_uplink.scene_reply=self.scene_runtime.accept_reply
+
+    def submit_scene(self,submission):
+        """operator2 원 예약 결과와 feedback3 gate용 내부 포트. 공개 IPC가 아니다."""
+        if self.scene_runtime is None:raise ValueError('scene profile not configured')
+        return self.scene_runtime.submit(submission)
+
+    def update_scene_gate(self,gate):
+        """실제 feedback/operator owner가 만든 원 gate만 전달한다."""
+        if self.scene_runtime is None:raise ValueError('scene profile not configured')
+        self.scene_runtime.update_gate(gate)
 
     def submit_mapper_tof(self,raw):
         """실제 센서 owner의 원 bytes용 유한 입력. source/clock 승인은 actor 회차에서 한다."""
@@ -472,6 +517,10 @@ class VerifiedGatewayRunner(GatewayRunner):
     def publish_mapper_scene_after_commit(self,raw):
         """내구 scene owner의 완료 뒤 actor에서 호출한다. 여기서 scene 권한을 발급하지 않는다."""
         return False if self.mapper_uplink is None else self.mapper_uplink.publish_scene_after_commit(raw)
+
+    def publish_mapper_scene_after_fence(self,raw):
+        """현재 Scene owner의 실제 negative event는 원 fsync 완료보다 먼저 전달할 수 있다."""
+        return False if self.mapper_uplink is None else self.mapper_uplink.publish_scene_after_fence(raw)
 
     def run(self,stop,*,connect_wait_s=5):
         try:
@@ -484,5 +533,8 @@ class VerifiedGatewayRunner(GatewayRunner):
         try:
             if self.machine:self._submit(ForwardStop(self.machine.generation))
         finally:
-            self._sink.close()
-            self._finish_stop()
+            try:
+                self._sink.close()
+                self._finish_stop()
+            finally:
+                if self.scene_runtime is not None:self.scene_runtime.close()

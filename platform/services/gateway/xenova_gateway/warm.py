@@ -20,6 +20,7 @@ class WarmDriveMachine(VerifiedDriveMachine):
         self.states=StateCopies(self)
         from xenova_mqtt.manual_session import SessionEvidence
         self.manual_input=SessionEvidence();self.movement=None
+        self._deferred_abandon=None
 
     def on_manual_input(self,payload,received):
         from xenova_mqtt.manual_session import parse
@@ -37,6 +38,9 @@ class WarmDriveMachine(VerifiedDriveMachine):
         return super().block(reason,now)
 
     def _abandon(self,reason):
+        if not self.durable_write_available():
+            if self._deferred_abandon is None:self._deferred_abandon=self.generation,reason
+            return True
         try:self.authority.abandon_preparations(reason)
         except AuthorityError as exc:
             self.output_permitted=False;self._authorized=False
@@ -64,6 +68,8 @@ class WarmDriveMachine(VerifiedDriveMachine):
         return super()._ready(vm,app,now,held)
 
     def _change(self,mode,vm,reason,now,*,arm=False,distrust=None):
+        if not self.durable_write_available():
+            return super()._change(mode,vm,reason,now,arm=arm,distrust=distrust)
         from .machine import Mode
         if not self._abandon('CONTROL_CONTEXT_CHANGED'):return [ForwardStop(self.generation)]
         manual=None
@@ -174,6 +180,9 @@ class WarmDriveMachine(VerifiedDriveMachine):
         return self._qualified(vm,app,now)
 
     def step(self,now):
+        if self.durable_write_available() and self._deferred_abandon is not None:
+            generation,reason=self._deferred_abandon;self._deferred_abandon=None
+            if generation==self.generation:self._abandon(reason)
         # Input/session loss is an output protection event, not a VM failure.
         # Clear the selected control so a new driver session can prepare without
         # first satisfying the old session's movement gate. No automatic rearm.

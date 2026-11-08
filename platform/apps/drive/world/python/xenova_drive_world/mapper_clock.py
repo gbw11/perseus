@@ -383,6 +383,31 @@ class MapperClockOwner:
         self._blocked = None
         self._streak = 0
         self._lease = None
+        self._scene_context_key = None
+        self._scene_revision_exhausted = False
+
+    def advance_scene_context(self, key):
+        """실제 Pi Scene owner의 의미 변경을 반영한다. 재전달은 같은32B key를 쓴다.
+
+        단일 actor만 호출한다. 새 Scene/명시 복원/철회의 key는 원 source·Scene·요청에
+        결박한다. 원 clock lease·오차·drift·time revision은 그대로 남기며, 다음 실제
+        probe만 새 admission revision의 ClockLease를 만들 수 있다.
+        """
+        if type(key) is not bytes or len(key) != 32:
+            raise MapperClockError('CLOCK_SCENE_CONTEXT_KEY')
+        if self._scene_revision_exhausted:
+            raise MapperClockError('CLOCK_SOURCE_REVISION_EXHAUSTED')
+        if key == self._scene_context_key:
+            return self.source_revision
+        if self.source_revision >= U63_MAX:
+            self.pending = None
+            self._scene_revision_exhausted = True
+            raise MapperClockError('CLOCK_SOURCE_REVISION_EXHAUSTED')
+        self.source_revision = integer(self.source_revision + 1, 1)
+        self._scene_context_key = key
+        # 이전 의미의 outstanding reply는 새 Scene을 수락할 근거가 아니다.
+        self.pending = None
+        return self.source_revision
 
     def set_vehicle(self, raw, now_us):
         sample = decode(raw, schema.VehicleSample)
@@ -404,13 +429,15 @@ class MapperClockOwner:
         self.vehicle = sample
 
     def trust(self, now_us):
-        if self._lease is None:
+        if self._lease is None or self._scene_revision_exhausted:
             return None
         value = decode(self._lease.trust_bytes, schema.WorldTrust)
         return value if now_us < value.expires_pi_us else None
 
     def plan(self, now_us, pi_client_instance):
         integer(now_us, 1)
+        if self._scene_revision_exhausted:
+            return None
         if self.pending is not None:
             if now_us < self.pending.expires_us:
                 return None

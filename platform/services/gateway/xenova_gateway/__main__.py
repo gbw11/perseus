@@ -42,9 +42,9 @@ def open_sink(settings: GatewaySettings) -> Sink:
     return LimitedSink(sink,limits,__import__('time').monotonic()) if limits else sink
 
 
-def _release_lease(lease,sink,ipc,link=None,uplink=None):
+def _release_lease(lease,sink,ipc,link=None,uplink=None,scene=None):
     """A live device/I/O owner retains the process lease until process exit."""
-    if any(getattr(owner,'thread',None) is not None and owner.thread.is_alive() for owner in (sink,ipc,link)):
+    if any(getattr(owner,'thread',None) is not None and owner.thread.is_alive() for owner in (sink,ipc,link,scene)):
         raise AuthorityError('Gateway owner termination unconfirmed; lease retained')
     if uplink is not None and uplink.process is not None and uplink.process.is_alive():
         raise AuthorityError('Gateway J process termination unconfirmed; lease retained')
@@ -128,6 +128,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         j_profile=UplinkProfile.load(settings.mapper_uplink_profile)
                         uplink=GatewayMapperUplink(j_profile,host,client.identity.agent_instance_id).start()
                         runner.mapper_uplink=uplink
+                        if j_profile.scene_policy is not None:runner.configure_scene(j_profile.scene_policy)
                     except (OSError,ValueError) as error:
                         # J 미설정/실패는 실제 clock trust를 만들지 않는다. 로컬 MANUAL/STOP은 유지한다.
                         world_failure=error
@@ -148,7 +149,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                        sink.close if sink and runner is None else None,
                        uplink.close if uplink else None,
                        (lambda:monitor.join(timeout=1)) if monitor else None,
-                       (lambda:_release_lease(lease,sink,ipc,link,uplink)) if lease else None,diagnostics.close):
+                       (lambda:_release_lease(lease,sink,ipc,link,uplink,
+                           None if runner is None else getattr(runner,'scene_runtime',None))) if lease else None,diagnostics.close):
             if finish is not None:
                 try:finish()
                 except Exception as error:cleanup_errors.append(error)
