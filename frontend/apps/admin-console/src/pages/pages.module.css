@@ -1299,6 +1299,22 @@ button.chip:hover:not(.chipOn) {
   border-radius: inherit;
   background: var(--vm-accent);
 }
+.segmentedMetricTrack {
+  position: relative;
+}
+.segmentedMetricTrack i {
+  position: absolute;
+  inset: 0 auto 0 0;
+}
+.segmentedMetricTrack .committedSegment {
+  background: color-mix(in srgb, var(--vm-accent) 28%, var(--x-surface-3));
+}
+.segmentedMetricTrack .reservedSegment {
+  background: color-mix(in srgb, var(--vm-accent) 58%, var(--x-surface-3));
+}
+.segmentedMetricTrack .usedSegment {
+  background: var(--vm-accent);
+}
 .vmCardFoot {
   display: flex;
   align-items: end;
