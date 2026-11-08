@@ -48,6 +48,39 @@ PB_BIND(xenova_drive_AppliedState, xenova_drive_AppliedState, 2)
 PB_BIND(xenova_drive_DriveLink, xenova_drive_DriveLink, 4)
 
 
+PB_BIND(xenova_drive_EpisodeCore, xenova_drive_EpisodeCore, 2)
+
+
+PB_BIND(xenova_drive_EpisodeProgress, xenova_drive_EpisodeProgress, AUTO)
+
+
+PB_BIND(xenova_drive_EpisodeAcceptanceRef, xenova_drive_EpisodeAcceptanceRef, AUTO)
+
+
+PB_BIND(xenova_drive_EpisodeSnapshot, xenova_drive_EpisodeSnapshot, 2)
+
+
+PB_BIND(xenova_drive_EpisodeSourceContext, xenova_drive_EpisodeSourceContext, 2)
+
+
+PB_BIND(xenova_drive_EpisodeRequest, xenova_drive_EpisodeRequest, 2)
+
+
+PB_BIND(xenova_drive_EpisodeReceipt, xenova_drive_EpisodeReceipt, 2)
+
+
+PB_BIND(xenova_drive_EpisodeStatus, xenova_drive_EpisodeStatus, 2)
+
+
+PB_BIND(xenova_drive_PiAbsoluteMeter, xenova_drive_PiAbsoluteMeter, AUTO)
+
+
+PB_BIND(xenova_drive_StopFacts, xenova_drive_StopFacts, 2)
+
+
+PB_BIND(xenova_drive_DriveControlFacts, xenova_drive_DriveControlFacts, 2)
+
+
 PB_BIND(xenova_drive_LaneGeometry, xenova_drive_LaneGeometry, 2)
 
 
@@ -102,4 +135,12 @@ PB_BIND(xenova_drive_SurveySummary, xenova_drive_SurveySummary, AUTO)
 PB_BIND(xenova_drive_TofObservation, xenova_drive_TofObservation, 2)
 
 
+
+#ifndef PB_CONVERT_DOUBLE_FLOAT
+/* On some platforms (such as AVR), double is really float.
+ * To be able to encode/decode double on these platforms, you need.
+ * to define PB_CONVERT_DOUBLE_FLOAT in pb.h or compiler command line.
+ */
+PB_STATIC_ASSERT(sizeof(double) == 8, DOUBLE_MUST_BE_8_BYTES)
+#endif
 

@@ -176,6 +176,7 @@ int main(int argc,char **argv){
  if(!strncmp(scenario,"observed-",9)){
   struct xd_inputs observed={.connected=true};
   strcpy(observed.control.sender,"dom0-gateway");strcpy(observed.control.instance,gateway_id);
+  if(!strcmp(scenario,"observed-wrong-sender"))strcpy(observed.control.sender,"gateway");
   if(!strcmp(scenario,"observed-disconnect"))observed.connected=false;
   if(!strcmp(scenario,"observed-control-busy"))observed.control.error=-EBUSY;
   if(!strcmp(scenario,"observed-control-error"))observed.control.error=-EIO;
@@ -284,7 +285,7 @@ def test_entry_clock_excludes_known_decode_context_work_without_renewing_lease(n
 @pytest.mark.parametrize('scenario,expected',[
     ('observed-stable',0),('observed-disconnect',-11),
     ('observed-control-busy',-11),('observed-control-error',-11),
-    ('observed-new-gateway',-11),
+    ('observed-new-gateway',-11),('observed-wrong-sender',-11),
 ])
 def test_actual_context_preserves_only_same_observed_gateway_until_original_expiry(native,scenario,expected):
     enabled,run=native;result=run(scenario)

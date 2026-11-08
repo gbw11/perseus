@@ -13,23 +13,30 @@ LOCALIZATION_BOUNDS=8
 WORLD_FEATURES=15
 STATE_FEATURES=7
 STATE_TASK_REFERENCE=8
-STATE_KNOWN_FEATURES=STATE_FEATURES|STATE_TASK_REFERENCE
+STATE_EPISODE=16
+STATE_KNOWN_FEATURES=STATE_FEATURES|STATE_TASK_REFERENCE|STATE_EPISODE
 CELL_ROAD=8
 MAX_U63=(1<<63)-1
 NIL_UUID=bytes(16)
 _STR64={'vehicle','configuration','calibration','primitive','reference_id','reason','device','mapper_device'}
 _UUID_BYTES={'admission_id','survey_id','mission_id','scene_admission_id','operator_request_nonce','sensor_instance',
              'request_nonce','nonce','pi_host_boot','gateway_instance','owner_vm','owner_execution','app_instance',
-             'driver_session'}
+             'driver_session','episode_id','birth_snapshot_id','meter_epoch','registry_epoch',
+             'origin_vm','origin_execution','origin_app_instance','expected_registry_epoch',
+             'expected_episode_id','phase_state_message_id','state_message_id',
+             'source_vm','source_execution','source_app_instance'}
 _REPEATED_CAPS={'DriveState.path':512,'DriveState.segments':3,'LaneModel.lanes':2,
     'LaneGeometry.centerline':32,'LaneModel.divider':32,'WorldSnapshot.parking_slots':8,
     'ParkingSlot.corners':4,'MissionExecution.selected_slot_polygon':4,
-    'TaskReferenceState.basis_prefix':64}
+    'TaskReferenceState.basis_prefix':64,'EpisodeCore.blocker':8}
 _MESSAGE_CAPS={'WorldSnapshot':32768,'DriveState':32768,'DriveLink':32768,'LaneModel':1408,
     'ParkingSlot':256,'MapLocalization':96,'SceneAdmissionRef':96,'ParkingSetMeta':64,
     'MissionGrant':1024,'MissionBudgetRequest':512,'MissionBudgetReply':1536,
     'MapperClockProbe':1024,'MapperClockReply':1024,'SurveySummary':288,'SceneGrant':1024,
-    'TofObservation':1024,'TaskReferenceState':1024,'GuestClockReceipt':64,'DirectionGateWitness':512}
+    'TofObservation':1024,'TaskReferenceState':1024,'GuestClockReceipt':64,'DirectionGateWitness':512,
+    'EpisodeCore':768,'EpisodeProgress':128,'EpisodeAcceptanceRef':256,'EpisodeSnapshot':1024,
+    'EpisodeSourceContext':768,'EpisodeRequest':2048,'EpisodeReceipt':1536,'EpisodeStatus':2048,
+    'PiAbsoluteMeter':128,'StopFacts':768,'DriveControlFacts':1024}
 
 
 def _bytes_bound(field):
@@ -317,6 +324,9 @@ def _validate_one(message):
                 or features&~STATE_KNOWN_FEATURES or not message.HasField('mission')):
             raise ValueError('state features/mission required')
         task=message.HasField('task_reference')
+        if bool(features&STATE_EPISODE)!=message.HasField('episode'):raise ValueError('episode feature/presence')
+        from .episodes import validate_state
+        validate_state(message)
         if bool(features&STATE_TASK_REFERENCE)!=task or task and not message.world_features&LANE_MODEL:
             raise ValueError('state task feature/presence/world profile')
         if task and message.task_reference.basis_revision>message.reference_revision:
@@ -404,6 +414,8 @@ def _validate_one(message):
                 raise ValueError('MANUAL direction gate source')
         else:raise ValueError('direction gate producer role')
     elif name=='ClockReply':
+        from .episodes import validate_clock
+        validate_clock(message)
         if message.HasField('guest_clock_valid_until_pi_us') and message.guest_clock_valid_until_pi_us<=message.pi_receive_us:
             raise ValueError('guest clock original expiry')
         if message.HasField('accepted_receipt') and not message.HasField('guest_clock_valid_until_pi_us'):
@@ -486,6 +498,13 @@ def _validate_one(message):
                 or any(value&~31 for value in message.quality)
                 or len(message.calibration)!=64 or any(c not in '0123456789abcdefABCDEF' for c in message.calibration)):
             raise ValueError('ToF bounded frame semantics')
+    elif name=='ClockProbe':
+        if message.HasField('supported_state_features') and message.supported_state_features&~STATE_KNOWN_FEATURES:
+            raise ValueError('unsupported declared state capabilities')
+    elif name in ('EpisodeCore','EpisodeProgress','EpisodeAcceptanceRef','EpisodeSnapshot','EpisodeSourceContext',
+                  'EpisodeRequest','EpisodeReceipt','EpisodeStatus','PiAbsoluteMeter','StopFacts','DriveControlFacts'):
+        from .episodes import validate_one
+        validate_one(message)
 
 def encode(message):
     validate(message)

@@ -123,6 +123,8 @@ message DriveState {
   optional DirectionGateRef direction_gate = 32;
   // State feature8 binds the original lane intent and basis to this path snapshot.
   optional TaskReferenceState task_reference = 33;
+  // Feature16 is opt-in; absence is not an authoritative NONE episode.
+  optional EpisodeSnapshot episode = 34;
 }
 // Presence means both native intent.active and basis.bound. Parent reference/source
 // fields retain their existing meanings; basis_revision is the original prefix's.
@@ -147,6 +149,9 @@ message ClockProbe {
   required uint64 sequence = 4;
   required uint64 guest_send_us = 5;
   optional GuestClockReceipt receipt = 6;
+  // Capability only, not the presence mask of a particular DriveState.
+  // Absence is legacy; authenticated peer and approved profile are also required.
+  optional uint32 supported_state_features = 7;
 }
 // Receipt of one exact original stamped Reply; arrival does not renew its lease.
 message GuestClockReceipt {
@@ -185,6 +190,8 @@ message ClockReply {
   optional GuestClockReceipt accepted_receipt = 10;
   // Pi-owned expiry fixed before enqueue; send stamp/receipt/ACK never renew it.
   optional uint64 guest_clock_valid_until_pi_us = 11;
+  optional EpisodeStatus episode_status = 12;
+  optional DriveControlFacts control_facts = 13;
 }
 message AcceptedState {
   required string host_boot = 1;
@@ -228,7 +235,206 @@ message DriveLink {
     MissionBudgetReply budget_reply = 9;
     // The original Pi SceneGrant, including revocation and original expiry.
     SceneGrant scene_grant = 10;
+    EpisodeRequest episode_request = 11;
   }
+}
+
+// Registry core only: progress and the receipt are deliberately outside its SHA.
+// state:0 UNKNOWN,1 NONE,2 ACTIVE. phase:0 FOLLOW,1 ASSESS,2 CHANGE_OUT,
+// 3 PASS,4 REJOIN,5 FINISHED. FINISHED preserves the closed episode's original key.
+message EpisodeCore {
+  required uint32 state = 1;
+  required bytes episode_id = 2;
+  required uint64 revision = 3;
+  required uint32 phase = 4;
+  required uint64 phase_revision = 5;
+  required fixed32 home_lane_id = 6;
+  required fixed32 target_lane_id = 7;
+  required uint32 policy = 8; // 0 inactive,1 RETURN_HOME,2 KEEP_TARGET.
+  repeated Point blocker = 9; // Conservative original occupied hull; max8 vertices.
+  required float blocker_position_bound_m = 10;
+  required uint64 blocker_world_sequence = 11;
+  required uint64 blocker_observation_sequence = 12;
+  required bytes birth_snapshot_id = 13;
+  required uint64 basis_revision = 14;
+  required uint32 basis_prefix_count = 15;
+  required bytes basis_prefix_sha256 = 16;
+  required bytes source_geometry_sha256 = 17;
+  required uint64 origin_vehicle_sequence = 18;
+  required uint64 started_pi_us = 19;
+  required uint64 deadline_pi_us = 20;
+  required uint64 phase_started_pi_us = 21;
+  required uint64 phase_deadline_pi_us = 22;
+  required sint64 left_baseline_ticks = 23;
+  required sint64 right_baseline_ticks = 24;
+  required bytes meter_epoch = 25;
+  required uint64 meter_baseline_total_ticks = 26;
+  required float max_travel_m = 27;
+  required uint32 progress_mode = 28; // 0 inactive,1 station lower,2 fixed-goal remaining.
+  required Pose phase_goal = 29;
+  required bool stop_wait = 30;
+  required uint64 stop_wait_started_pi_us = 31;
+}
+message EpisodeProgress {
+  required uint64 used_travel_ticks = 1;
+  required uint64 last_progress_pi_us = 2;
+  required uint64 vehicle_sequence = 3;
+  required float station_lower_m = 4;
+  required float remaining_upper_m = 5;
+  required uint64 revision = 6;
+}
+message EpisodeAcceptanceRef {
+  required bytes registry_epoch = 1;
+  required uint64 registry_revision = 2;
+  required bytes request_nonce = 3;
+  required bytes request_sha256 = 4;
+  required bytes accepted_core_sha256 = 5;
+  required uint64 request_sequence = 6;
+  required bytes origin_vm = 7;
+  required bytes origin_execution = 8;
+  required bytes origin_app_instance = 9;
+  required uint32 origin_generation = 10;
+  required uint64 origin_grant_revision = 11;
+}
+message EpisodeSnapshot {
+  required EpisodeCore core = 1;
+  required EpisodeProgress progress = 2;
+  required EpisodeAcceptanceRef acceptance = 3;
+}
+// A request has no parent DriveState. These are the actual source geometry keys.
+// A snapshot reuses the equivalent parent State/Task33 fields instead.
+message EpisodeSourceContext {
+  required string vehicle = 1;
+  required string mapper_boot = 2;
+  required string mapper_instance = 3;
+  required string map_epoch = 4;
+  required string frame_epoch = 5;
+  required string odom_epoch = 6;
+  required string clock_epoch = 7;
+  required string configuration = 8;
+  required string calibration = 9;
+  required bytes primitive = 10;
+  required string reference_id = 11;
+  required uint64 reference_revision = 12;
+  required uint64 world_sequence = 13;
+  required uint64 observation_sequence = 14;
+}
+message EpisodeRequest {
+  required uint32 major = 1;
+  required bytes request_nonce = 2;
+  required uint64 request_sequence = 3;
+  required uint32 action = 4; // 1 BEGIN,2 ADVANCE,3 FINISH.
+  required string vm = 5;
+  required string execution = 6;
+  required string app_instance = 7;
+  required uint32 control_generation = 8;
+  required bytes mission_id = 9;
+  required uint64 mission_revision = 10;
+  required uint64 expected_grant_revision = 11;
+  required uint64 cancel_fence_revision = 12;
+  required bytes scene_admission_id = 13;
+  required uint64 scene_revision = 14;
+  required EpisodeSourceContext source = 15;
+  required EpisodeCore candidate = 16;
+  required EpisodeProgress progress = 17;
+  required uint64 completed_guest_us = 18;
+  required uint64 began_guest_us = 19; // BEGIN only;0 on ADVANCE/FINISH across guest clocks.
+  required uint64 phase_started_guest_us = 20;
+  required uint64 valid_until_pi_us = 21;
+  required uint64 clock_probe_sequence = 22;
+  required bytes clock_reply_sha256 = 23;
+  required uint64 vehicle_sequence = 24;
+  required bytes expected_registry_epoch = 25;
+  required uint64 expected_registry_revision = 26;
+  required bytes expected_episode_id = 27;
+  required uint64 expected_episode_revision = 28;
+  required bytes phase_state_message_id = 29;
+  required uint64 plan_revision = 30;
+  required uint64 phase_revision = 31;
+  required uint64 calculation_sequence = 32;
+  required bytes plan_sha256 = 33;
+  optional uint64 stop_command_sequence = 34;
+}
+message EpisodeReceipt {
+  required uint32 major = 1;
+  required bytes request_nonce = 2;
+  required bytes request_sha256 = 3;
+  required uint32 result = 4; // 1 accepted,2 rejected,3 stale,4 unsupported,5 exhausted.
+  required uint32 reason = 5;
+  required bytes registry_epoch = 6;
+  required uint64 registry_revision = 7;
+  optional EpisodeSnapshot snapshot = 8;
+  required uint64 request_sequence = 9;
+}
+message EpisodeStatus {
+  required uint32 major = 1;
+  required uint32 state = 2; // 0 UNKNOWN,1 NONE,2 ACTIVE; never inferred from absence.
+  required bytes registry_epoch = 3;
+  required uint64 registry_revision = 4;
+  required bytes accepted_core_sha256 = 5;
+  required bytes episode_id = 6;
+  required uint64 episode_revision = 7;
+  required uint32 commit_state = 8; // 0 unknown,1 registered/pending state,2 full state admitted.
+  required bytes state_message_id = 9;
+  required bytes state_sha256 = 10;
+  required uint64 state_revision = 11;
+  required uint64 plan_revision = 12;
+  required uint64 phase_revision = 13;
+  required uint64 calculation_hwm = 14;
+  required uint64 vehicle_hwm = 15;
+  required uint64 valid_until_pi_us = 16;
+  optional EpisodeReceipt receipt = 17;
+}
+// The parent ClockReply.vehicle supplies exact host/device/odom/Pi session,
+// calibration, source sample/time and timestamp error at vehicle_sequence.
+message PiAbsoluteMeter {
+  required bytes meter_epoch = 1;
+  required uint64 total_ticks = 2;
+  required double metres_per_tick = 3; // Conservative upper m/tick; scale changes replace meter_epoch.
+  required uint64 gap_revision = 4;
+  required bool valid = 5;
+  required uint64 vehicle_sequence = 6;
+}
+// Ordinary STOP physical facts, distinct from cusp DirectionGateWitness.
+// state:0 UNKNOWN,1 SUBMITTED,2 APPLIED,3 fresh STATIONARY. No output permission.
+message StopFacts {
+  required uint32 state = 1;
+  required string pi_session = 2;
+  required string device_session = 3;
+  required uint64 command_sequence = 4;
+  required uint32 control_generation = 5;
+  required uint32 producer_role = 6; // 0 Pi-owned safety STOP,1 AUTO,2 MANUAL.
+  required bytes source_vm = 7;
+  required bytes source_execution = 8;
+  required bytes source_app_instance = 9;
+  required uint64 calculation_sequence = 10;
+  required uint64 counter = 11;
+  required uint64 applied_report_sequence = 12;
+  required uint64 applied_source_sample = 13;
+  required uint64 applied_pi_lower_us = 14;
+  required uint64 applied_pi_upper_us = 15;
+  required uint64 stationary_first_sequence = 16;
+  required uint64 stationary_last_sequence = 17;
+  required uint64 stationary_started_pi_us = 18;
+  required uint64 stationary_observed_pi_us = 19;
+  required uint64 valid_until_pi_us = 20;
+  required float left_speed_bound_mps = 21;
+  required float right_speed_bound_mps = 22;
+  required float yaw_rate_bound_rps = 23;
+  required uint64 plan_revision = 24;
+  required uint64 phase_revision = 25;
+  required bytes mission_id = 26;
+  required uint64 mission_revision = 27;
+  required uint64 grant_revision = 28;
+  required bytes driver_session = 29;
+  required uint64 driver_action_seq = 30;
+  required uint64 driver_state_seq = 31;
+}
+message DriveControlFacts {
+  required uint32 major = 1;
+  required PiAbsoluteMeter meter = 2;
+  optional StopFacts stop = 3;
+  required uint64 valid_until_pi_us = 4;
 }
 
 message LaneGeometry {

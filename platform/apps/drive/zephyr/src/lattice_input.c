@@ -291,6 +291,20 @@ static uint8_t mission_wire[1024],grant_candidate[1024],budget_wire[512],budget_
 static size_t mission_wire_size,budget_wire_size;
 static uint32_t control_generation;
 static char active_vm[37];
+static xenova_drive_EpisodeStatus current_episode;
+static xenova_drive_DriveControlFacts current_facts;
+static dw_vehicle facts_vehicle;
+static bool episode_available,facts_available,episode_pending,episode_send_pending,episode_reply_available,episode_probe_started;
+static xenova_drive_EpisodeRequest episode_request;
+static xenova_drive_EpisodeReceipt episode_reply;
+static uint8_t episode_wire[2048],episode_candidate[2048],episode_sha256[32];
+static size_t episode_wire_size;
+static uint8_t episode_mission_id[16];static uint64_t episode_mission_revision;
+static atomic_t snapshot_requested,episode_probe_requested;
+static void episode_pending_clear(void){
+ episode_pending=episode_send_pending=episode_reply_available=episode_probe_started=false;
+ episode_wire_size=0;atomic_set(&episode_probe_requested,0);atomic_set(&snapshot_requested,0);
+}
 #if defined(CONFIG_XENOVA_DRIVE_NATIVE_TEST)
 static uint64_t clock_trace[16][4];static unsigned clock_trace_count;
 #endif
@@ -337,6 +351,11 @@ static int cache_grant(const xenova_drive_MissionGrant *grant,const struct xt_bo
   }
   if(grant->issued_pi_us<current_mission.issued_pi_us)return -ESTALE;
  }
+ if(mission_wire_size){
+  episode_pending_clear();
+  if(current_mission.mission_revision!=grant->mission_revision||memcmp(current_mission.mission_id.bytes,grant->mission_id.bytes,16)||
+     current_mission.cancel_fence_revision!=grant->cancel_fence_revision)episode_available=false;
+ }
  current_mission=*grant;memcpy(mission_wire,grant_candidate,stream.bytes_written);mission_wire_size=stream.bytes_written;
  mission_available=true;return 0;
 }
@@ -359,10 +378,12 @@ static int cache_scene(const xenova_drive_SceneGrant *grant,const struct xt_boot
 }
 void dl_context(const struct xd_inputs *inputs){
  if(k_mutex_lock(&input_context_lock,K_NO_WAIT))return;
+ uint32_t previous_generation=control_generation;
  bool valid=inputs->connected&&!inputs->control.error&&!strcmp(inputs->control.sender,"dom0-gateway")&&inputs->control.instance[0];
  if(!valid||strcmp(gateway,inputs->control.instance)){
   for(unsigned i=0;i<2;i++){guest_clocks[i].confirmed_valid=false;guest_clocks[i].pending_valid=false;guest_clocks[i].gate_available=false;guest_clocks[i].sent=0;}
-  mission_available=false;mission_wire_size=0;gateway[0]=0;
+  mission_available=false;mission_wire_size=0;gateway[0]=0;episode_available=facts_available=false;
+  episode_pending_clear();
   if(engine)dw_scene_fence(&engine->maps);
  }
  context_available=valid;
@@ -370,6 +391,9 @@ void dl_context(const struct xd_inputs *inputs){
  struct xm_vehicle_control control;control_generation=0;active_vm[0]=0;
  if(valid&&!xm_vehicle_control_parse((struct xm_span){inputs->control.payload,inputs->control.length},&control)){
   control_generation=control.generation;strcpy(active_vm,control.active_vm_id);
+ }
+ if(previous_generation!=control_generation){
+  episode_available=facts_available=false;episode_pending_clear();
  }
  k_mutex_unlock(&input_context_lock);
 }
@@ -431,7 +455,7 @@ int dl_mission_get(xenova_drive_MissionGrant *out,uint64_t now){
 int dl_mission_for_local(xenova_drive_MissionGrant *out,uint64_t now){
  int rc=dl_mission_get(out,now);if(rc)return rc;
  struct xt_bootstrap boot;if(xd_context_get(&boot))return -EAGAIN;
- if(!out->admitted||out->kind!=1)return -EACCES;
+ if(!out->admitted||(out->kind!=1&&out->kind!=2))return -EACCES;
  return bytes_hex(out->owner_vm.bytes,16,boot.identity.vm_id,true)&&
   bytes_hex(out->owner_execution.bytes,16,boot.identity.execution_id,true)&&
   bytes_hex(out->app_instance.bytes,16,boot.auto_instance_id,true)?0:-EXDEV;
@@ -472,6 +496,75 @@ int dl_budget_take(xenova_drive_MissionBudgetRequest *request,xenova_drive_Missi
  if(k_mutex_lock(&input_context_lock,K_NO_WAIT))return -EBUSY;
  int rc=budget_pending&&budget_reply_available?0:-EAGAIN;
  if(!rc){*request=budget_request;*reply=budget_reply;budget_pending=budget_send_pending=budget_reply_available=false;}
+ k_mutex_unlock(&input_context_lock);return rc;
+}
+void dl_snapshot_request(void){atomic_set(&snapshot_requested,1);}
+int dl_episode_status(xenova_drive_EpisodeStatus *out,uint64_t now){
+ if(!out)return -EINVAL;
+ struct dl_clock mapping;uint64_t current;int rc=dl_clock_get(&mapping,&current);if(rc)return rc;
+ if(!mapping.acknowledged)return -EAGAIN;
+ if(now<current)now=current;
+ if(k_mutex_lock(&input_context_lock,K_NO_WAIT))return -EBUSY;
+ rc=!episode_available?-ENODATA:!mission_available||current_mission.mission_revision!=episode_mission_revision||
+    memcmp(current_mission.mission_id.bytes,episode_mission_id,16)?-ESTALE:current_episode.valid_until_pi_us<=now?-ESTALE:0;
+ if(!rc)*out=current_episode;
+ k_mutex_unlock(&input_context_lock);return rc;
+}
+int dl_control_facts(xenova_drive_DriveControlFacts *out,uint64_t now){
+ if(!out)return -EINVAL;
+ struct dl_clock mapping;uint64_t current;int rc=dl_clock_get(&mapping,&current);if(rc)return rc;
+ if(!mapping.acknowledged)return -EAGAIN;
+ if(now<current)now=current;
+ dw_vehicle original;
+ if(k_mutex_lock(&input_context_lock,K_NO_WAIT))return -EBUSY;
+ rc=!facts_available?-ENODATA:current_facts.valid_until_pi_us<=now?-ESTALE:0;
+ if(!rc){*out=current_facts;original=facts_vehicle;}
+ k_mutex_unlock(&input_context_lock);if(rc)return rc;
+ dw_vehicle latest;if(!engine||dw_vehicle_latest(&engine->odometry,&latest))return -EAGAIN;
+ if(!original.has_pi_session||!latest.has_pi_session||!latest.has_gateway_instance||
+    strcmp(latest.gateway_instance,mapping.gateway)||strcmp(original.pi_session,latest.pi_session)||
+    strcmp(original.device_session,latest.device_session)||strcmp(original.odom_epoch,latest.odom_epoch)||
+    strcmp(original.calibration,latest.calibration)||strcmp(original.host_boot,latest.host_boot)||
+    latest.sequence<original.sequence||now<original.pi_sample_us||
+    now-original.pi_sample_us+original.clock_error_us>lp_selected_config.pose_age_us)return -ESTALE;
+ return 0;
+}
+int dl_episode_submit(const xenova_drive_EpisodeRequest *request,const uint8_t fingerprint[32]){
+ if(!request||!fingerprint||dw_episode_request_validate(request))return -EINVAL;
+ uint8_t actual[32];if(!dw_episode_request_hash(request,actual)||memcmp(actual,fingerprint,32))return -EINVAL;
+ struct dl_clock mapping;uint64_t now;if(dl_clock_get(&mapping,&now)||!mapping.acknowledged)return -EAGAIN;
+ struct xt_bootstrap boot;if(xd_context_get(&boot))return -EAGAIN;
+ if(k_mutex_lock(&input_context_lock,K_NO_WAIT))return -EBUSY;
+ pb_ostream_t encoded=pb_ostream_from_buffer(episode_candidate,sizeof(episode_candidate));
+ if(!pb_encode(&encoded,xenova_drive_EpisodeRequest_fields,request)){k_mutex_unlock(&input_context_lock);return -EMSGSIZE;}
+ int rc=0;
+ if(episode_pending){
+  if(encoded.bytes_written!=episode_wire_size||memcmp(episode_candidate,episode_wire,episode_wire_size)||memcmp(fingerprint,episode_sha256,32))rc=-EBUSY;
+  else if(!episode_reply_available&&request->valid_until_pi_us>now)episode_send_pending=true;
+ }else{
+  uint64_t guest=clock_us();
+  if(!mission_available||!current_mission.admitted||request->control_generation!=control_generation||
+     request->control_generation!=current_mission.control_generation||
+     strcmp(request->vm,boot.identity.vm_id)||strcmp(request->execution,boot.identity.execution_id)||strcmp(request->app_instance,boot.auto_instance_id)||
+     !bytes_hex(current_mission.owner_vm.bytes,16,boot.identity.vm_id,true)||
+     !bytes_hex(current_mission.owner_execution.bytes,16,boot.identity.execution_id,true)||
+     !bytes_hex(current_mission.app_instance.bytes,16,boot.auto_instance_id,true)||
+     request->mission_revision!=current_mission.mission_revision||request->expected_grant_revision!=current_mission.grant_revision||
+     request->cancel_fence_revision!=current_mission.cancel_fence_revision||memcmp(request->mission_id.bytes,current_mission.mission_id.bytes,16)||
+     request->scene_revision!=current_mission.scene_revision||memcmp(request->scene_admission_id.bytes,current_mission.scene_admission_id.bytes,16)||
+     !current_clock.acknowledged||request->clock_probe_sequence!=current_clock.probe_sequence||
+     memcmp(request->clock_reply_sha256.bytes,current_clock.reply_sha256,32)||
+     request->completed_guest_us>guest||request->valid_until_pi_us<=now)rc=-ESTALE;
+  else{episode_request=*request;memcpy(episode_wire,episode_candidate,encoded.bytes_written);episode_wire_size=encoded.bytes_written;
+   memcpy(episode_sha256,fingerprint,32);episode_pending=episode_send_pending=true;episode_reply_available=false;episode_probe_started=false;}
+ }
+ k_mutex_unlock(&input_context_lock);return rc;
+}
+int dl_episode_take(xenova_drive_EpisodeRequest *request,xenova_drive_EpisodeReceipt *reply){
+ if(!request||!reply)return -EINVAL;
+ if(k_mutex_lock(&input_context_lock,K_NO_WAIT))return -EBUSY;
+ int rc=episode_pending&&episode_reply_available?0:-EAGAIN;
+ if(!rc){*request=episode_request;*reply=episode_reply;episode_pending_clear();}
  k_mutex_unlock(&input_context_lock);return rc;
 }
 static int vehicle_received(void *unused,const uint8_t *bytes,size_t count,int64_t received){
@@ -613,6 +706,7 @@ static int link_received(void *unused,const uint8_t *bytes,size_t count,int64_t 
    out->expires_guest=expiry;out->expires_pi=reply->guest_clock_valid_until_pi_us;out->probe_sequence=probe->sequence;
    strcpy(out->gateway,gateway);strcpy(out->vm,probe->vm);strcpy(out->execution,probe->execution);
    strcpy(out->app_instance,probe->app_instance);strcpy(out->host_boot,reply->host_boot);slot->receipt=receipt;
+   memcpy(out->reply_sha256,receipt.reply_sha256.bytes,32);
    strcpy(out->trust.vehicle,reply->vehicle.vehicle);strcpy(out->trust.odom_epoch,reply->vehicle.odom_epoch);
    strcpy(out->trust.calibration,reply->vehicle.calibration);
   }
@@ -622,6 +716,25 @@ static int link_received(void *unused,const uint8_t *bytes,size_t count,int64_t 
   if(!role){
    if(reply->has_current_mission){int granted=cache_grant(&reply->current_mission,&boot);if(granted&&granted!=-ESTALE){k_mutex_unlock(&input_context_lock);return granted;}}
    else mission_available=false;
+   bool available=reply->has_episode_status&&reply->has_current_mission&&reply->current_mission.control_generation==control_generation;
+   facts_available=reply->has_control_facts;
+   if(available){
+    const xenova_drive_EpisodeStatus *status=&reply->episode_status;
+    bool same=episode_available&&episode_mission_revision==reply->current_mission.mission_revision&&
+     !memcmp(episode_mission_id,reply->current_mission.mission_id.bytes,16);
+    bool epoch=same&&!memcmp(current_episode.registry_epoch.bytes,status->registry_epoch.bytes,16);
+    if(!same||!status->state||(epoch&&status->registry_revision>=current_episode.registry_revision)){
+     current_episode=*status;episode_available=true;
+     memcpy(episode_mission_id,reply->current_mission.mission_id.bytes,16);episode_mission_revision=reply->current_mission.mission_revision;
+    }else if(!epoch)episode_available=false;
+    /* An old exact result can finish bookkeeping without rolling current status back. */
+    const xenova_drive_EpisodeReceipt *answer=&status->receipt;
+    if(episode_pending&&status->has_receipt&&answer->request_sequence==episode_request.request_sequence&&
+       !memcmp(answer->request_nonce.bytes,episode_request.request_nonce.bytes,16)&&!memcmp(answer->request_sha256.bytes,episode_sha256,32)){
+     if(!episode_reply_available){episode_reply=*answer;episode_reply_available=true;episode_send_pending=false;}
+    }
+   }else episode_available=false;
+   if(facts_available){current_facts=reply->control_facts;facts_vehicle=reply->vehicle;}
    struct dw_trust previous_source=latest_trust;bool had_source=latest_trust.vehicle[0]!=0;
    const xenova_drive_WorldTrust *t=&reply->trust;struct dw_trust d={0};
    strcpy(d.vehicle,reply->vehicle.vehicle);strcpy(d.mapper_boot,t->mapper_boot);strcpy(d.mapper_instance,t->mapper_instance);
@@ -766,9 +879,7 @@ static int ct_setup(struct xm_zclient *client,struct xt_bootstrap *saved,bool wo
 #else
 #define LINK_SETUP(client,saved,world,unavailable) setup(client,saved,world,unavailable)
 #endif
-static void maps(void *a,void *b,void *c){
- ARG_UNUSED(a);ARG_UNUSED(b);ARG_UNUSED(c);
- while(!stopped()){
+static void maps_step(void){
   bool was_open=map_client.socket_open,source_unavailable;
   map_input_allowed=false;
   int prepared=setup(&map_client,&map_boot,true,&source_unavailable);
@@ -791,16 +902,16 @@ static void maps(void *a,void *b,void *c){
    (void)de_receive_poll(engine,now);
 #endif
   }
-  k_sleep(K_MSEC(2));
- }
+}
+static void maps(void *a,void *b,void *c){
+ ARG_UNUSED(a);ARG_UNUSED(b);ARG_UNUSED(c);
+ while(!stopped()){maps_step();k_sleep(K_MSEC(2));}
  map_input_allowed=false;
  xm_zclient_close(&map_client);
  while(de_receive_drain(engine)==DE_BUSY)k_sleep(K_MSEC(1));
  memset(&map_boot,0,sizeof(map_boot));
 }
-static void state(void *a,void *b,void *c){
- ARG_UNUSED(a);ARG_UNUSED(b);ARG_UNUSED(c);
- while(!stopped()){
+static void state_step(void){
   bool was_open=link_client.socket_open,source_unavailable;
   link_input_allowed=false;
   int prepared=LINK_SETUP(&link_client,&link_boot,false,&source_unavailable);
@@ -808,19 +919,27 @@ static void state(void *a,void *b,void *c){
   if(prepared&&source_unavailable&&was_open&&!stopped())(void)LINK_POLL(&link_client);
   if(!prepared){
    (void)LINK_POLL(&link_client);uint64_t now=clock_us();
-   if(link_client.connected&&now>=next_probe){
+   bool scheduled=now>=next_probe;
+   if(link_client.connected&&(atomic_get(&episode_probe_requested)||scheduled)){
     struct xt_bootstrap boot;
     if(!xd_context_get(&boot))for(unsigned role=0;role<2;role++){
+     if(role&&!scheduled)continue;
      const char *role_app=role?boot.manual_instance_id:boot.auto_instance_id;if(!role_app[0])continue;
      uint64_t sent_at=clock_us();if(!sent_at||sent_at>INT64_MAX)break;
      if(k_mutex_lock(&input_context_lock,K_NO_WAIT))break;
      struct guest_clock_slot *slot=&guest_clocks[role];
-     /* role마다 outstanding 하나이며 손실은 새 probe로 회복한다. */
-     bool send=(!slot->sent||(sent_at>=slot->sent&&sent_at-slot->sent>=lp_selected_config.clock_lease_us/2))&&slot->sequence<INT64_MAX;
+     /* A registered phase result uses a real subsequent probe, not a fabricated
+      * clock ACK. Pending-only recovery cannot wait beyond the request budget. */
+     bool pending=!role&&episode_pending&&!episode_reply_available;
+     bool urgent=!role&&atomic_cas(&episode_probe_requested,1,0)&&pending;
+     uint64_t retry=lp_selected_config.clock_lease_us/2;
+     if(pending){uint64_t bounded=MIN(retry,lp_selected_config.pose_age_us/4);retry=bounded>2000?bounded:2000;}
+     bool send=(urgent||!slot->sent||(sent_at>=slot->sent&&sent_at-slot->sent>=retry))&&slot->sequence<INT64_MAX;
      if(send){memset(&outgoing,0,sizeof(outgoing));outgoing.major=2;outgoing.which_payload=xenova_drive_DriveLink_probe_tag;
       xenova_drive_ClockProbe *p=&outgoing.payload.probe;strcpy(p->vm,boot.identity.vm_id);
       strcpy(p->execution,boot.identity.execution_id);strcpy(p->app_instance,role_app);
       p->sequence=++slot->sequence;p->guest_send_us=sent_at;slot->sent=sent_at;
+      if(!role){p->has_supported_state_features=true;p->supported_state_features=DW_STATE_KNOWN_FEATURES;}
       p->has_receipt=slot->pending_valid&&sent_at<slot->pending.expires_guest;
       if(p->has_receipt)p->receipt=slot->receipt;
       slot->sent_has_receipt=p->has_receipt;if(p->has_receipt)slot->sent_receipt=p->receipt;
@@ -828,7 +947,7 @@ static void state(void *a,void *b,void *c){
      k_mutex_unlock(&input_context_lock);if(send)(void)binary_publish(&link_client,out_topic,&outgoing);
     }
     uint64_t interval=MIN(lp_selected_config.clock_lease_us/4,lp_selected_config.pose_age_us/4);
-    next_probe=now+(interval>2000?interval:2000);
+    if(scheduled)next_probe=now+(interval>2000?interval:2000);
    }
    if(link_client.connected&&!k_mutex_lock(&applied_lock,K_NO_WAIT)){
     bool send=application_pending;
@@ -842,10 +961,33 @@ static void state(void *a,void *b,void *c){
     if(send)(void)binary_publish(&link_client,out_topic,&outgoing);
 #endif
    }
-   if(link_client.connected&&now>=next_snapshot){
+   if(link_client.connected&&(atomic_get(&snapshot_requested)||now>=next_snapshot)){
+    bool forced=atomic_cas(&snapshot_requested,1,0);
     memset(&outgoing,0,sizeof(outgoing));outgoing.major=2;outgoing.which_payload=xenova_drive_DriveLink_snapshot_tag;
-    if(!drive_lattice_snapshot(&outgoing.payload.snapshot))(void)binary_publish(&link_client,out_topic,&outgoing);
+    int captured=drive_lattice_snapshot(&outgoing.payload.snapshot);
+    if(!captured)captured=binary_publish(&link_client,out_topic,&outgoing);
+    if(captured&&forced)atomic_set(&snapshot_requested,1);
     next_snapshot=now+lp_selected_config.state_period_us;
+   }
+   if(link_client.connected&&!k_mutex_lock(&input_context_lock,K_NO_WAIT)){
+    bool send=episode_pending&&episode_send_pending&&!episode_reply_available;
+    if(send){
+     uint64_t guest=clock_us();
+     bool valid=clock_available&&current_clock.acknowledged&&guest<current_clock.expires_guest&&
+      (current_clock.upper<=0||(uint64_t)current_clock.upper<=INT64_MAX-guest)&&
+      (int64_t)guest+current_clock.upper>=0&&episode_request.valid_until_pi_us>(uint64_t)((int64_t)guest+current_clock.upper);
+     if(valid){memset(&outgoing,0,sizeof(outgoing));outgoing.major=2;outgoing.which_payload=xenova_drive_DriveLink_episode_request_tag;outgoing.payload.episode_request=episode_request;}
+     else send=false;
+     episode_send_pending=false;
+    }
+    k_mutex_unlock(&input_context_lock);
+    if(send){int sent=binary_publish(&link_client,out_topic,&outgoing);
+     if(!k_mutex_lock(&input_context_lock,K_NO_WAIT)){
+      if(sent){if(episode_pending&&!episode_reply_available)episode_send_pending=true;}
+      else if(episode_pending&&!episode_reply_available&&!episode_probe_started){episode_probe_started=true;atomic_set(&episode_probe_requested,1);}
+      k_mutex_unlock(&input_context_lock);
+     }
+    }
    }
    if(link_client.connected&&!k_mutex_lock(&input_context_lock,K_NO_WAIT)){
     bool send=budget_pending&&budget_send_pending&&!budget_reply_available;
@@ -858,8 +1000,10 @@ static void state(void *a,void *b,void *c){
     }
    }
   }
-  k_sleep(K_MSEC(2));
- }
+}
+static void state(void *a,void *b,void *c){
+ ARG_UNUSED(a);ARG_UNUSED(b);ARG_UNUSED(c);
+ while(!stopped()){state_step();k_sleep(K_MSEC(2));}
 #if defined(CONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS)
  if(ct_open&&!ct_reply_seen&&!ct_wire_failed)ct_bump(&ct_counts[CT_NO_REPLY]);
  ct_open=false;
