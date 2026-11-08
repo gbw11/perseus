@@ -1,0 +1,23 @@
+CREATE TABLE agent_command_results (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    vm_id VARCHAR(36) NOT NULL,
+    command_id VARCHAR(128) NOT NULL,
+    operation_id VARCHAR(128),
+    status VARCHAR(12) NOT NULL,
+    boot_id VARCHAR(64) NOT NULL,
+    agent_instance_id VARCHAR(64),
+    message_id VARCHAR(128),
+    seq BIGINT,
+    submitted_at DATETIME(6),
+    started_at DATETIME(6),
+    finished_at DATETIME(6),
+    duration_ms BIGINT,
+    result_json LONGTEXT,
+    error_json LONGTEXT,
+    received_at DATETIME(6) NOT NULL,
+    contract_violation BOOLEAN NOT NULL DEFAULT FALSE,
+    violation_detail VARCHAR(255),
+    CONSTRAINT pk_agent_command_results PRIMARY KEY (id),
+    CONSTRAINT uk_agent_command_results_vm_command UNIQUE (vm_id, command_id),
+    INDEX idx_agent_command_results_operation (operation_id)
+);

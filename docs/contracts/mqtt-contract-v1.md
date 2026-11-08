@@ -70,7 +70,8 @@ Python 공통 클라이언트의 내부 `Message.received_monotonic`은 Paho 수
 
 ## 3. VM 에이전트·자원 지표 토픽
 
-각 VM의 에이전트와 백엔드가 주고받는다. heartbeat·inventory·metrics 수신은 백엔드에 구현돼 있다. 명령(04·05)은 Linux 에이전트 0.4.0 이 받으며(3.2절), 백엔드 발신은 아직 없다.
+각 VM의 에이전트/drive-v1과 백엔드가 주고받는다. heartbeat·inventory·metrics와 명령 결과 수신,
+Linux·Zephyr 명령 발행은 백엔드에 구현돼 있다.
 
 | ID | 토픽 | `type` | 방향 | QoS | retain | payload |
 | --- | --- | --- | --- | --- | --- | --- |

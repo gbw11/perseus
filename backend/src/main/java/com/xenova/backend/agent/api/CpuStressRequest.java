@@ -7,5 +7,6 @@ import jakarta.validation.constraints.NotNull;
 
 public record CpuStressRequest(
         @NotNull @Min(1) @Max(4) Integer workers,
+        @JsonProperty("load_percent") @Min(10) @Max(100) Integer loadPercent,
         @JsonProperty("duration_s") @NotNull @Min(1) @Max(120) Integer durationS) {
 }
