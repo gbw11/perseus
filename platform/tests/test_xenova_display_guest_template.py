@@ -71,6 +71,13 @@ class DisplayGuestAccountTest(unittest.TestCase):
         })
         self.assertEqual(result["config"]["path"], "/etc/xenova/guest-display-domu.json")
         self.assertEqual(result["config"]["mode"], "0644")
+        unit = self.root / "usr/lib/systemd/system/xenova-guest-display-app.service"
+        directives = unit.read_text().splitlines()
+        self.assertIn("User=xenova-display", directives)
+        self.assertIn("Environment=PYTHONPATH=/opt/xenova/display-guest", directives)
+        self.assertIn("Restart=on-failure", directives)
+        self.assertEqual(result["service"]["path"],
+                         "/usr/lib/systemd/system/xenova-guest-display-app.service")
         self.assertFalse((self.root / "nonexistent").exists())
 
     def test_existing_account_or_instance_is_rejected(self):
@@ -100,7 +107,8 @@ class DisplayGuestAccountTest(unittest.TestCase):
                 "guest_display": {"account": "xenova-display",
                                   "python_modules": list(display_guest.MODULES),
                                   "web_assets": "external-vm-screens-dist",
-                                  "config": "/etc/xenova/guest-display-domu.json"}}
+                                  "config": "/etc/xenova/guest-display-domu.json",
+                                  "service": "xenova-guest-display-app.service"}}
         path = source / "recipe.json"
         path.write_text(json.dumps(meta))
         info = recipe.source_info(path.resolve(), meta["source_id"])
@@ -111,6 +119,8 @@ class DisplayGuestAccountTest(unittest.TestCase):
         for name in display_guest.MODULES:
             self.assertIn("platform/services/display/router/xenova_display/" + name, locked)
         self.assertIn("platform/services/display/router/deploy/guest-display/domu/guest-display-domu.json.example",
+                      locked)
+        self.assertIn("platform/services/display/router/deploy/guest-display/domu/xenova-guest-display-app.service",
                       locked)
         meta["guest_display"]["account"] = "root"
         path.write_text(json.dumps(meta))

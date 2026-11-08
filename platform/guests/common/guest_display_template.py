@@ -12,10 +12,12 @@ ROOT = Path(__file__).resolve().parents[3]
 SOURCE = ROOT / "platform/services/display/router/xenova_display"
 DEPLOY = ROOT / "platform/services/display/router/deploy/guest-display/domu"
 CONFIG_SOURCE = DEPLOY / "guest-display-domu.json.example"
+SERVICE_SOURCE = DEPLOY / "xenova-guest-display-app.service"
 MODULES = ("__init__.py", "capture_limits.py", "mjpeg.py", "guest_sender.py", "guest_app.py")
 POLICY = {"account": "xenova-display", "python_modules": list(MODULES),
           "web_assets": "external-vm-screens-dist",
-          "config": "/etc/xenova/guest-display-domu.json"}
+          "config": "/etc/xenova/guest-display-domu.json",
+          "service": "xenova-guest-display-app.service"}
 ACCOUNT = "xenova-display"
 HOME = "/nonexistent"
 SHELL = "/usr/sbin/nologin"
@@ -28,7 +30,7 @@ def validate_policy(policy):
 
 def source_files():
     """VM3에 복사하는 Plan A Python 입력을 source lock에 포함한다."""
-    files = [SOURCE / name for name in MODULES] + [CONFIG_SOURCE]
+    files = [SOURCE / name for name in MODULES] + [CONFIG_SOURCE, SERVICE_SOURCE]
     if any(path.is_symlink() or not path.is_file() or path.resolve() != path for path in files):
         raise ValueError("display guest Python input must be a canonical regular file")
     return files
@@ -51,6 +53,27 @@ def install_config(root):
     target.write_bytes(raw)
     target.chmod(0o644)
     return {"path": "/etc/xenova/guest-display-domu.json",
+            "sha256": hashlib.sha256(raw).hexdigest(), "mode": "0644"}
+
+
+def install_service(root):
+    """전용 계정으로 guest_app을 실행하는 hardened systemd unit을 설치한다."""
+    raw = SERVICE_SOURCE.read_bytes()
+    text = raw.decode("utf-8")
+    required = (
+        "User=xenova-display", "Group=xenova-display",
+        "Environment=PYTHONPATH=/opt/xenova/display-guest",
+        "ExecStart=/usr/bin/python3 -m xenova_display.guest_app --config /etc/xenova/guest-display-domu.json",
+        "Restart=on-failure", "NoNewPrivileges=true", "ProtectSystem=strict",
+    )
+    if any(value not in text.splitlines() for value in required):
+        raise ValueError("display guest service differs from the approved Plan A contract")
+    target = inside(root, "usr/lib/systemd/system/xenova-guest-display-app.service", follow_final=False)
+    if target.is_symlink() or (target.exists() and not target.is_file()):
+        raise ValueError("display guest service target is linked or non-regular")
+    target.write_bytes(raw)
+    target.chmod(0o644)
+    return {"path": "/usr/lib/systemd/system/xenova-guest-display-app.service",
             "sha256": hashlib.sha256(raw).hexdigest(), "mode": "0644"}
 
 
@@ -160,5 +183,6 @@ def prepare(root, policy, *, web_assets=None, web_revision=None, command=subproc
         installed[source.name] = {"sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)}
     web = install_web_assets(root, web_assets, web_revision)
     config = install_config(root)
+    service = install_service(root)
     return {"account": account, "python_root": "/opt/xenova/display-guest",
-            "python_modules": installed, "web": web, "config": config}
+            "python_modules": installed, "web": web, "config": config, "service": service}
