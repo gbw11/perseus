@@ -77,8 +77,30 @@ class MapperSensorState:
             tof_max_age_us=tof_max_age_us,max_speed_mps=max_speed_mps,max_yaw_rate_rps=max_yaw_rate_rps)
         self.pose_args=dict(max_gap_us=max_gap_us,max_speed_mps=max_speed_mps,max_yaw_rate_rps=max_yaw_rate_rps,capacity=capacity)
         self._thread=threading.get_ident();self._identity=None
+        self._development_context=None
         self.sensors=self.poses=None;self._seen_vehicle=OrderedDict();self._seen_tof=OrderedDict()
         self._pose_quarantined=False;self._vehicles={};self._vehicle_admissions=OrderedDict();self._last_bracket=None
+
+    @classmethod
+    def for_development(cls,profile,raw_binding,clock_policy,*,sensor_context,mapper_worker,mapper_instance):
+        """원 개발 binding만 선택한다. 아래 wire/clock/admission/read 본문은 공유한다."""
+        from ..simulation.motion_profile import DevelopmentMotionProfile
+        from .raw_binding import RawBinding
+        if (type(profile) is not DevelopmentMotionProfile or type(sensor_context) is not SensorContext
+                or sensor_context.domain!='DEVELOPMENT_SYNTHETIC'
+                or sensor_context.calibration is not profile.bound_calibration
+                or type(raw_binding) is not RawBinding
+                or raw_binding.fields['calibration_bundle']!=profile.bound_calibration.sha256):
+            raise ValueError('exact development profile/source/raw binding required')
+        source=sensor_context.source
+        if clock_policy!=profile.clock_policy(device=source['device'],primitive=source['primitive']):
+            raise ValueError('clock policy differs from the explicit development manifest')
+        arguments=profile.sensor_arguments;pose=profile.pose_arguments
+        result=cls(profile.bound_calibration,raw_binding,clock_policy,**arguments,
+            max_gap_us=pose['max_gap_us'],capacity=pose['capacity'],
+            mapper_worker=mapper_worker,mapper_instance=mapper_instance)
+        result._development_context=sensor_context
+        return result
 
     def original_pose_bracket(self,pose):
         """이번 read가 반환한 실제 pose의 원 admission을 읽는다. age/lease를 갱신하지 않는다."""
@@ -154,7 +176,12 @@ class MapperSensorState:
         identity=canonical(dict(source=source,origin=origin))
         if self._identity!=identity:
             if self._identity is not None:raise ValueError('metric geometry source changed without a new compute owner')
-            self.sensors=SensorSamples(SensorContext(self.calibration,source,**origin),**self.sensor_args)
+            selected=self._development_context
+            if selected is not None:
+                if selected.source!=source or any(getattr(selected,key)!=item for key,item in origin.items()):
+                    raise ValueError('development snapshot changed its original explicit source binding')
+            else:selected=SensorContext(self.calibration,source,**origin)
+            self.sensors=SensorSamples(selected,**self.sensor_args)
             self.poses=PoseBuffer(**self.pose_args);self._identity=identity
         if (type(value['vehicles']) is not list or len(value['vehicles'])>24 or type(value['probes']) is not dict
                 or len(value['probes'])>8 or type(value['tof']) is not dict or set(value['tof'])-{'0','1'}):

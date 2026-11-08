@@ -61,10 +61,29 @@ class SensorContext:
     gateway_instance: str
     pi_session: str
     device_session: str
+    _development: bool
 
     def __init__(self,calibration,current_source,*,pi_host_boot,gateway_instance,pi_session,device_session):
         if type(calibration) is not CalibrationProfile or calibration.kind=='SYNTHETIC' or calibration.vehicle_bundle_sha256 is None:
             raise SampleRejected('physical profile must declare the approved whole vehicle bundle')
+        self._assign(calibration,current_source,pi_host_boot,gateway_instance,pi_session,device_session,False)
+
+    @classmethod
+    def for_development(cls,profile,current_source,*,pi_host_boot,gateway_instance,pi_session,device_session):
+        """명시 개발 manifest만 SYNTHETIC odom에 결합한다. 기본 physical 입구는 그대로다."""
+        from ..simulation.motion_profile import DevelopmentMotionProfile
+        if type(profile) is not DevelopmentMotionProfile:
+            raise SampleRejected('exact explicit development motion profile required')
+        calibration=profile.bound_calibration;identity=profile.fields['identity']
+        if (type(current_source) is not dict or current_source.get('vehicle')!=identity['vehicle']
+                or current_source.get('configuration')!=identity['configuration']
+                or calibration.kind!='SYNTHETIC' or calibration.vehicle_bundle_sha256!=profile.sha256):
+            raise SampleRejected('development source/model/whole bundle differs')
+        result=object.__new__(cls)
+        result._assign(calibration,current_source,pi_host_boot,gateway_instance,pi_session,device_session,True)
+        return result
+
+    def _assign(self,calibration,current_source,pi_host_boot,gateway_instance,pi_session,device_session,development):
         if type(current_source) is not dict or set(current_source)!=SOURCE_FIELDS:raise SampleRejected('exact current S source required')
         for key in ('mapper_boot','mapper_instance','clock_epoch','map_epoch','frame_epoch','odom_epoch'):_uuid(current_source[key])
         for key in ('vehicle','device','configuration'):_label(current_source[key])
@@ -73,9 +92,18 @@ class SensorContext:
         for name,value in (('pi_host_boot',pi_host_boot),('gateway_instance',gateway_instance),('pi_session',pi_session),('device_session',device_session)):
             _uuid(value);object.__setattr__(self,name,value)
         object.__setattr__(self,'calibration',calibration);object.__setattr__(self,'_source',canonical(current_source))
+        object.__setattr__(self,'_development',development)
 
     @property
     def source(self):return json.loads(self._source)
+
+    @property
+    def domain(self):return 'DEVELOPMENT_SYNTHETIC' if self._development else 'PRODUCTION'
+
+    @property
+    def pose_clock_id(self):
+        epoch=self.source['clock_epoch']
+        return 'jetson-monotonic:'+epoch if self._development else epoch
 
 
 @dataclass(frozen=True,slots=True)
@@ -237,8 +265,9 @@ class SensorSamples:
         yaw=math.nextafter(sample.heading_error_rad+math.nextafter(self.yaw_rate*half,math.inf),math.inf)
         if yaw>math.pi:raise SampleRejected('Vehicle time/heading uncertainty exceeds supported pose tube')
         source=self.context.source
-        pose=PoseSample(sample.odom_epoch,source['clock_epoch'],self.context.calibration.sha256,middle,
-            sample.odom_pose.x,sample.odom_pose.y,sample.odom_pose.yaw,position,yaw,'ODOMETRY')
+        pose=PoseSample(sample.odom_epoch,self.context.pose_clock_id,self.context.calibration.sha256,middle,
+            sample.odom_pose.x,sample.odom_pose.y,sample.odom_pose.yaw,position,yaw,
+            'SYNTHETIC_ODOMETRY' if self.context.domain=='DEVELOPMENT_SYNTHETIC' else 'ODOMETRY')
         anchor=VehicleAnchor(sample.sequence,sample.source_sample,sample.source_us,sample.pi_sample_us,sample.odom_epoch,
             (sample.odom_pose.x,sample.odom_pose.y,sample.odom_pose.yaw),sample.calibration)
         value=VehicleEvidence(raw,sha256(raw).hexdigest(),anchor,pi,interval,pose,clock_lease,(sample.device_session,sample.source_sample,sample.source_us),interval[0]+self.vehicle_age)
