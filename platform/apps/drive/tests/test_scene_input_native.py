@@ -16,7 +16,7 @@ int main(int argc,char **argv){
  assert(argc==4);
  size_t rn=file_bytes(argv[1],reply_input),sn=file_bytes(argv[2],scene_input);
  const char *test=argv[3];engine=&fixture_engine;dw_pool_init(&engine->maps);
- context_available=true;strcpy(gateway,gateway_id);probe_sent=1000000;probe_sequence=1;
+ context_available=true;strcpy(gateway,gateway_id);probe_sent=1000000;auto_probe_sequence=1;
  assert(link_received(NULL,reply_input,rn,INT64_MAX)==0);
  int rc=link_received(NULL,scene_input,sn,INT64_MAX);
  if(!strcmp(test,"foreign-host")||!strcmp(test,"foreign-gateway")||!strcmp(test,"foreign-context")){
@@ -47,7 +47,7 @@ int main(int argc,char **argv){
   if(invalid)fresh.payload.clock.trust.lower_offset_us=fresh.payload.clock.trust.upper_offset_us+1;
   pb_ostream_t stream=pb_ostream_from_buffer(reply_input,sizeof(reply_input));
   assert(pb_encode(&stream,xenova_drive_DriveLink_fields,&fresh));rn=stream.bytes_written;
-  fake_now=1010000;probe_sent=1000000;probe_sequence=1;
+  fake_now=1010000;probe_sent=1000000;auto_probe_sequence=1;
   if(busy)atomic_flag_test_and_set(&engine->maps.lock);
   assert(link_received(NULL,reply_input,rn,INT64_MAX)==0);
   if(busy)atomic_flag_clear(&engine->maps.lock);
@@ -86,7 +86,7 @@ def scene_input_probe(tmp_path_factory):
         '-ffunction-sections','-fdata-sections','-Wl,--gc-sections','-Wl,--wrap=dw_link_decode',
         '-fsanitize=undefined',
         *['-I'+str(p) for p in (include,HOME/'zephyr/src',HOME/'planner',world,world/'generated',
-                                world/'nanopb',mqtt/'include',mqtt/'third_party/jsmn')],
+                                world/'nanopb',mqtt/'include',mqtt/'third_party/jsmn',HOME.parent/'common/xenova-drive-runtime/include')],
         *map(str,sources),'-lm','-o',str(binary)]
     built=subprocess.run(command,capture_output=True,text=True,timeout=120)
     assert built.returncode==0,built.stderr

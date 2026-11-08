@@ -16,6 +16,8 @@
 
 Pi 원 SceneGrant의 VM 전달 tag10·원 기한·retained 소비와 legacy live-only 호환은
 [지도 사용권 소비 계약](scene-grant-consumption.md)을 따른다.
+State33·Pi↔VM clock receipt/명시 ACK·실제 방향 증거와 command3의 원 clock 참조는
+[경로·시각·방향 증거 계약](state-clock-and-direction-witness.md)을 함께 배포한다.
 
 지도와 전체 path는 G1 UDS·작은 JSON latest 슬롯에 넣지 않는다. Gateway actor는
 권위와 G2 출처·적용 metadata를 소유한다. 큰 사본의 decode/encode는 binary I/O 소유자가

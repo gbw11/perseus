@@ -14,7 +14,7 @@ FLOATS=('resolution wheelbase front rear half_width margin max_steer steer_rate 
         'max_accel max_brake max_lateral_accel lookahead_min lookahead_max lookahead_time reaction_s '
         'goal_distance goal_heading tracking_error max_position_error max_heading_error max_steering_error primitive_speed '
         'primitive_duration pose_age_us live_age_us cell_age_ms deviation_cost curvature_cost switch_cost plan_horizon heuristic_weight heading_weight tracking_guard goal_straight_m max_reverse_velocity').split()
-INTS=('node_limit','expansion_limit','collision_limit','steering_levels','clock_error_us','clock_lease_us','planner_budget_us','state_period_us')
+INTS=('node_limit','expansion_limit','collision_limit','steering_levels','clock_error_us','clock_lease_us','planner_budget_us','state_period_us','direction_phase_us','guest_timestamp_error_us','guest_drift_ppm')
 
 def generate(profile,output):
     cfg=json.loads(profile.read_text(encoding='utf-8'))
@@ -27,6 +27,8 @@ def generate(profile,output):
         if type(cfg[key]) not in (int,float) or not math.isfinite(cfg[key]) or cfg[key]<=0:raise ValueError('positive finite '+key)
     for key in INTS:
         if type(cfg[key]) is not int or not 0<cfg[key]<=2**31-1:raise ValueError('positive bounded '+key)
+    if cfg['guest_drift_ppm']>=1000000 or cfg['guest_timestamp_error_us']>=1000000:raise ValueError('explicit paired guest clock bounds')
+    if cfg['direction_phase_us']>10000000:raise ValueError('provisional direction phase cap')
     if cfg['node_limit']>8192 or cfg['expansion_limit']>100000 or cfg['collision_limit']>100000000:raise ValueError('compiled resource caps')
     if cfg['max_steer']>=math.pi/2 or 2*cfg['max_steer']/cfg['primitive_duration']>cfg['steer_rate']:raise ValueError('steering continuity/rate')
     if cfg['lookahead_max']<cfg['lookahead_min'] or cfg['primitive_speed']>cfg['max_velocity']:raise ValueError('profile speed/lookahead')
@@ -69,7 +71,9 @@ def generate(profile,output):
     output.mkdir(parents=True,exist_ok=True)
     (output/'primitives.c').write_bytes('\n'.join(lines).encode())
     (output/'primitive-manifest.json').write_bytes((json.dumps(dict(profile=cfg,profile_sha256=digest,asset_sha256=asset_hash,generator_sha256=generator_hash,
-        states=81,samples_per_primitive=17,forward_only=True,in_place_or_holonomic_controls=False,
+        states=81,samples_per_primitive=17,forward_only=False,stored_geometry_forward=True,reverse_transform="(-x,y,-yaw),same steering",
+        maximum_segments=3,maximum_cusps=2,direction_phase_policy="provisional software cap; original phase E is never renewed",
+        in_place_or_holonomic_controls=False,
         root_targets=9,interior_target_indices=[0,2,4,6,8],heading_bins=32,xy_bin_m=cfg['resolution'],
         primitive_source_sha256=hashlib.sha256((output/'primitives.c').read_bytes()).hexdigest()),indent=2)+'\n').encode())
 

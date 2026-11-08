@@ -37,6 +37,7 @@ class VerifiedGatewayRunner(GatewayRunner):
         self.drive_link=None
         self.mapper_uplink=None
         self.scene_runtime=None
+        self.operator=None;self._authority_worker=None
         self._durable_events=deque(maxlen=8);self._durable_feedback=deque(maxlen=64)
         self.durable_event_dropped=self.durable_feedback_dropped=0
         self._pending_stop = None
@@ -154,6 +155,7 @@ class VerifiedGatewayRunner(GatewayRunner):
     def _feed(self,t,message):
         if getattr(message,'retained',False) and message.type!='vehicle.control':return
         if (self.readiness_profile=='warm-drive-1' and message.type=='drive.input' and message.topic==topics.manual_input()):
+            if self.operator is not None:return  # actual local registry already supplied its immutable source
             self.machine.on_manual_input(message.payload,message.received_monotonic);return
         if message.type=='vehicle.control':
             try:self.authority.reconcile(message.payload)
@@ -173,6 +175,16 @@ class VerifiedGatewayRunner(GatewayRunner):
                 if binding is None:return
                 ref={k:envelope.get(k) for k in ('message_id','boot_id','agent_instance_id','seq')}
                 ref.update(vm_id=vm,app_id=app,execution_id=binding['execution_id'],received_monotonic=t)
+                if self.operator is not None:
+                    try:ref=self.operator.admit_command(vm,app,message.payload,ref)
+                    except ValueError:return
+                    if ref is None:return
+                    if message.payload['command_kind']=='STOP':
+                        self.machine.on_command(app,vm,message.payload,t,ref)
+                        if vm==self.machine.active_vm and app==self.machine.active_app:
+                            self._submit(ForwardStop(self.machine.generation,ref),wait_for_stop=False)
+                        return
+                elif message.payload.get('profile') in ('drive-command-2','drive-command-3'):return
                 self.machine.on_command(app,vm,message.payload,t,ref)
         elif (message.type in (RESUME_REQUESTED,RESUME_CANCEL_REQUESTED) and message.topic in (CONSOLE_RESUME,topics.app_events('interaction'))
               and not self._output_broken and self._control_message_id is not None
@@ -215,6 +227,7 @@ class VerifiedGatewayRunner(GatewayRunner):
         self.machine=machine(vm_ids=self.pair,authority=self.authority,bindings=self.bindings,
             clock=self._clock,timing=self._timing)
         self.machine.durable_write_available=self._durable_available
+        self.machine.manual_registry=None if self.operator is None else self.operator.sources
         self.machine.continuous_handoff=self.drive_link is not None
         retained=self._client.latest(topics.vehicle_control())
         if retained is not None:
@@ -337,7 +350,7 @@ class VerifiedGatewayRunner(GatewayRunner):
             # One original STOP remains owned. Do not resubmit it or allow
             # DRIVE to overtake its unresolved physical submission.
             return
-        now=self._clock();source=action.source if isinstance(action,ForwardDrive) else None
+        now=self._clock();source=action.source
         device=self.device_view()
         if device['feedback_supported'] and not device['ready']:
             self.submissions.append(dict(source=source,generation=action.generation,device_applied=None,
@@ -347,6 +360,12 @@ class VerifiedGatewayRunner(GatewayRunner):
             return
         if isinstance(action,ForwardDrive):
             if not self.machine.output_permitted or action.generation!=self.machine.generation or not source:return
+            if source.get('command',{}).get('command_kind')=='STOP':
+                self._submit(ForwardStop(action.generation,source),wait_for_stop=False);return
+            if self.operator is not None and not self.operator.command_allowed(source.get('command',{})):
+                self._deferred_drive=None;self._submit(ForwardStop(action.generation),wait_for_stop=False);return
+            if source.get('valid_until_pi_us') is not None and int(now*1e6)>=source['valid_until_pi_us']:
+                self.serial_context_rejected+=1;return
             if self.scene_runtime is not None and not self.scene_runtime.command_allowed(source,int(now*1e6)):
                 self.serial_context_rejected+=1;self._deferred_drive=None
                 self._submit(ForwardStop(action.generation),wait_for_stop=False)
@@ -359,6 +378,9 @@ class VerifiedGatewayRunner(GatewayRunner):
                 self.serial_context_rejected+=1;return
             if not self._manual_can_move(action,device,now):return
             frame=self._encoder.drive(action.generation,action.v_mps,action.steer_rad)
+            if source.get('valid_until_pi_us') is not None:
+                from dataclasses import replace
+                frame=replace(frame,issued_pi_us=source.get('issued_pi_us'),expires_pi_us=source['valid_until_pi_us'],witness=source)
             if self.drive_link is not None:
                 ready=getattr(self._sink,'drive_ready_at',lambda f:0.)(frame)
                 if ready>now:
@@ -370,6 +392,12 @@ class VerifiedGatewayRunner(GatewayRunner):
             self._deferred_drive=None
         else:
             self._deferred_drive=None;frame=self._encoder.stop(action.generation,STOP_SAFE_STOP)
+            if self.operator is not None or source is not None:
+                from dataclasses import replace
+                source={} if source is None else dict(source)
+                source.setdefault('generation',action.generation)
+                source.setdefault('gateway_instance',self.drive_link.instance if self.drive_link else self._client.identity.agent_instance_id)
+                frame=replace(frame,witness=source)
         data=encode(frame)
         record={'source':source,'frame_counter':frame.counter,'generation':frame.generation,
                 'encoded_hex':data.hex(),'submitted_monotonic':now,'device_applied':None}
@@ -457,6 +485,7 @@ class VerifiedGatewayRunner(GatewayRunner):
         self._finish_stop()
         if self.drive_link is not None:self.drive_link.tick()
         if self.mapper_uplink is not None:self.mapper_uplink.tick(self.drive_link)
+        if self.operator is not None:self.operator.tick()
         if self.scene_runtime is not None:self.scene_runtime.tick()
         if self._durable_available():
             for _ in range(len(self._durable_events)):
@@ -490,7 +519,53 @@ class VerifiedGatewayRunner(GatewayRunner):
             self._submit(ForwardStop(self.machine.generation))
 
     def _durable_available(self):
-        return self.scene_runtime is None or self.scene_runtime.durable_available
+        # 새 Authority bytes가 저장됐어도 원 ACK를 actor가 소비하기 전에는
+        # old generation의 READY/delivery로 새 PENDING을 적용할 수 없다.
+        worker=self._authority_worker
+        return worker is None or not worker.busy and worker._results.empty()
+
+    def authority_worker(self):
+        """Scene/operator가 동일 Authority job1 owner를 공유한다."""
+        if self._authority_worker is None:
+            from .authority_journal import AuthorityJournalWorker
+            self._authority_worker=AuthorityJournalWorker(self.authority,lambda:int(self._clock()*1e6))
+        return self._authority_worker
+
+    def configure_operator(self):
+        if self.operator is not None or self.readiness_profile!='warm-drive-1':
+            raise ValueError('one operator owner requires warm profile')
+        from .operator_service import OperatorService
+        self.operator=OperatorService(self)
+
+    def submit_operator(self,call):
+        if self.operator is None:raise ValueError('operator profile not configured')
+        return self.operator.submit(call)
+
+    def matched_stop(self):
+        """feedback3 원 ingress만 stationary 증거가 된다. feedback2/write ACK는 변환하지 않는다."""
+        device=getattr(self._sink,'device',None)
+        value=getattr(device,'matched_stop',None)
+        policy=getattr(device,'stationary_policy',None)
+        sample=self.device_view().get('vehicle_sample')
+        if value is None or policy is None or sample is None or self.machine is None:return None
+        try:
+            value.check(dict(vehicle=sample['vehicle'],calibration=sample['calibration'],odom_epoch=sample['odom_epoch']),
+                self.authority.host,self.drive_link.instance if self.drive_link else self._client.identity.agent_instance_id,
+                self.machine.generation,self.device_view()['pi_session'],self.device_view()['device_session'],policy,int(self._clock()*1e6))
+        except ValueError:return None
+        return value
+
+    def current_scene_gate(self):
+        from .scene_authority import SceneGate
+        from .machine import Mode
+        m=self.machine;stop=self.matched_stop()
+        if m is None or stop is None or m.mode not in (Mode.MANUAL,Mode.SAFE_STOP):return None
+        device=self.device_view();operator=self.operator
+        mission=None if operator is None else operator.missions.current()
+        return SceneGate('MANUAL' if m.mode is Mode.MANUAL else 'HOLD',m.generation,
+            device['pi_session'],device['device_session'],0 if operator is None else operator.fence_revision,
+            stop,pulse_active=bool(operator and operator.sources and operator.sources.moving),
+            parking_active=bool(mission and mission['kind']==2 and mission['phase']!='HOLD'),countdown_active=bool(m._countdown))
 
     def configure_scene(self,policy):
         """명시 설치 profile의 actual owner를 연결한다. 기본은 기존 live-only 동작이다."""
@@ -538,3 +613,4 @@ class VerifiedGatewayRunner(GatewayRunner):
                 self._finish_stop()
             finally:
                 if self.scene_runtime is not None:self.scene_runtime.close()
+                if self._authority_worker is not None:self._authority_worker.close()

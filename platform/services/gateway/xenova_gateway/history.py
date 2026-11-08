@@ -102,6 +102,8 @@ def candidate(store, now_ms):
 
 def admission(store, identity, spec, now_ms, fields):
     """Validate a new key. Existing records are compared before this boundary."""
+    from .operator_contract import conflict
+    if conflict(store,identity):return 'IDEMPOTENCY_CONFLICT'
     key = request_key(identity)
     if key is None:
         if store.history_policy is not None or store.value.get('history'):
@@ -119,6 +121,9 @@ def admission(store, identity, spec, now_ms, fields):
         return 'REQUEST_TIME_INVALID'
     fence = fields.get('history', store.value.get('history', {}))
     floor = fence.get('floor_ms', 0) if fence.get('host_boot_id') == store.host else 0
+    if store.value.get('operator_host_boot_id')==store.host:
+        floor=max(floor,store.value.get('operator_floor_ms',0),store.value.get('operator_startup_ms',0))
+    floor=max(floor,getattr(store,'operator_ram_floor',0))
     if issued <= floor or now_ms >= issued + store.history_policy.retry_ms:
         return 'REQUEST_WINDOW_EXPIRED'
     if spec['deadline_ms'] > issued + store.history_policy.retry_ms:
@@ -128,8 +133,10 @@ def admission(store, identity, spec, now_ms, fields):
 
 def room(value):
     """Reserve supported terminal evidence at admission, not after its effect."""
+    from .operator_contract import capacity,reserved_bytes
+    if not capacity(value):return False
     base = {k: v for k, v in value.items() if k not in ('transitions', 'protections', 'pending')}
-    size = len(json.dumps(base, separators=(',', ':')).encode()) + ROW_RESERVE
+    size = len(json.dumps(base, separators=(',', ':')).encode()) + ROW_RESERVE + reserved_bytes(value)
     for name in ('transitions', 'protections'):
         for row in value.get(name, []):
             length = len(json.dumps(row, separators=(',', ':')).encode())

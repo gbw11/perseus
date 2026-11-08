@@ -114,7 +114,7 @@ void k_sleep(int64_t ms){
   assert(!memcmp(&original_handle,&engine->receive_handle,sizeof(original_handle)));
  }
  if(!world_owner&&iteration==0&&source_rc){
-  assert(current_clock.expires_guest==2000000&&application_pending&&probe_sequence==1&&probe_sent==90000);
+  assert(current_clock.expires_guest==2000000&&application_pending&&auto_probe_sequence==1&&probe_sent==90000);
   assert(!next_probe&&!next_snapshot&&!publishes&&!snapshots);
   for(unsigned k=0;k<2;k++)assert(!atomic_get(&copies[k].state));
  }
@@ -182,7 +182,9 @@ int main(int argc,char **argv){
  if(!strcmp(scenario,"source-copy"))assert(dw_link_decode(wire,wire_size,&incoming)==DW_OK&&
   incoming.which_payload==xenova_drive_DriveLink_accepted_tag);
  engine=&actual_engine;de_init(engine,&lp_selected_config,&lp_selected_assets);assert(!dw_pool_source(&engine->maps,&trust));
- current_clock.trust=trust;current_clock.lower=1000000;current_clock.upper=1100000;current_clock.expires_guest=2000000;
+ current_clock.trust=latest_trust=trust;
+ strcpy(current_clock.vm,vm);strcpy(current_clock.execution,execution);strcpy(current_clock.app_instance,app);strcpy(current_clock.host_boot,host);
+ current_clock.lower=1000000;current_clock.upper=1100000;current_clock.expires_guest=2000000;
  strcpy(current_clock.gateway,gateway_id);strcpy(gateway,gateway_id);context_available=clock_available=true;
  strcpy(fixture_boot.identity.vm_id,vm);strcpy(fixture_boot.identity.boot_id,host);
  strcpy(fixture_boot.identity.host_boot_id,host);strcpy(fixture_boot.identity.execution_id,execution);
@@ -198,11 +200,11 @@ int main(int argc,char **argv){
   assert(!de_world(engine,wire,wire_size,1200000));assert(engine->receive_awaiting);
   original_handle=engine->receive_handle;vehicle(1,1100000);vehicle(2,1190000);
  }
- probe_sequence=1;probe_sent=90000;application_pending=true;applied.application_sequence=7;
+ auto_probe_sequence=1;probe_sent=90000;application_pending=true;applied.application_sequence=7;
  uint64_t original_expiry=current_clock.expires_guest;running=true;context_calls=0;
  if(world_owner)maps(NULL,NULL,NULL);else state(NULL,NULL,NULL);
  if(source_rc&&!recover){assert(!accepted_maps&&!engine->maps.published);assert(current_clock.expires_guest==original_expiry);
-  assert(application_pending&&probe_sequence==1&&probe_sent==90000&&!next_probe&&!next_snapshot&&!publishes&&!snapshots);
+  assert(application_pending&&auto_probe_sequence==1&&probe_sent==90000&&!next_probe&&!next_snapshot&&!publishes&&!snapshots);
   for(unsigned k=0;k<2;k++)assert(!atomic_get(&copies[k].state));}
  if(world_owner){assert(!engine->receive_pending&&!engine->receive_awaiting);
   if(recover)assert(engine->maps.published==1);
@@ -212,7 +214,7 @@ int main(int argc,char **argv){
   }
  }
  if(recover_closed)assert(connects==1&&inputs_seen==0&&polls==1&&contexts[0]==1);
- if(recover_link)assert(current_clock.expires_guest==102000+lp_selected_config.clock_lease_us&&reads==2&&rejected_links==1&&probe_sequence==2);
+ if(recover_link)assert(current_clock.expires_guest==102000+lp_selected_config.clock_lease_us&&reads==2&&rejected_links==1&&auto_probe_sequence==2);
  if(!strcmp(scenario,"closed")||hard||stop_in_context||!strcmp(scenario,"close-error"))assert(!inputs_seen&&!polls&&!connects&&!publishes);
  else if(disconnected)assert(inputs_seen==1&&polls==1&&!connects&&selected->last_io_rc==-ECONNRESET);
  else if(source_rc&&!recover)assert(inputs_seen==1&&polls==1&&!connects);
@@ -248,12 +250,12 @@ def owner(tmp_path_factory):
     source=directory/'owners.c';source.write_text(HARNESS);binary=directory/'owners'
     world=HOME/'world';mqtt=HOME.parent/'common/xenova-mqtt-c';planner=HOME/'planner'
     sources=[source,world/'world.c',world/'generated/world.pb.c',*(world/'nanopb'/n for n in ('pb_common.c','pb_decode.c','pb_encode.c')),
-             planner/'engine.c',planner/'lattice.c',planner/'generated/primitives.c',*sorted((mqtt/'src').glob('*.c'))]
+             planner/'task_reference.c',planner/'engine.c',planner/'lattice.c',planner/'generated/primitives.c',*sorted((mqtt/'src').glob('*.c'))]
     command=['cc','-std=gnu11','-O1','-g','-Wall','-Wextra','-Werror','-ffunction-sections','-fdata-sections','-Wl,--gc-sections',
              '-fsanitize=address,undefined','-DCONFIG_XENOVA_MQTT_BOUNDED_IO=1','-DCONFIG_XENOVA_MQTT_IO_MS=50',
              '-DCONFIG_XENOVA_MQTT_RX_BUF=2048','-DCONFIG_XENOVA_MQTT_TX_BUF=2048','-DCONFIG_XENOVA_MQTT_MAX_SUBS=4',
              '-DCONFIG_XENOVA_MQTT_LATEST_SLOTS=4','-DCONFIG_XENOVA_MQTT_PUB_TOPICS=4','-DTEST_PRIMITIVE_SHA="'+fixture.PRIMITIVE+'"',
-             *['-I'+str(p) for p in (inc,HOME/'zephyr/src',planner,world,world/'generated',world/'nanopb',mqtt/'include',mqtt/'src',mqtt/'ports/zephyr',mqtt/'third_party/jsmn')],
+             *['-I'+str(p) for p in (inc,HOME/'zephyr/src',planner,world,world/'generated',world/'nanopb',mqtt/'include',mqtt/'src',mqtt/'ports/zephyr',mqtt/'third_party/jsmn',HOME.parent/'common/xenova-drive-runtime/include')],
              *map(str,sources),'-lm','-o',str(binary)]
     build=subprocess.run(command,capture_output=True,text=True);assert build.returncode==0,build.stderr
     def run(kind,scenario,wire=None):

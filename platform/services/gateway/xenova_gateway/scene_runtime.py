@@ -33,66 +33,7 @@ class SceneSubmission:
             raise SceneAuthorityError('only begin carries original scene IDs')
 
 
-@dataclass(frozen=True, slots=True)
-class _JournalResult:
-    proposal: SceneJournalProposal
-    ack: SceneJournalAck | None
-    unknown: bool
-    error: str | None
-
-
-class SceneJournalWorker:
-    """동일 Authority의 worker1/job1/result1. fsync 동안 actor가 lock을 기다리지 않는다.
-
-    busy는 actor의 submit 전에 설정하고 execute가 원 lock을 반납한 뒤에만 내린다.
-    실제 durable 진입은 runner/machine의 busy guard가 지연하며 데이터/STOP 경로는 계속 돈다.
-    """
-    def __init__(self, store, clock_us):
-        self.store, self.clock_us = store, clock_us
-        self._jobs = queue.Queue(maxsize=1); self._results = queue.Queue(maxsize=1)
-        self._busy = threading.Event(); self._stop = threading.Event()
-        self.thread = threading.Thread(target=self._run, name='gateway-scene-journal', daemon=False)
-        self.thread.start()
-
-    @property
-    def busy(self): return self._busy.is_set()
-
-    def submit(self, proposal):
-        if (type(proposal) is not SceneJournalProposal or self._stop.is_set()
-                or self.busy or not self._results.empty()):
-            raise SceneAuthorityError('one live original scene journal')
-        self._busy.set()
-        try: self._jobs.put_nowait(proposal)
-        except BaseException:
-            self._busy.clear(); raise
-
-    def _run(self):
-        while not self._stop.is_set() or not self._jobs.empty():
-            try: proposal = self._jobs.get(timeout=.05)
-            except queue.Empty: continue
-            try:
-                ack = execute_scene_journal(self.store, proposal, clock_us=self.clock_us)
-                result = _JournalResult(proposal, ack, False, None)
-            except BaseException as error:
-                from .authority import AuthorityError
-                current = self.store.value.get('current_scene')
-                written = current is not None and json.dumps(current, sort_keys=True,
-                    separators=(',', ':'), ensure_ascii=True).encode('ascii') == proposal.record
-                unknown = bool(self.store.error or written or not isinstance(error, AuthorityError))
-                result = _JournalResult(proposal, None, unknown, type(error).__name__)
-            try: self._results.put_nowait(result)
-            finally:
-                # execute's with-store-lock has unwound before this publication.
-                self._busy.clear()
-
-    def take(self):
-        try: return self._results.get_nowait()
-        except queue.Empty: return None
-
-    def close(self):
-        self._stop.set(); self.thread.join(1.)
-        if self.thread.is_alive():
-            raise RuntimeError('SCENE_JOURNAL_OWNER_TERMINATION_UNCONFIRMED')
+from .authority_journal import AuthorityJournalWorker as SceneJournalWorker
 
 
 class GatewaySceneRuntime:
@@ -108,7 +49,7 @@ class GatewaySceneRuntime:
         self._last_fence = None; self.closed = False
         self._semantic_dispatch = False; self._advanced_negative = None
         self.rejected = self.failed = self.journal_unknown = self.fenced = 0
-        self.worker = SceneJournalWorker(runner.authority, lambda: int(runner._clock()*1_000_000))
+        self.worker = runner.authority_worker()
 
     @property
     def thread(self): return self.worker.thread
@@ -134,6 +75,7 @@ class GatewaySceneRuntime:
     def _current_gate(self):
         from .machine import Mode
         m = self.runner.machine; gate = self._gate
+        if getattr(self.runner,'operator',None) is not None:gate=self.runner.current_scene_gate()
         if m is None or gate is None or m.failure or self.runner._output_broken: return None
         mode = 'MANUAL' if m.mode is Mode.MANUAL else 'HOLD' if m.mode is Mode.SAFE_STOP else None
         if (mode != gate.mode or gate.generation != m.generation
@@ -321,7 +263,8 @@ class GatewaySceneRuntime:
             self._fence('CURRENT_SCENE_UNAVAILABLE')
         elif self.motion_grant(now) is not None: self._last_fence = None
         proposal = owner.take_journal()
-        if proposal is not None and self._submitted is None and self._unknown is None:
+        if (proposal is not None and self._submitted is None and self._unknown is None
+                and not self.worker.busy and self.worker._results.empty()):
             self._submitted = proposal
             self.worker.submit(proposal)
 

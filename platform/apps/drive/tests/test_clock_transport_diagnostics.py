@@ -102,7 +102,7 @@ static void probe_value(xenova_drive_DriveLink *out,uint64_t sequence){
  strcpy(out->payload.probe.vm,"11111111-1111-4111-8111-111111111111");
  strcpy(out->payload.probe.execution,"22222222-2222-4222-8222-222222222222");
  strcpy(out->payload.probe.app_instance,"33333333-3333-4333-8333-333333333333");
- out->payload.probe.sequence=sequence;out->payload.probe.guest_send_us=1000000;probe_sequence=sequence;probe_sent=1000000;
+ out->payload.probe.sequence=sequence;out->payload.probe.guest_send_us=1000000;auto_probe_sequence=sequence;probe_sent=1000000;
 }
 #if defined(CONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS)
 static atomic_bool writer_done;
@@ -150,7 +150,7 @@ int main(int argc,char **argv){
  if(!strcmp(scenario,"wire-fail"))publish_rc=-EIO;
  if(!strcmp(scenario,"extra-clock-fail"))fail_read=1;
  int result=binary_publish(&link_client,"fixture/out",&p);
- assert(p.payload.probe.sequence==1&&p.payload.probe.guest_send_us==1000000&&probe_sent==1000000&&probe_sequence==1);
+ assert(p.payload.probe.sequence==1&&p.payload.probe.guest_send_us==1000000&&probe_sent==1000000&&auto_probe_sequence==1);
  assert(encode_calls==1&&publish_calls==(encode_fail?0U:1U));
  assert(link_client.socket_io.deadline_ms==(encode_fail?0:1251));
 #if defined(CONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS)
@@ -223,7 +223,7 @@ def native(tmp_path_factory):
     source=directory/'input.c';source.write_text(HARNESS)
     mqtt=HOME.parent/'common/xenova-mqtt-c';world=HOME/'world';binaries={}
     common=['cc','-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-Wno-misleading-indentation','-ffunction-sections','-fdata-sections','-Wl,--gc-sections','-Wl,--wrap=pb_encode','-Wl,--wrap=dw_link_decode','-fsanitize=undefined','-fstack-usage','-DCONFIG_XENOVA_MQTT_BOUNDED_IO=1','-DCONFIG_XENOVA_MQTT_IO_MS=250',
-        *['-I'+str(path) for path in (include,HOME/'zephyr/src',HOME/'planner',world,world/'generated',world/'nanopb',mqtt/'include',mqtt/'third_party/jsmn')],str(source),str(world/'world.c'),str(world/'generated/world.pb.c'),*[str(p) for p in sorted((mqtt/'src').glob('*.c'))],*[str(world/'nanopb'/name) for name in ('pb_common.c','pb_decode.c','pb_encode.c')],'-lm','-pthread']
+        *['-I'+str(path) for path in (include,HOME/'zephyr/src',HOME/'planner',world,world/'generated',world/'nanopb',mqtt/'include',mqtt/'third_party/jsmn',HOME.parent/'common/xenova-drive-runtime/include')],str(source),str(world/'world.c'),str(world/'generated/world.pb.c'),*[str(p) for p in sorted((mqtt/'src').glob('*.c'))],*[str(world/'nanopb'/name) for name in ('pb_common.c','pb_decode.c','pb_encode.c')],'-lm','-pthread']
     for enabled in (False,True):
         binary=directory/('on' if enabled else 'off')
         command=[*common,'-DINPUT_SOURCE="'+str(HOME/'zephyr/src/lattice_input.c')+'"',*(['-DCONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS=1','-DCONFIG_SHELL=1'] if enabled else []),'-o',str(binary)]

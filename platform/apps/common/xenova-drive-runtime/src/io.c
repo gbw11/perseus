@@ -38,7 +38,7 @@ static struct {
  uint64_t context_revision,connection_revision;
  uint32_t generation,age_ms;
  char session[XM_UUID_LEN+1],receiver[XM_UUID_LEN+1];
- bool classified,valid,committed;
+ bool classified,valid,committed,modern;
 } memory_source;
 static struct xdr_app_buffer input_memory;
 static uint32_t input_age_ms;
@@ -102,18 +102,24 @@ static int accept_input(void *unused,const char *topic,const struct xm_envelope 
   memory_control_rc=xd_manual_control_observed(&manual_source,env->payload,&memory_control);
  if(!strcmp(topic,input_topic)&&xm_span_eq(env->type,"drive.input")){
   bool seen=manual_source.seen;uint64_t sample=manual_source.last.sample;
+  bool modern_seen=manual_source.modern_seen;uint64_t modern_state=manual_source.modern.state;
   char session[XM_UUID_LEN+1];strcpy(session,manual_source.last.session);
   int rc=xd_manual_accept(&manual_source,env->payload,now);
   if(!rc){
    /* A legacy body does not update the parsed original sample. Never label
     * it using the previous strict sample, even in the same clock tick. */
-   memory_source.classified=manual_source.seen&&(!seen||sample!=manual_source.last.sample||
-    strcmp(session,manual_source.last.session));
+   memory_source.modern=manual_source.modern_seen&&(!modern_seen||modern_state!=manual_source.modern.state);
+   memory_source.classified=memory_source.modern||(manual_source.seen&&(!seen||sample!=manual_source.last.sample||
+    strcmp(session,manual_source.last.session)));
    memory_source.sequence=env->seq;memory_source.received_ms=now;memory_source.committed=false;
    memory_source.connection_revision=working.connection_revision+(client->connected!=working.connected);
    memory_source.valid=manual_source.last.valid;memory_source.generation=manual_source.last.generation;
    memory_source.age_ms=manual_source.last.age_ms;
    strcpy(memory_source.session,manual_source.last.session);strcpy(memory_source.receiver,manual_source.receiver);
+   if(memory_source.modern){
+    memory_source.valid=manual_source.modern.valid;memory_source.generation=manual_source.modern.generation;
+    strcpy(memory_source.session,manual_source.modern.session);memory_source.age_ms=0;
+   }
   }
   return rc;
  }
@@ -134,6 +140,9 @@ static void memory_commit(void){
  if(!in->length){if(!input_memory.source_rc)input_memory.source_rc=-ENODATA;return;}
  input_memory.input_status=XDR_INPUT_UNCLASSIFIED;
  if(!memory_source.classified||!original)return;
+ /* Pi source expiry needs the real clock bridge, owned by the calculation.
+  * Do not label a modern input fresh using only guest receive age. */
+ if(memory_source.modern)return;
  if(working.control.error||memory_control_rc||!working.connected||working.connection_revision!=memory_source.connection_revision||
     strcmp(memory_source.receiver,working.app_instances[1])||strcmp(memory_control.mode,"MANUAL")||
     memory_control.generation!=memory_source.generation||strcmp(memory_control.manual_session,memory_source.session)||
@@ -181,6 +190,18 @@ static int publish_as(const char *topic,const char *type,const char *json,const 
  ARG_UNUSED(instance);return xm_zclient_publish_until(client,topic,type,json,end);
 #endif
 }
+/* I/O-owner only: a new held lease may supersede state without changing its
+ * action. It never renews this candidate's original E. Release/grant/keys or
+ * a source fault invalidates old completed DRIVE before serialization. */
+static bool manual_candidate_current(const struct xd_candidate *c){
+ if(!c->modern_manual)return true;
+ const struct xm_manual_input *old=&c->manual_source,*now=&manual_source.modern;
+ return manual_source.modern_seen&&!manual_source.blocked&&now->valid&&old->valid&&
+  old->profile==now->profile&&old->kind==now->kind&&old->action==now->action&&old->state<=now->state&&
+  old->keys==now->keys&&old->grant_revision==now->grant_revision&&
+  !strcmp(old->session,now->session)&&!strcmp(old->input_epoch,now->input_epoch)&&
+  !strcmp(old->source_instance,now->source_instance)&&!strcmp(old->device_instance,now->device_instance);
+}
 static void send_command(void) {
  k_mutex_lock(&exchange_lock,K_FOREVER);
  bool take=command_pending;
@@ -190,7 +211,7 @@ static void send_command(void) {
  if(!take)return;
  struct xd_delivery d=result(&active,XD_SENT,0);
  if(atomic_get(&stop)||!xd_owner_admit()){d.disposition=XD_STOPPED;d.rc=-ESHUTDOWN;}
- else if(!valid){d.disposition=XD_CONTEXT_CHANGED;d.rc=-EXDEV;}
+ else if(!valid||!manual_candidate_current(&active)){d.disposition=XD_CONTEXT_CHANGED;d.rc=-EXDEV;}
  else if(k_uptime_get()>=active.expires_ms){d.disposition=XD_EXPIRED;d.rc=-ETIME;}
  else {
   d.send_begin_us=clock_us();

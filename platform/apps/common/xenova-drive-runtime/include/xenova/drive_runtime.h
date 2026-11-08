@@ -18,6 +18,10 @@ int xd_command_input(const char *message_type);
 /* Binary product input uses its actual source sample and earliest valid-until
  * on this guest clock. It is not a fabricated perception.result receive. */
 int xd_command_bound(int64_t valid_until_ms);
+/* Exact original xdiag counter-us deadline; an actual k_uptime bracket maps
+ * the remaining duration to the ms transport clock, rounded down.
+ * No receive/completion time may replace the source's converted deadline. */
+int xd_command_bound_us(uint64_t original_valid_until_guest_us);
 /* Identity copied with this iteration's input snapshot; empty before bootstrap. */
 const char *xd_vm_id(void);
 int xd_publish(struct xm_zclient *, const char *topic, const char *type, const char *payload);

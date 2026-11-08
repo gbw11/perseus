@@ -139,7 +139,8 @@ class AuthorityStore:
             if (type(pending['generation']) is not int or pending['generation']!=value['generation'] or type(pending['deadline_ms']) is not int or
                 pending['deadline_ms']<0 or type(pending['arm_after_apply']) is not bool):raise ValueError('pending context invalid')
         if value['phase']=='PENDING' and pending is None:raise ValueError('pending deadline required')
-        if value.get('manual_input_profile') not in (None,'manual-session-1'):raise ValueError('manual input profile')
+        if value.get('manual_input_profile') not in (None,'manual-session-1','manual-input-2','manual-input-3'):
+            raise ValueError('manual input profile')
         if pending and ('manual_policy' in pending or 'manual_session' in pending):
             canonical(pending['manual_session'])
             if pending['manual_policy'] not in ('CONTINUE_SESSION','NEUTRAL_THEN_ACTION'):raise ValueError('manual policy')
@@ -197,6 +198,8 @@ class AuthorityStore:
                 validate_result(row,submitted,row.get('committed_generation'))
         from .provider import validate_records
         validate_records(value)
+        from .operator_contract import validate_store
+        validate_store(value)
 
     def save(self,value):
         self.validate(value)
@@ -233,6 +236,10 @@ class AuthorityStore:
             value={**self.value,**fields};return self.save(value)
 
     def issue(self,mode: Mode,owner: str,reason: str,now: float,timeout: float,*,arm: bool,manual=None,distrust=None):
+        return self.update(**self.issue_fields(mode,owner,reason,now,timeout,arm=arm,manual=manual,distrust=distrust))
+
+    def issue_fields(self,mode: Mode,owner: str,reason: str,now: float,timeout: float,*,arm: bool,manual=None,distrust=None):
+        """원 issue와 같은 변경안. operator journal은 이 값과 mission/원장을 한 번 저장한다."""
         if self.error:raise AuthorityError(self.error)
         canonical(owner)
         if mode is not Mode.SAFE_STOP and self.protected(owner):
@@ -243,7 +250,7 @@ class AuthorityStore:
         if distrust is not None:
             rows=[row for row in self.value.get('distrusted',[]) if row['vm_id']!=distrust['vm_id']]
             fields['distrusted']=[*rows,distrust]
-        return self.update(generation=generation,mode=mode.value,owner=owner,reason=reason,phase='PENDING',
+        return dict(generation=generation,mode=mode.value,owner=owner,reason=reason,phase='PENDING',
             manual_hold=False if mode is Mode.AUTO else self.value.get('manual_hold',False),
             pending={'generation':generation,'host_boot_id':self.host,'deadline_ms':int((now+timeout)*1000),
                      'arm_after_apply':arm,**(manual or {})},requests=[],**fields)

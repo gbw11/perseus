@@ -43,6 +43,8 @@ int drive_lattice_reset_poll(int64_t);
 void drive_lattice_adapter(struct drive_adapter *,bool);
 int drive_lattice_join(int64_t);
 void drive_lattice_report(void);
+int drive_lattice_command(const struct drive_completion *,struct xm_drive_command3 *,uint64_t *);
+void drive_lattice_command_attempt(const struct drive_completion *,const struct xm_drive_command3 *);
 #define main product_main
 #include "main.c"
 #undef main
@@ -119,6 +121,7 @@ int xd_publish_supervision(const char *topic,const char *payload,uint64_t check,
 }
 int xd_command_input(const char *type){assert(type);return 0;}
 int xd_command_bound(int64_t until){assert(until>0);return 0;}
+int xd_command_bound_us(uint64_t until){assert(until>0);return 0;}
 void xd_command(struct xm_zclient *client,const char *topic,const char *json,int encoded,uint32_t generation,float v,float steer,int64_t input_seq,int64_t control_seq,int64_t age,uint32_t timeout){
  (void)client;(void)input_seq;(void)control_seq;(void)age;(void)timeout;
  assert(topic&&json&&encoded>0&&generation==1&&steer==0);attempts++;
@@ -147,6 +150,8 @@ int drive_lattice_reset_poll(int64_t end){assert(end);return 0;}
 void drive_lattice_adapter(struct drive_adapter *a,bool manual){(void)a;(void)manual;assert(0);}
 int drive_lattice_join(int64_t end){assert(end);return 0;}
 void drive_lattice_report(void){}
+int drive_lattice_command(const struct drive_completion *w,struct xm_drive_command3 *out,uint64_t *e){(void)w;(void)out;(void)e;assert(0);return -EINVAL;}
+void drive_lattice_command_attempt(const struct drive_completion *w,const struct xm_drive_command3 *c){(void)w;(void)c;assert(0);}
 int main(void){
  assert(!product_main());
  assert(loops==60&&reads[0]==60&&first_restricted_iteration==1&&restricted_reentry_iteration==51);
@@ -203,7 +208,7 @@ def compile_main(tmp_path, harness, defines):
                PLATFORM / 'apps/autonomous/zephyr/src/autonomous.c',
                PLATFORM / 'apps/manual/zephyr/src/manual.c']
     sources += [mqtt / 'src' / name for name in (
-        'xm_topic.c', 'xm_policy.c', 'xm_envelope.c', 'xm_json.c', 'xm_seq.c', 'xm_payload.c')]
+        'xm_topic.c', 'xm_policy.c', 'xm_envelope.c', 'xm_json.c', 'xm_seq.c', 'xm_payload.c','xm_manual.c')]
     argv = ['cc', '-std=gnu11', '-O1', '-g', '-Wall', '-Wextra', '-Werror',
             '-fsanitize=address,undefined', '-DCONFIG_XENOVA_DRIVE_APP_STOP_MS=500',
             *['-D' + value for value in defines], *['-I' + str(path) for path in paths],
@@ -267,7 +272,7 @@ static unsigned pair_reads,pair_clocks;static int pair_rc;''')
 struct old_sample {float v_mps,steer_rad,nearest_m;enum auto_reason auto_reason;const char *reason;
  bool binary_input;int64_t input_sequence,input_received_ms,valid_until_ms;char map_epoch[37];
  uint64_t reference_revision,observation_sequence;uint32_t path_generation,tracker_index,maneuver_phase;};
-_Static_assert(sizeof(struct old_sample)==sizeof(struct drive_sample),"sample padding must absorb domain");
+_Static_assert(sizeof(struct old_sample)<=sizeof(struct drive_sample),"explicit modern metadata extends the legacy prefix");
 _Static_assert(offsetof(struct old_sample,input_sequence)==offsetof(struct drive_sample,input_sequence),"source offsets unchanged");
 static unsigned checks;
 static int pair(struct drive_completion *work,int64_t before,uint64_t counter,int64_t after,
@@ -327,7 +332,8 @@ int main(void){
 }
 '''
     result = compile_main(tmp_path, harness, ['CONFIG_XENOVA_DRIVE_LATTICE=1'])
-    assert result == dict(checks=21, sample_bytes=128, source_offset=32)
+    assert result["checks"]==21 and result["source_offset"]==32
+    assert result["sample_bytes"]>=128 # explicit modern command metadata, not a new wire layout
 
 
 def epoch_harness(raw_epoch_us, uptime_epoch_ms, manual=False):
@@ -417,3 +423,21 @@ int main(void){
     result = compile_main(tmp_path, harness,
         ['CONFIG_XENOVA_DRIVE_WARM=1', 'CONFIG_XENOVA_DRIVE_LATTICE=1'])
     assert result == dict(loops=50, offers=50, neutral=10, moving=10)
+
+
+def test_original_manual_completion_body_reaches_final_runtime_source_guard(tmp_path):
+    harness=HARNESS[:HARNESS.index("int main(void){")]+r'''
+int main(void){
+ struct drive_completion work={0};work.source.input_seq=17;work.source.input_received_ms=123;
+ work.source.control_seq=8;work.source.context_revision=9;work.source.connection_revision=10;
+ strcpy(work.source.vm_id,VM);strcpy(work.source.app_instance,INSTANCE);
+ strcpy(work.source.input,"{\"profile\":\"manual-input-2\",\"sample_seq\":\"17\"}");work.source.input_length=strlen(work.source.input);
+ provenance(&work,DRIVE_TASK_MANUAL);
+ assert(source.input.seq==17&&source.input.received_ms==123&&source.input.length==work.source.input_length);
+ assert(!memcmp(source.input.payload,work.source.input,work.source.input_length));
+ assert(source.control_revision==9&&source.connection_revision==10&&source.control.seq==8);
+ assert(!source.input.error&&source.perception.error==-ENODATA);
+ puts("{\"checks\":4}");return 0;
+}
+'''
+    assert compile_main(tmp_path,harness,["CONFIG_XENOVA_DRIVE_LATTICE=1"])=={"checks":4}

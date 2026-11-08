@@ -21,6 +21,8 @@ struct drive_engine {
  struct de_path_slot paths[DE_PATH_SLOTS];atomic_flag lock;
  const struct lp_config *config;const struct lp_assets *assets;
  struct lp_search search;struct lp_tracker tracker;struct lp_metrics tracking,planned;
+ struct tr_intent task;struct tr_basis basis;
+ struct lp_tracker progress_snapshot;uint32_t progress_generation;uint64_t planning_vehicle_pi_us;
  struct dw_handle planning_map;const struct dw_snapshot *planning_snapshot;
  struct de_reference planning_path;bool planning,plan_finalized,plan_valid;atomic_bool stopping,path_invalidated;int current;
  uint32_t epoch,next_generation,next_lease;uint64_t path_revision;
