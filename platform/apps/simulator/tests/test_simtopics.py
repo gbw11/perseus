@@ -98,7 +98,7 @@ def test_pose_at_20hz_with_surface(setup, clock):
     poses = client.of("sim.pose")
     assert 19 <= len(poses) <= 21
     p = poses[-1]
-    assert set(p) == {"x", "y", "yaw", "v_mps", "steer_rad", "world_revision", "surface"}
+    assert set(p) == {"x", "y", "yaw", "v_mps", "steer_rad", "world_revision", "surface", "race"}
     assert p["surface"] == "road" and p["world_revision"] == st.revision
     assert (p["x"], p["y"]) == (round(sim.vehicle.x, 4), round(sim.vehicle.y, 4))
 
@@ -158,6 +158,84 @@ def test_placement_refuses_on_car_and_out_of_track(setup):
     client.command({"op": "obstacle.add", "request_id": "b", "obstacle_id": "o2", "x": 1000.0, "y": 1000.0})
     assert [r["code"] for r in client.of("sim.command.result")] == ["ON_CAR", "OUT_OF_TRACK"]
     assert sim.vehicle.obstacles == []
+
+
+def at_start(sim, di, off):
+    """출발선에서 중심선 점 di 개 앞, 옆 off (+ 왼쪽). 레드불링 출발 직선은 벽이 0.39 m (잔디 없음)."""
+    T = sim.track
+    return T.at((T.start_index + di) % T.N, off)
+
+
+def add(client, oid, kind, xy):
+    client.command({"op": "obstacle.add", "request_id": oid, "obstacle_id": oid, "kind": kind, "x": xy[0], "y": xy[1]})
+    return client.of("sim.command.result")[-1]
+
+
+def test_partly_outside_wall_is_out_of_track(setup):
+    """mock 과 같이 장애물이 벽 밖으로 조금이라도 나가면 거부 (|off| > 벽 − 폭/2)."""
+    sim, client, _ = setup
+    assert add(client, "o1", "cone", at_start(sim, 30, 0.39 - 0.09 + 0.01))["code"] == "OUT_OF_TRACK"
+    assert add(client, "o2", "cone", at_start(sim, 30, 0.39 - 0.09 - 0.01))["ok"] is True
+
+
+def test_no_gap_reports_gap_and_need(setup):
+    """폭 0.30 박스를 벽 0.39 m 직선 가운데 → 양쪽 틈 0.24 m < 필요 0.26 m (차 폭 0.20 + 양쪽 0.03)."""
+    sim, client, _ = setup
+    r = add(client, "b1", "box", at_start(sim, 30, 0.0))
+    assert r["ok"] is False and r["code"] == "NO_GAP"
+    assert r["gap_m"] == pytest.approx(0.24, abs=1e-3) and r["need_m"] == pytest.approx(0.26)
+    assert "틈" in r["message"] and sim.vehicle.obstacles == []
+    assert add(client, "c1", "cone", at_start(sim, 30, 0.0))["ok"] is True     # 콘(0.18)이면 틈 0.30 m
+
+
+def test_no_gap_between_two_obstacles(setup):
+    sim, client, _ = setup
+    assert add(client, "a", "cone", at_start(sim, 30, 0.2))["ok"] is True
+    r = add(client, "b", "cone", at_start(sim, 30, -0.2))
+    assert r["code"] == "NO_GAP" and r["gap_m"] < 0.26
+    assert [o.id for o in sim.vehicle.obstacles] == ["a"]
+
+
+def test_too_dense_slalom_is_refused(setup):
+    """틈은 각각 있지만 0.6 m 뒤에서 반대쪽을 막으면 기준 회피 주행이 옮겨 갈 거리가 없다. 1.6 m 뒤면 지나간다."""
+    sim, client, _ = setup
+    assert add(client, "a", "cone", at_start(sim, 20, 0.15))["ok"] is True
+    r = add(client, "b", "cone", at_start(sim, 23, -0.15))
+    assert r["code"] == "TOO_DENSE" and r["gap_m"] is None and "촘촘" in r["message"]
+    assert [o.id for o in sim.vehicle.obstacles] == ["a"]
+    assert add(client, "c", "cone", at_start(sim, 28, -0.15))["ok"] is True
+
+
+def test_too_close_only_after_start_and_in_front_of_running_car(setup, clock):
+    sim, client, _ = setup
+    sim.vehicle.wheel_rad_s = 1.0 / sim._settings.drivetrain.wheel_radius_m    # 1 m/s 로 달리는 중
+    assert sim.race.phase == "lights"
+    assert add(client, "x1", "cone", at_start(sim, 4, 0.0))["ok"] is True      # 출발 전: 지금 차로는 돌려 보지 않는다
+    client.command({"op": "obstacle.remove", "request_id": "rm", "obstacle_id": "x1"})
+    clock.now += 10.0
+    sim.race.update(sim.track.start_index, sim.track.start_index, sim.track.N, manual=False, forward=False)
+    assert sim.race.phase == "go"
+    assert add(client, "x2", "cone", at_start(sim, 4, 0.0))["code"] == "TOO_CLOSE"
+    assert add(client, "x3", "cone", at_start(sim, 40, 0.0))["ok"] is True     # 멀면 피할 거리가 있다
+
+
+def test_rejected_move_keeps_old_place(setup):
+    sim, client, _ = setup
+    assert add(client, "a", "cone", at_start(sim, 30, 0.2))["ok"] is True
+    old = sim.vehicle.obstacles[0]
+    add(client, "b", "cone", at_start(sim, 60, -0.2))
+    x, y = at_start(sim, 30, -0.2)
+    client.command({"op": "obstacle.move", "request_id": "mv", "obstacle_id": "b", "x": x, "y": y})
+    assert client.of("sim.command.result")[-1]["code"] == "NO_GAP"
+    assert sim.vehicle.obstacles[0] == old and sim.vehicle.obstacles[1].x != x
+
+
+def test_pose_carries_race(setup, clock):
+    sim, client, st = setup
+    st.publish()
+    race = client.of("sim.pose")[-1]["race"]
+    assert set(race) == {"phase", "lights_on", "lap", "lap_ms", "last_lap_ms", "best_lap_ms", "jump_start"}
+    assert race["phase"] == "lights" and race["lap"] == 0 and race["last_lap_ms"] is None
 
 
 def test_ninth_obstacle_is_refused(setup):

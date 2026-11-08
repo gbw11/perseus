@@ -9,9 +9,13 @@
 import { delay, http, HttpResponse, type JsonBodyType } from 'msw';
 import {
   VM_CPU_PERCENT_METRIC,
+  type CpuStressRequest,
+  type AutoDelayRequest,
   type CreateVmRequest,
   type LoginRequest,
+  type MemoryStressRequest,
   type SignupRequest,
+  type StressCommand,
   type TokenResponse,
   type UpdateMemoryRequest,
   type UpdateVcpuPinningRequest,
@@ -20,8 +24,10 @@ import {
   type Vm,
   type VmResources,
 } from '../api/types';
+import { mockBoardDown, setMockBoardDown } from './board';
 import { initialVms, MOCK_PASSWORD, MOCK_USER, TEMPLATES, VM_IDS } from './data';
-import { mockMemoryPoolSamples } from './memoryMetrics';
+import { mockKernelHeapSamples, mockMemoryPoolSamples, mockZephyrNetworkSamples } from './memoryMetrics';
+import { mockTelemetryHeartbeat } from './telemetryHeartbeat';
 import { getDisplays, RouteError, scenarioEvents, setRoute, startVm, stopVm, vmStateOf } from './scenario';
 
 const REFRESH_COOKIE = 'xenova_refresh';
@@ -38,9 +44,11 @@ let refreshGranted = false;
 let mockUsername = MOCK_USER.username;
 let mockNickname = MOCK_USER.nickname;
 let mockPassword = MOCK_PASSWORD;
+const demoCommands = new Map<string, { vmId: string; createdAt: number; agentExit?: boolean }>();
 
 /** 시험용: 처음 상태로 */
 export function resetMockState(): void {
+  setMockBoardDown(false);
   vms = initialVms();
   pinningByVm = initialPinning();
   tokenSeq = 0;
@@ -49,6 +57,7 @@ export function resetMockState(): void {
   mockUsername = MOCK_USER.username;
   mockNickname = MOCK_USER.nickname;
   mockPassword = MOCK_PASSWORD;
+  demoCommands.clear();
 }
 
 function initialPinning(): Map<string, VcpuPinning[]> {
@@ -163,6 +172,13 @@ function validate(body: Partial<CreateVmRequest>): { field: string; reason: stri
   return errors;
 }
 
+/** mock 보드 끊김(board.ts): 보드에 묻는 API 는 실제 백엔드처럼 502 */
+const boardUnreachable = () =>
+  HttpResponse.json(
+    { code: 'VM_CONTROL_BAD_RESPONSE', message: 'VM 제어 서비스와의 연결 설정이 올바르지 않습니다.' },
+    { status: 502 },
+  );
+
 export const handlers = [
   // ---- 인증 ----
   http.post('*/api/v1/auth/signup', async ({ request }) => {
@@ -220,6 +236,7 @@ export const handlers = [
   http.get('*/api/v1/vms', async ({ request }) => {
     await delay(LATENCY_MS);
     if (!authorized(request)) return unauthorized();
+    if (mockBoardDown()) return boardUnreachable();
     return HttpResponse.json({
       items: vms.map(live),
       observed_at: new Date().toISOString(),
@@ -229,6 +246,7 @@ export const handlers = [
   http.get('*/api/v1/vms/:vmId', async ({ request, params }) => {
     await delay(LATENCY_MS);
     if (!authorized(request)) return unauthorized();
+    if (mockBoardDown()) return boardUnreachable();
     const vm = find(String(params.vmId));
     return vm ? HttpResponse.json(vm as unknown as JsonBodyType) : vmNotFound();
   }),
@@ -236,6 +254,7 @@ export const handlers = [
   http.get('*/api/v1/vms/:vmId/resources', async ({ request, params }) => {
     await delay(LATENCY_MS);
     if (!authorized(request)) return unauthorized();
+    if (mockBoardDown()) return boardUnreachable();
     const vm = find(String(params.vmId));
     return vm ? HttpResponse.json(resourcesOf(vm) as unknown as JsonBodyType) : vmNotFound();
   }),
@@ -316,6 +335,133 @@ export const handlers = [
     return HttpResponse.json(resourcesOf(find(vm.vm_id)!) as unknown as JsonBodyType);
   }),
 
+  http.post('*/api/v1/vms/:vmId/stress/:kind', async ({ request, params }) => {
+    await delay(LATENCY_MS);
+    if (!authorized(request)) return unauthorized();
+    const vm = find(String(params.vmId));
+    if (!vm) return vmNotFound();
+    if (vm.guest_kind !== 'linux') {
+      return error(400, 'UNSUPPORTED_GUEST_KIND', 'CPU·메모리 부하는 Linux VM에서만 지원합니다.');
+    }
+    if (vm.state !== 'running' || vm.agent_status !== 'ONLINE') {
+      return error(409, 'AGENT_UNAVAILABLE', `VM Agent가 온라인 상태가 아닙니다: ${vm.vm_id}`);
+    }
+    const kind = String(params.kind);
+    const body = (await request.json()) as Partial<CpuStressRequest & MemoryStressRequest>;
+    const amount = kind === 'cpu' ? body.workers : body.memory_mib;
+    const max = kind === 'cpu' ? 4 : 512;
+    if (
+      (kind !== 'cpu' && kind !== 'memory') ||
+      !Number.isInteger(amount) ||
+      amount! < 1 ||
+      amount! > max ||
+      !Number.isInteger(body.duration_s) ||
+      body.duration_s! < 1 ||
+      body.duration_s! > 120
+    ) {
+      return error(400, 'VALIDATION_ERROR', '입력값을 확인해 주세요.');
+    }
+    const now = new Date();
+    const command: StressCommand = {
+      command_id: crypto.randomUUID(),
+      operation_id: crypto.randomUUID(),
+      vm_id: vm.vm_id,
+      type: kind === 'cpu' ? 'CPU' : 'MEMORY',
+      amount: amount!,
+      load_percent: null,
+      duration_s: body.duration_s!,
+      submitted_at: now.toISOString(),
+      expires_at: new Date(now.getTime() + 30_000).toISOString(),
+    };
+    demoCommands.set(command.command_id, { vmId: vm.vm_id, createdAt: Date.now() });
+    return HttpResponse.json(command as unknown as JsonBodyType, { status: 202 });
+  }),
+
+  http.post('*/api/v1/vms/:vmId/faults/auto-delay', async ({ request, params }) => {
+    await delay(LATENCY_MS);
+    if (!authorized(request)) return unauthorized();
+    const vm = find(String(params.vmId));
+    if (!vm) return vmNotFound();
+    if (vm.guest_kind !== 'zephyr' || vm.state !== 'running')
+      return error(409, 'COMMAND_UNAVAILABLE', '실행 중인 Zephyr VM이 아닙니다.');
+    const body = (await request.json()) as Partial<AutoDelayRequest>;
+    if (
+      !Number.isInteger(body.delay_ms) ||
+      body.delay_ms! < 1 ||
+      body.delay_ms! > 100 ||
+      !Number.isInteger(body.duration_s) ||
+      body.duration_s! < 1 ||
+      body.duration_s! > 120
+    ) {
+      return error(400, 'VALIDATION_ERROR', '입력값을 확인해 주세요.');
+    }
+    const now = new Date();
+    const commandId = crypto.randomUUID();
+    demoCommands.set(commandId, { vmId: vm.vm_id, createdAt: Date.now() });
+    return HttpResponse.json(
+      {
+        command_id: commandId,
+        operation_id: crypto.randomUUID(),
+        vm_id: vm.vm_id,
+        delay_ms: body.delay_ms,
+        duration_s: body.duration_s,
+        submitted_at: now.toISOString(),
+        expires_at: new Date(now.getTime() + 30_000).toISOString(),
+      },
+      { status: 202 },
+    );
+  }),
+
+  http.post('*/api/v1/vms/:vmId/faults/agent-exit', async ({ request, params }) => {
+    await delay(LATENCY_MS);
+    if (!authorized(request)) return unauthorized();
+    const vm = find(String(params.vmId));
+    if (!vm) return vmNotFound();
+    if (vm.guest_kind !== 'linux')
+      return error(400, 'UNSUPPORTED_GUEST_KIND', 'agent_exit는 Linux VM에서만 지원합니다.');
+    if (vm.state !== 'running' || vm.agent_status !== 'ONLINE')
+      return error(409, 'AGENT_UNAVAILABLE', `VM Agent가 온라인 상태가 아닙니다: ${vm.vm_id}`);
+    const now = new Date();
+    const commandId = crypto.randomUUID();
+    demoCommands.set(commandId, { vmId: vm.vm_id, createdAt: Date.now(), agentExit: true });
+    return HttpResponse.json(
+      {
+        command_id: commandId,
+        operation_id: crypto.randomUUID(),
+        vm_id: vm.vm_id,
+        submitted_at: now.toISOString(),
+        expires_at: new Date(now.getTime() + 30_000).toISOString(),
+      },
+      { status: 202 },
+    );
+  }),
+
+  http.get('*/api/v1/vms/:vmId/commands/:commandId', async ({ request, params }) => {
+    await delay(80);
+    if (!authorized(request)) return unauthorized();
+    const item = demoCommands.get(String(params.commandId));
+    if (!item || item.vmId !== params.vmId)
+      return error(404, 'COMMAND_NOT_FOUND', '명령을 찾을 수 없습니다.');
+    const elapsed = Date.now() - item.createdAt;
+    return HttpResponse.json({
+      command_id: params.commandId,
+      vm_id: params.vmId,
+      status: item.agentExit
+        ? 'ACCEPTED'
+        : elapsed > 2200
+          ? 'SUCCEEDED'
+          : elapsed > 600
+            ? 'RUNNING'
+            : 'ACCEPTED',
+      message: item.agentExit
+        ? 'Agent가 종료 명령을 수락했습니다.'
+        : elapsed > 2200
+          ? '명령 실행이 완료되었습니다.'
+          : 'VM에서 명령을 실행하고 있습니다.',
+      updated_at: new Date().toISOString(),
+    });
+  }),
+
   http.post('*/api/v1/vms', async ({ request }) => {
     await delay(LATENCY_MS);
     if (!authorized(request)) return unauthorized();
@@ -351,9 +497,17 @@ export const handlers = [
     if (!vm) return vmNotFound();
     const action = String(params.action);
     if (action !== 'start' && action !== 'stop') return error(404, 'NOT_FOUND', '없는 동작입니다.');
-    const wanted = action === 'start' ? 'stopped' : 'running';
-    if (live(vm).state !== wanted)
-      return error(409, 'INVALID_VM_STATE', `지금 상태(${vm.state})에서는 할 수 없습니다.`);
+    // 계약 §5: start 는 running 이면 그대로 200, crashed·paused·stopping 이면 409 (정지 후 다시 시작).
+    // stop 은 runtime 유무와 관계없이 동작하고 이미 꺼져 있으면 그대로 200.
+    const state = live(vm).state;
+    if (action === 'start' && state === 'running') return HttpResponse.json(vm as unknown as JsonBodyType);
+    if (action === 'stop' && state === 'stopped') return HttpResponse.json(vm as unknown as JsonBodyType);
+    if (action === 'start' && state !== 'stopped')
+      return error(
+        409,
+        'INVALID_VM_STATE',
+        `지금 상태(${state})에서는 시작할 수 없습니다. 정지 후 다시 시작하세요.`,
+      );
     const next: Vm = { ...vm, state: action === 'start' ? 'running' : 'stopped' };
     vms = vms.map((v) => (v.vm_id === vm.vm_id ? next : v));
     // 주행 시나리오에도 알린다 — 자율주행 VM 을 멈추면 수동주행이 바로 이어받는다 (계약 §5.2)
@@ -423,17 +577,26 @@ export const handlers = [
     await delay(LATENCY_MS);
     if (!authorized(request)) return unauthorized();
     if (params.vmId === VM_IDS.autonomous || params.vmId === VM_IDS.manual) {
-      return HttpResponse.json({ items: mockMemoryPoolSamples(String(params.vmId)) });
+      const vmId = String(params.vmId);
+      return HttpResponse.json({
+        items: [
+          ...mockKernelHeapSamples(vmId),
+          ...mockMemoryPoolSamples(vmId),
+          ...mockZephyrNetworkSamples(vmId),
+        ],
+      } as unknown as JsonBodyType);
     }
     if (params.vmId !== VM_IDS.interaction) return HttpResponse.json({ items: [] });
     const now = Date.now();
     const items = Array.from({ length: 30 }, (_, i) => {
       const t = now - (29 - i) * 10_000;
       const wave = Math.sin(t / 40_000);
+      const usedBytes = (142 + 10 * wave) * 1024 * 1024;
       return {
         sample_id: `m-${t}`,
         vm_id: VM_IDS.interaction,
-        source: 'agent',
+        boot_id: 'mock-boot-interaction',
+        source: 'guest_agent',
         observed_at: new Date(t).toISOString(),
         values: [
           {
@@ -445,16 +608,47 @@ export const handlers = [
           },
           {
             name: 'memory_used_bytes',
-            value: (142 + 10 * wave) * 1024 * 1024,
+            value: usedBytes,
             unit: 'bytes',
             labels: null,
             unavailable_reason: null,
           },
           {
-            name: 'net_rx_bytes_total',
-            value: 1_200_000 + i * 8_000,
+            // MemAvailable 은 페이지 캐시 일부를 포함해 할당량 − 사용량보다 조금 작다
+            name: 'memory_available_bytes',
+            value: 512 * 1024 * 1024 - usedBytes - 24 * 1024 * 1024,
             unit: 'bytes',
             labels: null,
+            unavailable_reason: null,
+          },
+          ...(['xvda', 'xvdb'] as const).flatMap((device, d) => [
+            {
+              name: 'disk_read_bytes_total',
+              value: (d === 0 ? 180_000_000 : 4_000_000) + i * (d === 0 ? 96_000 : 4_096),
+              unit: 'bytes',
+              labels: { device },
+              unavailable_reason: null,
+            },
+            {
+              name: 'disk_write_bytes_total',
+              value: (d === 0 ? 62_000_000 : 1_000_000) + i * (d === 0 ? 40_960 : 0),
+              unit: 'bytes',
+              labels: { device },
+              unavailable_reason: null,
+            },
+          ]),
+          {
+            name: 'net_rx_bytes_total',
+            value: 1_200_000 + i * 8_000 + Math.round(3_000 * (1 + wave)),
+            unit: 'bytes',
+            labels: { iface: 'eth0' },
+            unavailable_reason: null,
+          },
+          {
+            name: 'net_tx_bytes_total',
+            value: 640_000 + i * 3_200,
+            unit: 'bytes',
+            labels: { iface: 'eth0' },
             unavailable_reason: null,
           },
         ],
@@ -479,10 +673,44 @@ export const handlers = [
       observed_at: new Date().toISOString(),
       stale: false,
       items: [
-        { pid: 412, name: 'message-board', cpu_percent: 4.2, rss_bytes: 48_234_496 },
+        { pid: 412, name: 'interaction', cpu_percent: 4.2, rss_bytes: 48_234_496 },
         { pid: 388, name: 'xenova-agent', cpu_percent: 1.1, rss_bytes: 21_495_808 },
         { pid: 1, name: 'systemd', cpu_percent: 0.2, rss_bytes: 11_010_048 },
       ],
     } as unknown as JsonBodyType);
+  }),
+
+  http.get('*/api/v1/vms/:vmId/threads', async ({ request, params }) => {
+    await delay(LATENCY_MS);
+    if (!authorized(request)) return unauthorized();
+    const zephyr = params.vmId === VM_IDS.autonomous || params.vmId === VM_IDS.manual;
+    return HttpResponse.json({
+      vm_id: params.vmId,
+      window_ms: zephyr ? 1000 : null,
+      received_at: zephyr ? new Date().toISOString() : null,
+      stale: !zephyr,
+      threads_status: zephyr ? 'ok' : null,
+      parts_received: zephyr ? 1 : 0,
+      part_count: zephyr ? 1 : null,
+      complete: zephyr,
+      conflicting_pages: false,
+      items: zephyr
+        ? [
+            {
+              thread_id: '1',
+              thread_name: 'telemetry',
+              name_truncated: false,
+              cpu_percent: 1.2,
+              unavailable_reason: null,
+            },
+          ]
+        : [],
+    });
+  }),
+
+  http.get('*/api/v1/vms/:vmId/telemetry/heartbeat', async ({ request, params }) => {
+    await delay(LATENCY_MS);
+    if (!authorized(request)) return unauthorized();
+    return HttpResponse.json(mockTelemetryHeartbeat(String(params.vmId)));
   }),
 ];

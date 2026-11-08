@@ -49,9 +49,12 @@ const struct lp_config lp_selected_config={
  .clock_lease_us=1000000,
  .planner_budget_us=2000000,
  .state_period_us=500000,
+ .direction_phase_us=10000000,
+ .guest_timestamp_error_us=1000,
+ .guest_drift_ppm=100,
 };
 const struct lp_assets lp_selected_assets={
- .id="lattice-lab-1",.sha256="61531ae8ec6f59a55b981e504f3ea29a5bc1e4b98e8f3cd83e9354b143e1e1df",
+ .id="lattice-lab-1",.sha256="8ec36bbd39f0e48a2653ac2f41607afd928aca7b5bec0d33ee556c36fcab79a4",
  .resolution=1.000000000e-01f,
  .wheelbase=2.500000000e-01f,
  .max_steer=5.500000000e-01f,

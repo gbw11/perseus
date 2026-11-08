@@ -100,3 +100,41 @@ def test_feedback2_actual_pty_shares_single_serial_owner_and_recovers_frames():
         assert value and value['source_sample']==3 and value['odom_pose']['x']>0
         assert sink.ready and not sink.fault
     finally:sink.close();os.close(master);os.close(slave)
+
+
+def test_apply_timeout_keeps_output_fenced_but_accepts_independent_encoder_samples():
+    from xenova_gateway.frame import StopFrame,DriveFrame
+    from xenova_gateway.sink import SinkError
+    import select
+    master,slave=pty.openpty();os.set_blocking(master,False);now=[0.]
+    sensor=VehicleOdometry(config(),str(uuid4()))
+    sink=FeedbackSerialSink(os.ttyname(slave),timeout_ms=500,clock=lambda:now[0],odometry=sensor)
+    device=str(uuid4());frames=Framer()
+    try:
+        sink.ready=True;sink.started=0.;sink.device_session=device;sensor.device_session(device)
+        sink.capabilities=CAP_ACCEPT|CAP_APPLY|CAP_ODOMETRY
+        sink.write(StopFrame(42,0,1),0.)  # Deliberately leave this command unacknowledged.
+        for index in (1,2):
+            now[0]=.6+(index-1)*.02;sink.poll(now[0])
+            assert sink.fault=='DEVICE_APPLY_TIMEOUT'
+            probes=[]
+            for _ in range(4):
+                assert select.select([master],[],[],1)[0]
+                probes.extend(payload for kind,payload in frames.feed(os.read(master,4096)) if kind==ODOM_PROBE)
+                if probes:break
+            assert len(probes)==1
+            pi,dev,echo=PROBE.unpack(probes[0]);now[0]+=.001
+            os.write(master,packet(ODOM_REPORT,SAMPLE.pack(pi,dev,echo,1000000+(index-1)*20000,index,index,index,5,0,10)))
+            assert select.select([sink._serial.fileno()],[],[],1)[0]
+            sink.poll(now[0])
+        view=sink.snapshot
+        assert view['vehicle_sample']['source_sample']==2
+        assert view['vehicle_sample']['odom_pose']['x']>0
+        assert view['fault']=='DEVICE_APPLY_TIMEOUT'
+        assert view['applied'] is None and view['physical_stop'] is None
+        with pytest.raises(SinkError,match='device fault'):sink.write(DriveFrame(42,0,.1,0),now[0])
+        now[0]+=.3
+        assert sink._view()['vehicle_sample'] is None  # Sensor lease still expires normally.
+        sink.fault='DEVICE_RESTARTED'
+        assert sink._view()['vehicle_sample'] is None
+    finally:sink.close();os.close(master);os.close(slave)

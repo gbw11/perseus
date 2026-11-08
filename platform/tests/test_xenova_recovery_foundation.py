@@ -824,7 +824,9 @@ class FactoryIntentTest(unittest.TestCase):
         board = self.board()
         from test_xenova_lifecycle import Xen
         records = vm.load_records(board.data)
-        p = vm.Platform(board.data,board.root/"run/xenova",Xen(board.data,records),defaults_path=FILES/"defaults.json")
+        # 실제 설치 fixture의 정책/권한을 사용한다. 소스 checkout mode를 승인으로 쓰지 않는다.
+        p = vm.Platform(board.data,board.root/"run/xenova",Xen(board.data,records),defaults_path=FILES/"defaults.json",
+                        execution_policy_path=board.root/"etc/xenova/execution-policy.json")
         m = management.Manager(p)
         target = records["zephyr-drive-a"]
         with patch.object(vm,"storage_check"), patch.object(p,"check_xen"):
@@ -893,9 +895,11 @@ class PackagingAndUnitsTest(unittest.TestCase):
             self.assertEqual(result.returncode,0,text)
             for diagnostic in ("Found ordering cycle","deleted to break ordering cycle","Ordering cycle found, skipping"):
                 self.assertNotIn(diagnostic,text)
-            drop=root/"etc/systemd/system/xenova-host-admission.service.d"
-            drop.mkdir(parents=True)
-            (drop/"injected.conf").write_text("[Unit]\nBefore=xenova-vms.service\n")
+            # 이 음성 대조는 ordering cycle 검출이다. 고정 QEMU loader가 읽지 않은
+            # drop-in의 존재를 가정하지 않고, 확인한 소유 unit fragment에 같은 edge를 넣는다.
+            # 실제 drop-in 검색/적용 수락을 이 검사로 대신하지 않는다.
+            unit=root/"usr/lib/systemd/system/xenova-host-admission.service"
+            unit.write_text(unit.read_text()+"\n[Unit]\nBefore=xenova-vms.service\n")
             broken=verify(root,"xenova-host-admission.service","xenova-vms.service")
             self.assertIn("Found ordering cycle",broken.stdout+broken.stderr)
 

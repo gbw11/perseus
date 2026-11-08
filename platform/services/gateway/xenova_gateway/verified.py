@@ -3,12 +3,24 @@ permission are separate evidence. This class never restarts a VM or provisions
 credentials. All generations originate in AuthorityStore before publication.
 """
 from __future__ import annotations
+from collections import deque
 from dataclasses import dataclass
 from typing import Any
 from xenova_mqtt.readiness import parse as parse_readiness
 from .authority import AuthorityError,AuthorityStore
 from .machine import (ControlMachine,Mode,Timing,DRIVE_APPS,AUTONOMOUS,MANUAL_APP,
     AppTrack,ForwardDrive,ForwardStop,PublishControl,PublishEvent,Measure,valid_command)
+
+TRUST_REASONS=frozenset(('AUTO_DEADLINE_MISS',))
+INPUT_FAILURES=frozenset(('INPUT_UNAVAILABLE','INPUT_STALE','INPUT_INVALID','MAP_UNAVAILABLE',
+                         'WORLD_UNAVAILABLE','OBSERVATION_EXPIRED'))
+
+def valid_untrusted_payload(payload):
+    """Validate legacy FW32 evidence, not its former VM-wide interpretation."""
+    if not isinstance(payload,dict) or payload.get('trust')!='UNTRUSTED' or payload.get('reason') not in TRUST_REASONS:return False
+    command_id=payload.get('command_id')
+    if not isinstance(command_id,str) or not command_id or len(command_id)>128:return False
+    return type(payload.get('consecutive_misses')) is int and payload['consecutive_misses']>=5
 
 @dataclass
 class Prepared:
@@ -38,9 +50,14 @@ class VerifiedDriveMachine(ControlMachine):
         self.apps=self.nodes[self.active_vm]
         self.prepared={(vm,app):Prepared() for vm in self.vm_ids for app in DRIVE_APPS}
         self.sessions={};self.streams={};self.references={}
+        self._cancel_ids:list[str]=[]  # 최근 취소 요청 message_id (메모리, 재전달 중복만 막는다)
         self.output_permitted=False;self._authorized=False;self.transport_ok=False;self.delivered=False
         self.failure=None;self._resume_authorized=False
+        self.untrusted={row['vm_id']:dict(row) for row in value.get('distrusted',[])}
+        self._legacy_faults=deque(maxlen=64)
         self.continuous_handoff=False;self._handoff_grace_until=0.;self._resume_auto=False
+        self.durable_write_available=lambda:True
+        self._deferred_authority=None;self._authority_transition_deferred=False
         self._resume_vm=self.active_vm
         # Restart restores preference, never output permission, even if the last
         # process persisted an in-flight command with arm_after_apply=true.
@@ -68,9 +85,10 @@ class VerifiedDriveMachine(ControlMachine):
 
     def _bound(self,vm,now,app=None):
         from xenova_mqtt.drive_binding import app_instance
-        if self.authority.protected(vm):return False
         row=self.bindings.current(vm,now)
         if not row:return False
+        if self.authority.protected_execution(vm)==row['execution_id']:return False
+        if vm in self.untrusted and row['execution_id']==self.untrusted[vm]['execution_id']:return False
         return all(self.sessions.get((vm,target))==(row['execution_id'],row['boot_id'],app_instance(row,target))
                    for target in (DRIVE_APPS if app is None else (app,)))
 
@@ -107,6 +125,49 @@ class VerifiedDriveMachine(ControlMachine):
         if vm in self.nodes and app in DRIVE_APPS and self._bound(vm,t,app):
             self.nodes[vm][app].last_heartbeat_t=t
 
+    def on_vm_untrusted(self,vm,app,payload,t):
+        """Interpret deployed FW32 reports at the scope their evidence proves.
+
+        AUTO deadline evidence revokes that function, never the same
+        execution's normal MANUAL qualification.
+        Historical durable VM distrust remains guarded by recovery completion.
+        """
+        if (vm not in self.nodes or app!=AUTONOMOUS or not valid_untrusted_payload(payload) or
+                not 0<=self.clock()-t<=self.readiness_lease_s or not self._bound(vm,t,app)):return []
+        binding=self.bindings.current(vm,self.clock())
+        if binding is None:return []
+        evidence={key:payload[key] for key in ('trust','reason','command_id','consecutive_misses') if key in payload}
+        fields={'vm_id':vm,'execution_id':binding['execution_id'],**evidence,'gen':self.generation,'t':t}
+        key=(vm,binding['execution_id'],self.sessions.get((vm,app)),payload['command_id'])
+        if key in self._legacy_faults:return []
+        self._legacy_faults.append(key)
+        self._invalidate_function(vm,app,'DEADLINE')
+        actions=[Measure('autonomous_function_failure',fields)]
+        if vm!=self.active_vm or self.active_app!=AUTONOMOUS or not self.output_permitted:return actions
+        return actions+self._autonomous_failure(vm,'autonomous_deadline',self.clock())
+
+    def _invalidate_function(self,vm,app,reason):
+        self.nodes[vm][app].pending=None
+        p=self.prepared[vm,app]
+        p.state='NOT_READY';p.reason=reason;p.observed=None;p.since=None
+
+    def _input_unavailable(self,vm,now):
+        p=self.prepared[vm,AUTONOMOUS]
+        return (p.generation==self.generation and p.state!='READY' and p.reason in INPUT_FAILURES and
+                p.observed is not None and 0<=now-p.observed<=self.readiness_lease_s)
+
+    def _autonomous_failure(self,vm,reason,now):
+        other=next(candidate for candidate in self.vm_ids if candidate!=vm)
+        # One VM's input error is not proof that the shared Jetson failed.
+        # Prefer the other AUTO only with its own current qualification.
+        if self.transport_ok and self._qualified(other,AUTONOMOUS,now,held=True):
+            return self._change(Mode.AUTO,other,reason,now,arm=True)
+        self._authorized=False
+        if (self._input_unavailable(vm,now) and self._input_unavailable(other,now) and
+                self.transport_ok and self._qualified(vm,MANUAL_APP,now,held=True)):
+            return self._change(Mode.MANUAL,vm,'autonomous_input_unavailable',now,arm=False)
+        return self._change(Mode.SAFE_STOP,vm,'no_fresh_standby',now)
+
     def _ready(self,vm,app,now,held=False):
         p=self.prepared[vm,app]
         return bool(self._bound(vm,now,app) and p.generation==self.generation and p.state=='READY' and
@@ -119,7 +180,10 @@ class VerifiedDriveMachine(ControlMachine):
                     0<=now-p.observed<=self.readiness_lease_s)
 
     def _qualified(self,vm,app,now,held=False):
-        return self._ready(vm,app,now,held=held)
+        return vm not in self.untrusted and not self.authority.protected(vm) and self._ready(vm,app,now,held=held)
+
+    def rejoin_ready(self,vm,app,now):
+        return vm in self.untrusted and self.authority.protected(vm) and self._ready(vm,app,now,held=True)
 
     def node_status(self,vm,now):
         app=self.active_app or MANUAL_APP
@@ -148,24 +212,39 @@ class VerifiedDriveMachine(ControlMachine):
         if self.transport_ok and not connected:self.block('TRANSPORT_UNAVAILABLE',now)
         self.transport_ok=connected
 
+    def _save_or_defer(self,**fields):
+        """Scene fsync에 actor가 대기하지 않는다. RAM fence 뒤 원 실패시각만 보존한다."""
+        if self.durable_write_available():
+            self.authority.update(**fields);return True
+        old=self._deferred_authority
+        if old is not None and old[0]==self.generation:
+            fields={**fields,**old[1]}
+        self._deferred_authority=self.generation,fields
+        return False
+
     def block(self,reason,now):
         self.output_permitted=False;self._authorized=False;self._countdown=None;self._resume_requested.clear()
         for p in self.prepared.values():p.since=None;p.observed=None
-        try:self.authority.update(rearm_required=True)
+        try:self._save_or_defer(rearm_required=True)
         except AuthorityError:self.failure='AUTHORITY_STORAGE_UNCERTAIN'
         return [ForwardStop(self.generation),Measure('output_blocked',{'reason':reason,'gen':self.generation,'t':now})]
 
     def _fail(self,reason,now):
         self.output_permitted=False;self._authorized=False;self.failure=reason;self._countdown=None
-        try:self.authority.update(phase='FAILED',rearm_required=True,
+        try:self._save_or_defer(phase='FAILED',rearm_required=True,
             failure={'reason':reason,'generation':self.generation,'observed_monotonic_ms':int(now*1000)})
         except AuthorityError:self.failure='AUTHORITY_STORAGE_UNCERTAIN'
 
-    def _change(self,mode,vm,reason,now,*,arm=False,manual=None):
+    def _change(self,mode,vm,reason,now,*,arm=False,manual=None,distrust=None):
+        if not self.durable_write_available():
+            # No control was accepted yet. Re-evaluate current qualifications next
+            # turn rather than replaying a stale transition or issuing a generation.
+            self._authority_transition_deferred=True
+            return [ForwardStop(self.generation)]
         cancelled=[] if reason=='resume_requested' else self._cancel_countdown(reason,now)
         self._countdown=None;self._resume_requested.clear()
         self.output_permitted=False
-        try:self.authority.issue(mode,vm,reason,now,self.apply_timeout_s,arm=arm,manual=manual)
+        try:self.authority.issue(mode,vm,reason,now,self.apply_timeout_s,arm=arm,manual=manual,distrust=distrust)
         except AuthorityError as exc:
             self._fail(str(exc),now)
             return [ForwardStop(self.generation)]
@@ -189,6 +268,7 @@ class VerifiedDriveMachine(ControlMachine):
         return actions
 
     def on_resume(self,t,requested_by=None,*,expected_generation=None,message_id=None):
+        if not self.durable_write_available():return False
         target=self.active_vm
         auto_return=self.mode is Mode.MANUAL and self.authority.value.get('manual_hold',False) and self.output_permitted
         if self.mode is Mode.SAFE_STOP:
@@ -205,6 +285,19 @@ class VerifiedDriveMachine(ControlMachine):
         self._resume_auto=auto_return
         self._resume_requested.append((t,requested_by));self._resume_authorized=True;self._resume_vm=target;return True
 
+    def on_cancel_resume(self,t,requested_by=None,*,expected_generation=None,message_id=None):
+        """drive.resume.cancel_requested (계약 v1.7). 카운트다운을 시작한 세대와 같은 expected_generation 만 받는다.
+
+        영구 중복 기록은 남기지 않지만, QoS 1 재전달이 같은 세대의 다음 카운트다운을 끄지 않도록
+        최근 message_id 는 메모리에 둔다.
+        """
+        countdown=self._countdown
+        if countdown is None or not isinstance(message_id,str) or not message_id:return False
+        if type(expected_generation) is not int or expected_generation!=countdown.generation or countdown.generation!=self.generation:return False
+        if message_id in self._cancel_ids:return False
+        self._cancel_ids.append(message_id);del self._cancel_ids[:-64]
+        return super().on_cancel_resume(t,requested_by)
+
     def _resume(self,now):
         if not self._resume_requested:return []
         from .machine import _Countdown
@@ -218,6 +311,10 @@ class VerifiedDriveMachine(ControlMachine):
         return bool(track and track.last_command_t is not None and 0<=now-track.last_command_t<=self.timing.command_timeout_s)
 
     def _output(self,now):
+        if self._authority_transition_deferred:
+            if self._last_stop_t is None or now-self._last_stop_t>=self.timing.stop_resend_s:
+                self._last_stop_t=now;return [ForwardStop(self.generation)]
+            return []
         track=self.apps.get(self.active_app);pending=track.pending if track else None
         for tracks in self.nodes.values():
             for item in tracks.values():item.pending=None
@@ -233,6 +330,12 @@ class VerifiedDriveMachine(ControlMachine):
 
     def step(self,now):
         if not self._started:raise RuntimeError('start required')
+        if self.durable_write_available():
+            self._authority_transition_deferred=False
+            original=self._deferred_authority;self._deferred_authority=None
+            if original is not None and original[0]==self.generation:
+                try:self.authority.update(**original[1])
+                except AuthorityError:self._fail('AUTHORITY_STORAGE_UNCERTAIN',now)
         if self.authority.error:
             self.output_permitted=False;self._authorized=False;self.failure=self.authority.error
             return self._output(now)
@@ -244,6 +347,8 @@ class VerifiedDriveMachine(ControlMachine):
             pending=self.authority.value['pending']
             if pending['host_boot_id']!=self.authority.host or now*1000>=pending['deadline_ms']:
                 self._fail('CONTROL_PUBLISH_UNCONFIRMED' if not self.delivered else 'CONTROL_APPLY_UNCONFIRMED',now)
+            elif not self.durable_write_available():
+                return actions+self._output(now)
             elif self.delivered and app is None:
                 # SAFE_STOP has no app owner. This confirms only publication and
                 # disarmed Gateway state, never an absent guest's application.
@@ -259,10 +364,12 @@ class VerifiedDriveMachine(ControlMachine):
                         'mode':self.mode.value,'output_permitted':self.output_permitted,'t':now}))
             return actions+self._output(now)
         if (self.phase=='FAILED' or self.failure) and not (self._resume_requested or self._countdown):return self._output(now)
+        # 아래 판정은 actions 를 새로 대입하므로 운영자 취소 이벤트는 따로 두었다가 앞에 붙인다
+        cancelled=self._operator_cancel(now)
         if app and self.output_permitted:
             p=self.prepared[self.active_vm,app]
-            if self.mode is Mode.AUTO and p.state!='READY' and p.reason in ('INPUT_UNAVAILABLE','INPUT_STALE','INPUT_INVALID','MAP_UNAVAILABLE','OBSERVATION_EXPIRED') and self._qualified(self.active_vm,MANUAL_APP,now,held=True):
-                actions=self._change(Mode.MANUAL,self.active_vm,'autonomous_lost',now,arm=True)
+            if self.mode is Mode.AUTO and p.state!='READY':
+                actions=self._autonomous_failure(self.active_vm,'autonomous_unavailable',now)
             elif not self._ready(self.active_vm,app,now) or not self._command_fresh(now):
                 track=self.apps[app];p=self.prepared[self.active_vm,app]
                 actions.append(Measure('output_evidence_lost',{'vm_id':self.active_vm,'app':app,'gen':self.generation,
@@ -286,5 +393,5 @@ class VerifiedDriveMachine(ControlMachine):
                 self._authorized=True
                 target_mode=Mode.AUTO if self.mode is Mode.AUTO_READY or self._resume_auto else Mode.MANUAL if self.mode is Mode.SAFE_STOP else self.mode
                 actions=self._change(target_mode,self._resume_vm,'resume_requested',now,arm=True)
-        if not actions:actions+=self._resume(now)
-        return actions+self._output(now)
+        if not actions and not cancelled:actions+=self._resume(now)
+        return cancelled+actions+self._output(now)

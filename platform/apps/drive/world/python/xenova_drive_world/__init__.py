@@ -1,3 +1,3 @@
 """Shared bounded world/state wire; import opens no transport or device."""
-from .codec import schema,encode,decode,validate,MAX_BYTES
+from .codec import schema,encode,decode,validate,MAX_BYTES,PreparedClock
 from .road import mark_road

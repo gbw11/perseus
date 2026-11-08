@@ -49,6 +49,7 @@ from uuid import UUID, uuid4
 
 from ..errors import Dom0ManagerError, DriverTimeout
 from .model import FailureReason, HealthState, Judgment, VmHealth
+from .budget import StableRun, host_boot_id
 from .platform_recovery import RecoveryPlatform
 from .policy import RecoveryPolicy
 from .protection import HISTORICAL, LIVE, LOST, PROTECTED, GatewayProtection, Outcome, ProtectionHold
@@ -96,6 +97,14 @@ class _Held(Exception):
     """force-restart 근거가 부족하다. attempt 를 소비하지 않고 잠시 뒤 다시 본다."""
 
 
+class _BudgetHeld(Exception):
+    """새 논리 시도만 보류한다. 원 시도 회수·필수 기록·출력 보호는 별도다."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
 class _ProtectionFailed(Exception):
     """Gateway 보호를 이 복구에서 더 얻을 수 없다(계약·설정 거절, 보호 요청 상한). 새 키로 우회하지 않고 최종 실패로 닫는다."""
 
@@ -126,7 +135,9 @@ class RecoveryEngine:
         new_id: Callable[[], UUID] = uuid4,
         inline: bool = False,
         drive_vm_ids: Iterable[UUID | str] | None = None,
+        non_drive_vm_ids: Iterable[UUID | str] = (),
         protection: GatewayProtection | None = None,
+        boot_id: Callable[[], str] = host_boot_id,
     ) -> None:
         self._policy = policy
         self._platform = platform
@@ -137,8 +148,10 @@ class RecoveryEngine:
         self._wall = wall
         self._new_id = new_id
         self._inline = inline
-        # None: 주행 VM 이 어느 것인지 모른다(drive config 없음). Zephyr force 를 모두 보류한다. 빈 집합은 "주행 VM 없음"이 확인된 것
+        # None: 주행 VM 이 어느 것인지 모른다(drive config 없음). Zephyr force 를 모두 보류한다
         self._drive_vm_ids = None if drive_vm_ids is None else frozenset(str(UUID(str(v))) for v in drive_vm_ids)
+        # Gateway 보호 없이 force 해도 되는 Zephyr 는 명시적으로 선언한 것뿐이다. drive config 에 없다고 비주행으로 보지 않는다
+        self._non_drive_vm_ids = frozenset(str(UUID(str(v))) for v in non_drive_vm_ids)
         self._protection = protection  # 없으면 주행 VM force 는 보류된다
         self._settle_due: dict[UUID, float] = {}  # 닫힌 복구의 보호 정산을 다음에 시도할 시각(메모리. 재시작하면 바로 다시 본다)
         self._held: dict[UUID, str] = {}  # 근거 부족으로 보류 중인 복구의 마지막 사유. 바뀔 때만 로그한다
@@ -146,6 +159,14 @@ class RecoveryEngine:
         self._futures: dict[UUID, Future] = {}
         self._lock = threading.RLock()
         self._records: dict[UUID, RecoveryRecord] = store.load()
+        self._store.budget_tracking |= policy.budget_enabled
+        self._budget_boot_reader = boot_id
+        self._budget_boot: str | None = None
+        self._budget_boot_error: Exception | None = None
+        self._budget_boot_first_error: Exception | None = None
+        self._stable: dict[UUID, StableRun] = {}  # 재시작 때 시간은 이어 붙이지 않고 실제 관측부터 다시 확인한다.
+        if policy.budget_enabled:
+            self._refresh_budget_context()
         self._lost = store.history_lost
         self._lost_warned = False
         self._dirty = False  # 메모리의 상태가 저장소에 아직 반영되지 않았다(저장 실패). 다음 주기에 다시 저장한다
@@ -188,6 +209,85 @@ class RecoveryEngine:
                      'recovery_id':str(r.recovery_id),'recovery_attempt_id':str(r.recovery_attempt_id)}
                     for r in self._records.values() if r.status==RecoveryStatus.COMPLETED and r.execution_id]
 
+    def budget_status(self, vm_id: UUID) -> dict[str, Any]:
+        """내부 정책 조회. 원 결과/실제 재부팅 횟수/출력 허가가 아니며 I/O를 하지 않는다."""
+        with self._lock:
+            used = self._budget_used(vm_id)
+            run = self._stable.get(vm_id)
+            return {'configured': self._policy.budget_enabled, 'used': used,
+                    'limit': self._policy.vm_max_attempts, 'hold_reason': self._budget_reason(vm_id),
+                    'stable_for_s': max(0.0, min(run.last.progress) - run.since) if run else 0.0,
+                    'stable_required_s': self._policy.stable_s, 'durable': not self._dirty}
+
+    def observation_unavailable(self) -> None:
+        """실패한 관측 구간을 안정 시간으로 세지 않는다. 누적 사용량은 지우지 않는다."""
+        with self._lock:
+            self._stable.clear()
+
+    def _budget_used(self, vm_id: UUID) -> int | None:
+        return self._store.vm_budget_used.get(vm_id, 0 if self._store.budget_baseline_known else None)
+
+    def _budget_reason(self, vm_id: UUID) -> str | None:
+        if not self._policy.budget_enabled:
+            return None
+        if self._budget_boot is None:
+            return 'RECOVERY_BUDGET_CONTEXT_UNAVAILABLE'
+        used = self._budget_used(vm_id)
+        if used is None:
+            return 'RECOVERY_BUDGET_UNKNOWN'
+        if used >= self._policy.vm_max_attempts:
+            return 'RECOVERY_BUDGET_EXHAUSTED'
+        return None
+
+    def _refresh_budget_context(self) -> None:
+        if self._budget_boot is not None:
+            return
+        try:
+            value = self._budget_boot_reader()
+            if not isinstance(value, str) or str(UUID(value)) != value or UUID(value).int == 0:
+                raise ValueError('invalid recovery budget host boot identity')
+        except (OSError, ValueError) as error:
+            previous = self._budget_boot_error
+            if self._budget_boot_first_error is None:
+                self._budget_boot_first_error = error
+            if previous is None or (type(previous), getattr(previous, 'errno', None)) != (type(error), getattr(error, 'errno', None)):
+                log.error('recovery budget host context unavailable (%s, errno=%s)', type(error).__name__, getattr(error, 'errno', None))
+            self._budget_boot_error = error
+        else:
+            if self._budget_boot_error is not None:
+                log.info('recovery budget host context available again')
+            self._budget_boot, self._budget_boot_error = value, None
+
+    def _update_stability(self, now: float) -> None:
+        if not self._policy.budget_enabled:
+            return
+        self._refresh_budget_context()
+        samples = self._watcher.stability_samples() if hasattr(self._watcher, 'stability_samples') else {}
+        busy = {record.vm_id for record in self._records.values()
+                if record.status == RecoveryStatus.EXECUTING or record.recovery_id in self._futures}
+        live = set()
+        renewals = {}
+        if self._budget_boot is not None:
+            for vm_id, sample in samples.items():
+                if vm_id in busy or sample.observed_at != now or self._budget_used(vm_id) == 0:
+                    continue
+                live.add(vm_id)
+                run = self._stable.get(vm_id)
+                if run is None:
+                    self._stable[vm_id] = StableRun.start(sample)
+                elif run.advance(sample, self._policy.stable_s):
+                    renewals[vm_id] = self._budget_used(vm_id)
+                    self._store.vm_budget_used[vm_id] = 0
+        for vm_id in set(self._stable) - live:
+            del self._stable[vm_id]
+        if renewals:
+            if self._save():  # 수신/조회마다 쓰지 않고 예산 갱신 전이만 필수 저장한다.
+                for vm_id in renewals:
+                    del self._stable[vm_id]
+                    log.info('vm %s: continuous stability confirmed; VM recovery budget renewed', vm_id)
+            else:
+                self._store.vm_budget_used.update(renewals)  # 저장 미확정을 정상 예산 회복으로 표시하지 않는다.
+
     # ---- 입력 ----
 
     def on_judgment(self, judgment: Judgment, now: float | None = None) -> RecoveryRecord:
@@ -204,6 +304,8 @@ class RecoveryEngine:
                 status=RecoveryStatus.DETECTED, detected_at=self._iso(self._wall()), detected_monotonic=now,
             )
             self._records[record.recovery_id] = record
+            if self._store.budget_tracking:
+                self._store.vm_budget_used.setdefault(judgment.vm_id, self._budget_used(judgment.vm_id))
             self._save()
             log.warning("vm %s: recovery %s opened (%s)", record.vm_id, record.recovery_id, record.reason)
             return record
@@ -228,6 +330,7 @@ class RecoveryEngine:
         now = self._clock() if now is None else now
         self.collect(now)
         with self._lock:
+            self._update_stability(now)
             for record in [r for r in self._records.values() if r.open]:
                 in_flight = record.recovery_id in self._futures
                 if in_flight or record.status == RecoveryStatus.EXECUTING:
@@ -326,9 +429,16 @@ class RecoveryEngine:
                 hold = "drive VM without a current Gateway protection for this execution"
             if hold is not None:
                 raise _Held(hold)
+            budget_reason = self._budget_reason(record.vm_id)
+            if budget_reason is not None:
+                raise _BudgetHeld(budget_reason)
             self._held.pop(record.recovery_id, None)
             now = self._clock()
             spec = self._build_spec(record, view, now)  # ValueError: 관측으로는 spec 을 만들 수 없음 → 최종 실패
+            budget_present = record.vm_id in self._store.vm_budget_used
+            budget_before = self._budget_used(record.vm_id)
+            if self._store.budget_tracking:
+                self._store.vm_budget_used[record.vm_id] = None if budget_before is None else budget_before + 1
             previous_closed = record.attempt_closed
             record.attempt += 1
             record.attempt_closed = False
@@ -341,6 +451,10 @@ class RecoveryEngine:
             record.status = RecoveryStatus.EXECUTING
             self._emit(record, "recovery.started", now)
             if not self._save():
+                if budget_present:
+                    self._store.vm_budget_used[record.vm_id] = budget_before
+                else:
+                    self._store.vm_budget_used.pop(record.vm_id, None)
                 record.pending_events.pop()
                 record.attempt -= 1
                 record.attempt_closed = previous_closed
@@ -413,6 +527,12 @@ class RecoveryEngine:
         except _ProtectionFailed as exc:
             self._close(record, RecoveryStatus.FAILED, now, final=True, error={
                 "code": "PROTECTION_UNAVAILABLE", "platform_code": None, "message": f"{exc} (Gateway {exc.code})" if exc.code else str(exc)})
+        except _BudgetHeld as exc:
+            record.due_monotonic = now + self._policy.transient_retry_s
+            if self._held.get(record.recovery_id) != exc.code:
+                self._held[record.recovery_id] = exc.code
+                log.warning('vm %s: recovery %s new attempt held (%s, used=%s limit=%s); original attempts and protection remain owned',
+                            record.vm_id, record.recovery_id, exc.code, self._budget_used(record.vm_id), self._policy.vm_max_attempts)
         except _Held as exc:
             record.due_monotonic = now + self._policy.transient_retry_s  # attempt·상태·이벤트는 그대로다
             if self._held.get(record.recovery_id) != str(exc):
@@ -489,6 +609,9 @@ class RecoveryEngine:
         zephyr = record.guest_kind == "zephyr"
         if zephyr and self._drive_vm_ids is None:
             return "drive VMs are unknown (no drive config); every Zephyr force-restart is held"
+        if zephyr and str(record.vm_id) not in self._drive_vm_ids and str(record.vm_id) not in self._non_drive_vm_ids:
+            # 설정에서 빠진 Zephyr 를 비주행으로 보고 Gateway 보호 없이 force 하지 않는다. 비주행 Zephyr 는 따로 선언해야 한다
+            return "Zephyr VM is in neither the drive config nor the declared non-drive VMs; its force-restart is held"
         health = self._watcher.health(record.vm_id)
         if health is None or not health.intent_known:
             return "no current health with a known intent"
@@ -498,7 +621,7 @@ class RecoveryEngine:
         if evidence == FailureReason.DOMAIN_CRASHED:
             if view.get("xen_state") != "crashed":
                 return f"crash evidence but the platform now observes {view.get('xen_state')}"
-        elif not ((evidence == FailureReason.APP_HEARTBEAT_LOST and zephyr) or
+        elif not ((evidence in (FailureReason.APP_HEARTBEAT_LOST,FailureReason.VM_UNTRUSTED) and zephyr) or
                   (record.graceful_failed_execution_id == view.get("execution_id") and evidence.value == record.reason)):
             return f"current evidence {evidence.value} does not justify force-restart"
         if health.domid != view.get("domid"):
@@ -616,6 +739,8 @@ class RecoveryEngine:
         error = {"code": code, "platform_code": exc.platform_code, "message": exc.message}
         log.warning("vm %s: recovery %s attempt %d: %s (%s)", record.vm_id, record.recovery_id, record.attempt, code, exc.message)
         if code in GONE_CODES:
+            self._store.vm_budget_used.pop(record.vm_id, None)
+            self._stable.pop(record.vm_id, None)  # 플랫폼이 등록 부재/영구 제거를 확인한 경우만 해제한다.
             self._close(record, RecoveryStatus.CANCELLED, now, error=error)
         elif code in TRANSIENT_CODES or (exc.platform_code is None and
                 (isinstance(exc, DriverTimeout) or (record.request is not None and record.status==RecoveryStatus.EXECUTING))):
@@ -766,6 +891,22 @@ class RecoveryEngine:
         if left:
             log.error("recovery worker degraded: %d recovery event(s) not stored in the outbox yet; kept in %s and retried every cycle", left, self._store.path)
 
+    def hold_reasons(self) -> list[str]:
+        """복구 실행·기록을 막고 있는 내부 상태(자가진단용, 354)."""
+        with self._lock:
+            reasons = []
+            if self._lost:
+                reasons.append("RECOVERY_HISTORY_LOST")  # 어떤 복구도 실행하지 않는다
+            if self._dirty:
+                reasons.append("RECOVERY_STATE_UNSAVED")  # 상태가 저장되기 전에는 이벤트를 내지 않는다
+            if any(record.pending_events for record in self._records.values()):
+                reasons.append("RECOVERY_EVENTS_PENDING")  # outbox 에 못 옮겨 Spring 이 재보충으로도 못 받는다
+            for vm_id in self._store.vm_budget_used:
+                reason = self._budget_reason(vm_id)
+                if reason is not None and reason not in reasons:
+                    reasons.append(reason)
+            return reasons
+
     # ---- 보조 ----
 
     def _save(self) -> bool:
@@ -783,6 +924,7 @@ class RecoveryEngine:
         stale = closed[:-KEEP_CLOSED] if len(closed) > KEEP_CLOSED else []
         for record in stale:
             del self._records[record.recovery_id]
+            self._skipped.discard(record.recovery_id)
         if stale:
             self._save()
 

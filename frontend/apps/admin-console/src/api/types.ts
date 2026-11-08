@@ -49,7 +49,7 @@ export type AgentStatus = 'UNKNOWN' | 'ONLINE' | 'STALE' | 'OFFLINE';
 /** 백엔드 VmRole (DB vms.role). 배포자가 VM 등록·수정 때 지정하며 이름·app_id 로 추정하지 않는다 */
 export type VmRole = 'primary_drive' | 'backup_drive' | 'interaction';
 
-/** §2.2 프론트 공개 VM. agent_status·ipv4 는 목록·단건 조회에만 있다 */
+/** §2.2 프론트 공개 VM. 주소 필드는 조회용 VM 응답에 포함된다. */
 export interface Vm {
   vm_id: string;
   name: string;
@@ -57,6 +57,7 @@ export interface Vm {
   state: VmState;
   agent_status?: AgentStatus;
   ipv4?: string | null;
+  assigned_ipv4?: string | null;
   template_id: string;
   template_version: string;
   vcpus: number;
@@ -135,6 +136,64 @@ export interface UpdateVcpusRequest {
 export type VmResourceUpdate =
   { kind: 'memory'; body: UpdateMemoryRequest } | { kind: 'vcpus'; body: UpdateVcpusRequest };
 
+/** POST /api/v1/vms/{id}/stress/cpu — workers 1~4, duration_s 1~120 */
+export interface CpuStressRequest {
+  workers: number;
+  duration_s: number;
+}
+
+/** POST /api/v1/vms/{id}/stress/memory — memory_mib 1~512, duration_s 1~120 */
+export interface MemoryStressRequest {
+  memory_mib: number;
+  duration_s: number;
+}
+
+export type StressRequest =
+  { kind: 'cpu'; body: CpuStressRequest } | { kind: 'memory'; body: MemoryStressRequest };
+
+export type StressType = 'CPU' | 'MEMORY';
+
+/** 202 응답. Agent 에 MQTT agent.command(action=stress)를 보냈다는 뜻이고, 실제 부하는 메트릭으로 확인한다 */
+export interface SubmittedCommand {
+  command_id: string;
+  operation_id: string;
+  vm_id: string;
+  submitted_at: string;
+  expires_at: string;
+}
+
+export interface StressCommand extends SubmittedCommand {
+  type: StressType;
+  /** CPU 는 워커 수, MEMORY 는 MiB */
+  amount: number;
+  load_percent?: number | null;
+  duration_s: number;
+}
+
+/** POST /api/v1/vms/{id}/faults/auto-delay — Zephyr 주행 연산에 지연을 주는 데모 명령 */
+export interface AutoDelayRequest {
+  delay_ms: number;
+  duration_s: number;
+}
+
+export interface AutoDelayCommand extends SubmittedCommand {
+  delay_ms: number;
+  duration_s: number;
+}
+
+/** POST /api/v1/vms/{id}/faults/agent-exit — Linux Agent 종료 데모 명령 */
+export type AgentExitCommand = SubmittedCommand;
+
+export type CommandState = 'PENDING' | 'ACCEPTED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'REJECTED';
+
+export interface CommandStatusResponse {
+  command_id: string;
+  vm_id: string;
+  status: CommandState;
+  message?: string | null;
+  updated_at: string;
+}
+
 /** §2.3 */
 export interface Template {
   template_id: string;
@@ -195,7 +254,9 @@ export type EventType =
   | 'drive.mode.changed'
   | 'drive.fault.detected'
   | 'drive.resume.accepted'
-  | 'drive.resume.cancelled';
+  | 'drive.resume.cancelled'
+  // 콘솔이 모니터 화면 배치를 바꿈 (REST-24, backend EventType.DISPLAY_ROUTE_CHANGED)
+  | 'display.route.changed';
 
 export type EventSeverity = 'INFO' | 'WARNING' | 'ERROR';
 
@@ -216,7 +277,7 @@ export interface EventListResponse {
   items: VmEvent[];
 }
 
-// ---- 메트릭·프로세스 (노션 API 명세 "메트릭 조회", 백엔드 MetricsController) — 에이전트가 있는 Linux VM 만 ----
+// ---- 메트릭·프로세스·스레드 (Spring VM 조회 계약) ----
 
 /** VM에 할당된 vCPU 용량을 기준으로 계산한 전체 CPU 사용률. 프로세스 cpu_percent와 구분한다. */
 export const VM_CPU_PERCENT_METRIC = 'cpu_percent_allocated';
@@ -227,6 +288,34 @@ export interface MetricValue {
   unit: string | null;
   labels: Record<string, string> | null;
   unavailable_reason: string | null;
+  counter_value?: string | null;
+  /** v2 정수의 원문. value 숫자 projection보다 우선한다. */
+  raw_value?: string | null;
+  status?: string | null;
+  source_rc?: number | null;
+}
+
+/** 소유 버퍼의 내용·업무 상태. 관측 성공이나 출력 허가와 다른 경계다. */
+export interface ManualBufferObservation {
+  phase: 'empty' | 'stored' | 'pending' | 'running' | 'retained';
+  content_bytes: string;
+  sequence: string | null;
+  source_uptime_ms: string | null;
+  owner_lifetime: string | null;
+  context_revision: string;
+  connection_revision: string;
+  input_status: 'missing' | 'unclassified' | 'accepted' | 'invalid' | 'expired' | 'context_changed';
+  source_rc: number;
+  performed: boolean | null;
+  revoked: boolean;
+  last_read_sequence: string | null;
+}
+
+export interface TelemetryExecutionContext {
+  binding: string;
+  host_boot_id: string | null;
+  execution_id: string | null;
+  receipt_id: string | null;
 }
 
 export interface MetricSample {
@@ -237,6 +326,32 @@ export interface MetricSample {
   observed_at: string;
   received_at?: string;
   window_ms?: number | null;
+  network?: {
+    publisher_instance_id: string;
+    observed_uptime_ms: string | null;
+  };
+  telemetry?: {
+    family: string;
+    publisher_instance_id: string;
+    message_seq?: string | null;
+    source_sample_seq: string | null;
+    observed_uptime_ms: string | null;
+    sent_uptime_ms: string;
+    sent_at: string | null;
+    utc_quality: string | null;
+    utc_source: string | null;
+    uncertainty_ms: number | null;
+    collection: {
+      sample_id: string;
+      start_uptime_ms: string;
+      end_uptime_ms: string;
+      elapsed_us: string | null;
+      status: string;
+      source_rc: number | null;
+    };
+    context: TelemetryExecutionContext;
+    buffer?: ManualBufferObservation | null;
+  };
   values: MetricValue[];
 }
 
@@ -256,6 +371,62 @@ export interface ProcessesResponse {
   observed_at: string | null;
   stale: boolean;
   items: ProcessInfo[];
+  process_collection?: {
+    status: 'first_sample' | 'ok' | 'partial' | 'read_failed' | 'disabled';
+    discovered: number;
+    read_ok: number;
+    vanished: number;
+    failed: number;
+    truncated: boolean;
+    error: string | null;
+  } | null;
+}
+
+export interface ThreadsResponse {
+  vm_id: string;
+  window_ms: number | null;
+  received_at: string | null;
+  stale: boolean;
+  threads_status: string | null;
+  parts_received: number;
+  part_count: number | null;
+  complete: boolean;
+  conflicting_pages: boolean;
+  stack_snapshot?: {
+    snapshot_id: string;
+    source_status: string;
+    rows_seen: number | null;
+    received_at: string;
+    expires_at: string;
+    items: {
+      row_id: number;
+      name: string;
+      name_truncated: boolean;
+      reserved_bytes: number;
+      peak_used_bytes: number | null;
+      status: string;
+    }[];
+  } | null;
+  items: {
+    thread_id: string;
+    thread_name: string;
+    name_truncated: boolean;
+    cpu_percent: number | null;
+    unavailable_reason: string | null;
+  }[];
+}
+
+export interface TelemetryHeartbeatResponse {
+  vm_id: string;
+  status: 'FRESH' | 'STALE' | 'UNKNOWN';
+  publisher_state: 'running' | 'degraded' | 'stopping' | null;
+  last_collection_success_uptime_ms?: string | null;
+  last_collection_success_age_ms: number | null;
+  collection_failures_total: number | null;
+  /** MQTT 제출 실패 누계 (백엔드 BigInteger) */
+  publish_submit_failures_total?: number | null;
+  received_at: string | null;
+  age_ms: number | null;
 }
 
 // ---- 화면 배치 (노션 API 명세 REST-23·REST-24, 백엔드 -129) ----

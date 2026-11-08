@@ -69,9 +69,11 @@ def validate_records(value):
         integer(row['accepted_generation'], minimum=1, maximum=0xffffffff)
         validate_result(row, spec, row['accepted_generation'])
         if row['phase'] == 'PROTECTED':
-            if spec['target_vm'] in held:
+            # Only one active protection per VM per host boot. An earlier host's PROTECTED row is
+            # history (S15P31E110-346) and the new host may protect the same VM again with a new key.
+            if (row['host_boot_id'], spec['target_vm']) in held:
                 raise ValueError('multiple active protections')
-            held.add(spec['target_vm'])
+            held.add((row['host_boot_id'], spec['target_vm']))
         else:
             end = row['completion']
             uuid(end['host_boot_id']); uuid(end['target_execution_id'])
@@ -303,9 +305,21 @@ class GatewayProvider:
             raise ProviderError('TARGET_CHANGED')
         if self.m.active_vm == spec['target_vm'] and self.m.output_permitted:
             raise ProviderError('OUTPUT_NOT_PROTECTED')
+        if not cancel and any(item['vm_id']==spec['target_vm'] for item in self.a.value.get('distrusted',[])):
+            app='autonomous' if self.m.mode is Mode.AUTO else 'manual'
+            if not self.m.rejoin_ready(spec['target_vm'],app,self.m.clock()):
+                raise ProviderError('TARGET_NOT_READY')
         ended = {**row, 'phase': 'CANCELLED' if cancel else 'RELEASED', 'completion': dict(context)}
-        self.a.update(protections=[ended if r['request_id']==request_id else r
-                                   for r in self.a.value['protections']])
+        fields={'protections':[ended if r['request_id']==request_id else r
+                               for r in self.a.value['protections']]}
+        if not cancel:
+            fields['distrusted']=[item for item in self.a.value.get('distrusted',[])
+                                  if item['vm_id']!=spec['target_vm']]
+        self.a.update(**fields)
+        if not cancel:
+            # The actor updates RAM only after the guarded durable completion.
+            # Old execution reports remain rejected by the current binding.
+            self.m.untrusted.pop(spec['target_vm'],None)
         self.capture_pending.discard(request_id)
         # No preference rollback, generation allocation, automatic resume or
         # freshness renewal. New bindings/calculation/rearm remain necessary.

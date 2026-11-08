@@ -25,7 +25,7 @@ import xenova_management as management
 import xenova_management_cli as cli
 import xenova_preparation as ownership
 import xenova_vm as vm
-from xenova_runtime import PlatformError, OperationBusy
+from xenova_runtime import PlatformError, OperationBusy, operation_lock
 
 
 class PreparationConcurrencyTest(FollowupFixture):
@@ -443,6 +443,22 @@ with patch.object(vm,'storage_check'):
         self.assertEqual((stage/'root.raw').stat().st_ino,before[0])
         self.assertEqual((stage/'root.raw').read_bytes(),before[1])
         self.assertEqual(fresh.call('operation',{'idempotency_key':'create:'+self.spec['vm_id']})['data']['effective_status'],'RECOVERY_REQUIRED')
+
+    def test_private_ready_waits_for_short_publication_contention(self):
+        waiting=threading.Event()
+        original_sleep=self.p.sleep
+
+        def sleep(seconds):
+            waiting.set()
+            original_sleep(seconds)
+
+        with patch.object(self.p,'sleep',side_effect=sleep), self.blocked(other=False) as state:
+            with operation_lock(self.p.runtime):
+                state['release'].set()
+                self.assertTrue(waiting.wait(10),'private owner did not wait to publish')
+                self.assertTrue(state['thread'].is_alive())
+        self.assertEqual(self.last['writes'],1)
+        self.assertEqual(self.last['response']['operation_id'],self.last['op']['operation_id'])
 
     def test_S3_T08_private_ready_interruption_does_not_publish_or_recopy(self):
         self.interrupted_private('private-prepared')

@@ -1,14 +1,18 @@
 import { setupServer } from 'msw/node';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { ApiError, getSession, refreshSession, request, setSession } from '../api/client';
+import { getSession, refreshSession, request, setSession } from '../api/client';
 import {
   VM_CPU_PERCENT_METRIC,
+  type AgentExitCommand,
   type MetricHistoryResponse,
   type TokenResponse,
+  type StressCommand,
   type VmResources,
   type Vm,
   type VmListResponse,
 } from '../api/types';
+import { canStartVm, canStopVm } from '../format';
+import { setMockBoardDown } from './board';
 import { MOCK_PASSWORD, VM_IDS } from './data';
 import { handlers, resetMockState } from './handlers';
 
@@ -55,6 +59,20 @@ describe('MSW mock API', () => {
     expect(vm.agent_status).toBe('ONLINE');
   });
 
+  it('mock 보드를 끊으면 VM 목록·상세가 502 VM_CONTROL_BAD_RESPONSE, 다시 이으면 정상', async () => {
+    await login();
+    setMockBoardDown(true);
+    await expect(request('/api/v1/vms')).rejects.toMatchObject({
+      status: 502,
+      code: 'VM_CONTROL_BAD_RESPONSE',
+    });
+    await expect(request(`/api/v1/vms/${VM_IDS.interaction}`)).rejects.toMatchObject({ status: 502 });
+
+    setMockBoardDown(false);
+    const list = await request<VmListResponse>('/api/v1/vms');
+    expect(list.items).toHaveLength(3);
+  });
+
   it('틀린 비밀번호는 INVALID_CREDENTIALS, 토큰 없이는 401', async () => {
     await expect(login('wrong')).rejects.toMatchObject({ status: 401, code: 'INVALID_CREDENTIALS' });
     await expect(request('/api/v1/vms', { auth: false })).rejects.toMatchObject({ status: 401 });
@@ -67,14 +85,22 @@ describe('MSW mock API', () => {
     expect(getSession()?.access_token).not.toBe(first.access_token);
   });
 
-  it('정지 → 시작, 같은 상태로 다시 보내면 INVALID_VM_STATE', async () => {
+  it('정지 → 시작, 같은 상태로 다시 보내면 그대로 200 (계약 §5, backend VmService 와 같음)', async () => {
     await login();
     const id = '11111111-1111-4111-8111-111111111111';
     expect((await request<Vm>(`/api/v1/vms/${id}/stop`, { method: 'POST' })).state).toBe('stopped');
-    const again = request(`/api/v1/vms/${id}/stop`, { method: 'POST' });
-    await expect(again).rejects.toBeInstanceOf(ApiError);
-    await expect(again).rejects.toMatchObject({ status: 409, code: 'INVALID_VM_STATE' });
+    expect((await request<Vm>(`/api/v1/vms/${id}/stop`, { method: 'POST' })).state).toBe('stopped');
     expect((await request<Vm>(`/api/v1/vms/${id}/start`, { method: 'POST' })).state).toBe('running');
+    expect((await request<Vm>(`/api/v1/vms/${id}/start`, { method: 'POST' })).state).toBe('running');
+  });
+
+  it('canStartVm·canStopVm — crashed·paused 는 정지만 되고, 정지 뒤 시작한다', () => {
+    expect(canStartVm('stopped')).toBe(true);
+    for (const state of ['running', 'crashed', 'paused', 'stopping'] as const)
+      expect(canStartVm(state)).toBe(false);
+    for (const state of ['running', 'crashed', 'paused', 'stopping'] as const)
+      expect(canStopVm(state)).toBe(true);
+    expect(canStopVm('stopped')).toBe(false);
   });
 
   it('생성은 입력값을 검사하고, 같은 이름은 VM_NAME_CONFLICT', async () => {
@@ -178,5 +204,22 @@ describe('MSW mock API', () => {
         body: { memory_mib: 64 },
       }),
     ).rejects.toMatchObject({ status: 400, code: 'RESOURCE_UNSUPPORTED' });
+  });
+
+  it('Linux Agent 종료는 접수하고 Zephyr 부하 API는 거절한다', async () => {
+    await login();
+    await request(`/api/v1/vms/${VM_IDS.interaction}/start`, { method: 'POST' });
+    const exit = await request<AgentExitCommand>(`/api/v1/vms/${VM_IDS.interaction}/faults/agent-exit`, {
+      method: 'POST',
+    });
+    expect(exit).toMatchObject({ vm_id: VM_IDS.interaction });
+    expect(exit.command_id).toEqual(expect.any(String));
+
+    await expect(
+      request<StressCommand>(`/api/v1/vms/${VM_IDS.autonomous}/stress/cpu`, {
+        method: 'POST',
+        body: { workers: 1, duration_s: 30 },
+      }),
+    ).rejects.toMatchObject({ status: 400, code: 'UNSUPPORTED_GUEST_KIND' });
   });
 });

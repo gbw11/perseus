@@ -30,7 +30,7 @@ export interface DriveStateDto {
     flags: { estop: boolean; watchdog: boolean; obstacle: boolean } | null;
     received_ago_ms: number;
   } | null;
-  /** app_id 별. 네비게이션 VM 은 message-board */
+  /** app_id 별. 인터랙션 VM 은 interaction */
   apps: Record<string, DriveAppDto>;
   perception: {
     valid: boolean;
@@ -79,7 +79,7 @@ export const HEARTBEAT_STALE_MS = 3000;
 const TOPIC_APP_ID: Record<AppId, string> = {
   autonomous: 'autonomous',
   manual: 'manual',
-  interaction: 'message-board',
+  interaction: 'interaction',
 };
 
 function heartbeatFresh(dto: DriveAppDto): boolean {
@@ -210,7 +210,7 @@ const MAX_EVENTS = 40;
 const APP_TITLE: Record<string, string> = {
   autonomous: '자율주행',
   manual: '수동주행',
-  'message-board': '네비게이션',
+  interaction: '네비게이션',
 };
 
 function text(event: EventDto): string {

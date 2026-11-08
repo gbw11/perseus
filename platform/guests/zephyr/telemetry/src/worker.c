@@ -44,8 +44,10 @@ static uint8_t tx[XT_PAYLOAD_MAX+256],rx[512];
 static struct xt_message outgoing,inflight;
 static struct xt_observation current,frozen;
 static struct xt_observation cpu_frozen;
+static unsigned app_memory_part,app_memory_remaining;
+static bool app_memory_active,resource_app_first;
 static char cpu_sample[37];
-static unsigned cpu_part,cpu_parts;
+static unsigned cpu_part,cpu_parts,cpu_remaining;
 static int64_t cpu_due,cpu_expiry;
 static bool cpu_active;
 static char current_sample[37],frozen_sample[37],frozen_id[37];
@@ -73,6 +75,8 @@ static int collect_current(void)
 	if(current.resources.cpu.rc && current.resources.cpu.rc!=-ENOTSUP &&
 	   current.resources.cpu.rc!=-ENODATA)failed=true;
 	for(size_t i=0;i<current.resources.regions;i++)if(current.resources.memory[i].rc)failed=true;
+    if(current.resources.app_registered)for(unsigned i=0;i<current.resources.app_count;i++)
+     if(current.resources.app[i].rc)failed=true;
 	xt_collection_result(&publisher.counters,failed,current.end_ms);
 	if (!current.history_rc) { xt_capture_events(&publisher,&current.history); }
 	publisher.counters.collect_us+=current.elapsed_us;
@@ -178,7 +182,11 @@ static int send_observation(enum xt_kind kind,const struct xt_observation *sourc
 	uint64_t start=k_ticks_to_us_floor64(k_uptime_ticks());
 	int rc=xt_encode(&publisher,kind,source,k_uptime_get(),sample,snapshot,part,&outgoing);
 	publisher.counters.serialized_us+=k_ticks_to_us_floor64(k_uptime_ticks())-start;
-	if (rc) { return rc; }
+	if (rc) {
+        /* Encoding rejected this sample before any bytes were submitted. Do not
+         * charge a stale/invalid page as a maximum wire packet. */
+        tokens+=reservation;return rc;
+    }
 	/* Return the conservative reservation surplus, with framing still counted. */
 	tokens+=reservation-(unsigned)(outgoing.length+strlen(outgoing.topic)+12);
 	if (outgoing.qos) {
@@ -192,6 +200,29 @@ static int send_observation(enum xt_kind kind,const struct xt_observation *sourc
 	return rc;
 }
 
+/* Each pump offers one page per stream. Alternate which stream can consume
+ * the next byte reservation; a large CPU window must not always precede app
+ * memory. App cursor survives expiration, so the next fresh sample starts at
+ * the first region that was not sent. CPU uses the same rule for its next
+ * window. Neither cursor renews the old source age. */
+static void send_cpu_page(void)
+{
+ if(!cpu_active||!connected)return;
+ int rc=send_observation(XT_CPU,&cpu_frozen,cpu_sample,NULL,cpu_part);
+ if(!rc){
+  cpu_part=(cpu_part+1)%cpu_parts;
+  if(!--cpu_remaining)cpu_active=false;
+ }else if(rc&&rc!=-EAGAIN&&rc!=-EBUSY)cpu_active=false;
+}
+static void send_app_memory_page(void)
+{
+ if(!app_memory_active||!connected)return;
+ int rc=send_observation(XT_APP_MEMORY,&cpu_frozen,cpu_sample,NULL,app_memory_part);
+ if(!rc){
+  app_memory_part=(app_memory_part+1)%cpu_frozen.resources.app_count;
+  if(!--app_memory_remaining)app_memory_active=false;
+ }else if(rc&&rc!=-EAGAIN&&rc!=-EBUSY)app_memory_active=false;
+}
 static void acknowledge(void)
 {
 	if (!pending || !acked) { return; }
@@ -258,7 +289,7 @@ static void work(void *a,void *b,void *c)
 		{XT_PROGRESS,1000},{XT_INTERVAL,5000},{XT_JITTER,5000},{XT_LATENESS,5000},
 		{XT_ELAPSED,5000},{XT_PUBLISHER,5000},{XT_POOLS,2000},
 	};
-	cpu_active=false;cpu_due=0;
+	cpu_active=false;cpu_due=0;cpu_part=cpu_remaining=0;app_memory_active=false;app_memory_part=app_memory_remaining=0;resource_app_first=true;
 	int64_t due[ARRAY_SIZE(periodic)]={0};
 	while (!atomic_get(&stopping)) {
 		int64_t now=k_uptime_get();
@@ -344,18 +375,27 @@ static void work(void *a,void *b,void *c)
 				if (rc!=-EAGAIN && rc!=-EBUSY) { due[i]=now+periodic[i].ms; }
 			}
 			if(cpu_active&&k_uptime_get()>=cpu_expiry){cpu_active=false;++publisher.counters.live_discarded;}
-			if(!cpu_active&&now>=cpu_due){
-			 cpu_frozen=current;memcpy(cpu_sample,current_sample,sizeof(cpu_sample));cpu_part=0;
-			 cpu_parts=(unsigned)MAX(1,(cpu_frozen.resources.rows+3)/4);cpu_active=true;
+			if(app_memory_active&&k_uptime_get()>=cpu_frozen.resources.raw.at_ms+2000){
+			 app_memory_active=false;++publisher.counters.live_discarded;
+			}
+			/* CPU and app pages share one frozen capture. Neither consumer can
+			 * replace it while the other still owns an unexpired page cycle. */
+			if(!cpu_active&&!app_memory_active&&now>=cpu_due){
+			 cpu_frozen=current;memcpy(cpu_sample,current_sample,sizeof(cpu_sample));
+             cpu_parts=(unsigned)MAX(1,(cpu_frozen.resources.rows+3)/4);
+             /* Fresh thread sets may change page count. Keep the next unsent
+              * index only inside the new window; no old values carry over. */
+             cpu_part%=cpu_parts;cpu_remaining=cpu_parts;cpu_active=true;
 			 cpu_expiry=cpu_frozen.resources.cpu.end_ms+2000;cpu_due=now+2000;
+			 app_memory_active=cpu_frozen.resources.app_registered&&cpu_frozen.resources.app_count>0&&cpu_frozen.resources.app_count<=XDR_APP_REGIONS;
+             if(app_memory_active)app_memory_part%=cpu_frozen.resources.app_count;
+             app_memory_remaining=app_memory_active?cpu_frozen.resources.app_count:0;
 			}
-			if(cpu_active){
-			 int rc=send_observation(XT_CPU,&cpu_frozen,cpu_sample,NULL,cpu_part);
-			 if(!rc&&++cpu_part==cpu_parts)cpu_active=false;
-			 else if(rc&&rc!=-EAGAIN&&rc!=-EBUSY)cpu_active=false;
-			}
-			freeze_request();
-			if (snapshot_active && !pending) { (void)send_observation(snapshot_kind,&frozen,frozen_sample,frozen_id,snapshot_part); }
+			if(resource_app_first){send_app_memory_page();send_cpu_page();}
+            else{send_cpu_page();send_app_memory_page();}
+            resource_app_first=!resource_app_first;
+            freeze_request();
+            if (snapshot_active && !pending) { (void)send_observation(snapshot_kind,&frozen,frozen_sample,frozen_id,snapshot_part); }
 			else if (publisher.event_count && !pending && !inventory_pending) { (void)send_observation(XT_EVENT,&current,current_sample,NULL,0); }
 		}
 		publish_status(connection_error);k_sleep(K_MSEC(20));

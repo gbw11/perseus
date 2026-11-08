@@ -42,11 +42,18 @@ def process_server(tmp_path):
 
 
 @pytest.fixture
-def actor_server(tmp_path):
+def actor_server(tmp_path,request):
     import importlib.util
     spec = importlib.util.spec_from_file_location('owned_gateway_lab', LAB)
     module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
     lab = module.Lab(tmp_path/'xenova-gateway-lab-actor')
+    if getattr(request,'param',False):
+        # Existing durable record fixture, not a new VM distrust producer.
+        old=dict(vm_id=B,execution_id=lab.executions[B],reason='MEMORY_PRESSURE',
+                 command_id='historical-memory',observed_monotonic_ms=int(time.monotonic()*1000),
+                 generation=lab.runner.machine.generation)
+        lab.auth.update(distrusted=[old]);lab.runner.machine.untrusted[B]=dict(old)
+        assert lab.auth.load()['distrusted']==[old]
     stop = threading.Event()
     def loop():
         while not stop.is_set():
@@ -220,6 +227,34 @@ def test_c08_exclusion_new_binding_finish_and_stale_completion(actor_server):
     assert client.get(next_request)['app_applied'] # released protection permits legitimate normal progress
 
 
+@pytest.mark.parametrize('actor_server',[True],indirect=True)
+def test_historical_distrust_finish_releases_durable_and_ram_then_allows_second_request(actor_server,monkeypatch):
+    lab,client=actor_server;machine=lab.runner.machine
+    request=str(uuid4());spec=submission(client,B);client.submit(request,spec)
+    old=dict(machine.untrusted[B])
+    lab.executions[B]=str(uuid4());lab.instances[B]={app:str(uuid4()) for app in ('autonomous','manual')}
+    deadline=time.monotonic()+1
+    while not machine.rejoin_ready(B,'autonomous',time.monotonic()):
+        assert time.monotonic()<deadline;time.sleep(.005)
+    context=client.context();end=dict(host_boot_id=context['host_boot_id'],
+        expected_generation=context['generation'],target_execution_id=lab.executions[B])
+    with pytest.raises(GatewayRejected,match='AUTHORITY_CHANGED'):
+        client.finish(request,{**end,'expected_generation':end['expected_generation']+1})
+    assert machine.untrusted[B]==old and lab.auth.protected(B)
+    original=lab.auth.update
+    def fail(**fields):raise AuthorityError('fixture-storage-failure')
+    monkeypatch.setattr(lab.auth,'update',fail)
+    with pytest.raises(GatewayRejected):client.finish(request,end)
+    assert machine.untrusted[B]==old and lab.auth.value['distrusted']==[old] and lab.auth.protected(B)
+    monkeypatch.setattr(lab.auth,'update',original)
+    assert client.finish(request,end)['phase']=='RELEASED'
+    assert B not in machine.untrusted and not lab.auth.value['distrusted'] and not lab.auth.protected(B)
+    assert client.context()['owner']==A  # Standby does not automatically seize control.
+    second=str(uuid4());client.submit(second,submission(client,B))
+    assert client.get(second)['phase']=='PROTECTED'
+    assert not machine._qualified(B,'autonomous',time.monotonic())
+
+
 @pytest.mark.parametrize('payload',[
     HEADER.pack(MAX_BYTES+1), HEADER.pack(1)+b'\xff',
     HEADER.pack(23)+b'{"version":1,"version":1}',
@@ -346,6 +381,86 @@ def test_c14_command_expiry_stop_runs_while_actor_storage_is_blocked(actor_serve
         assert type(lab.mock.frames[-1][1]).__name__=='StopFrame'
     finally:release.set();thread.join(3)
     assert out[0]['phase']=='PREPARING'
+
+
+@pytest.mark.parametrize('write_failure', (False, True))
+def test_pending_stop_outcome(tmp_path, write_failure):
+    import importlib.util
+    from xenova_gateway.frame import StopFrame
+    from xenova_gateway.machine import ForwardDrive, ForwardStop
+    from xenova_gateway.output_owner import OutputOwner
+    from xenova_gateway.sink import MockSink
+
+    spec = importlib.util.spec_from_file_location('pending_stop_lab', LAB)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    lab = module.Lab(tmp_path/'xenova-gateway-lab-stop')
+    entered, release = threading.Event(), threading.Event()
+
+    class DelayedStop(MockSink):
+        def write(self, frame, at):
+            assert isinstance(frame, StopFrame)
+            entered.set()
+            assert release.wait(2)
+            if write_failure:
+                raise OSError(5, 'test device write failed')
+            return super().write(frame, at)
+
+    device = DelayedStop()
+    owner = None
+    try:
+        runner = lab.runner
+        runner._emit(runner.machine.block('owned pending STOP test', time.monotonic()))
+        lab.output.close()
+        runner._finish_stop()
+        owner = OutputOwner(device, command_timeout_s=.1)
+        runner._sink = owner
+        before = lab.auth.path.read_bytes()
+        failed = runner.serial_failed
+        accepted = runner.serial_accepted
+        generation = runner.machine.generation
+
+        runner._submit(ForwardStop(generation))
+        assert entered.wait(1) and runner._pending_stop is not None
+        original = runner.submissions[-1]
+        assert original['serial_result'] == 'pending'
+        submitted = original['submitted_monotonic']
+        record_count = len(runner.submissions)
+
+        runner._submit(ForwardStop(generation))
+        runner._submit(ForwardDrive('manual', generation, .1, 0))
+        assert len(runner.submissions) == record_count
+        assert runner.serial_failed == failed
+        assert runner.serial_accepted == accepted
+        assert lab.auth.path.read_bytes() == before
+
+        release.set()
+        until = time.monotonic()+1
+        while runner._pending_stop is not None and time.monotonic() < until:
+            runner._finish_stop()
+            time.sleep(.001)
+        assert runner._pending_stop is None
+        assert original['submitted_monotonic'] == submitted
+        assert original['device_applied'] is None
+
+        if write_failure:
+            assert original['serial_result'] == 'failed'
+            assert original['failure_cause']['cause_type'] == 'OSError'
+            assert runner.serial_failed == failed+1
+            assert runner.machine.failure == 'OUTPUT_PATH_FAILED'
+            assert not runner.machine.output_permitted
+        else:
+            assert original['serial_result'] == 'accepted'
+            assert runner.serial_accepted == accepted+1
+            assert runner.serial_failed == failed
+            assert len(device.frames) == 1
+            assert lab.auth.path.read_bytes() == before
+            assert original['serial_completed_monotonic'] >= submitted
+    finally:
+        release.set()
+        if owner is not None:
+            owner.close()
+        lab.close()
 
 
 def test_unconfirmed_device_write_retains_one_stop_and_prohibits_late_new_drive():

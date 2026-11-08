@@ -1,25 +1,19 @@
 import { Button, Card, Modal, useToast } from '@xenova/ui';
-import { useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { ApiError } from '../api/client';
 import { useVm, useVmResources, useVms, type VmAction } from '../api/queries';
 import type { Vm } from '../api/types';
-import { osLabel } from '../domain/roles';
-import { STATE_HEALTH, STATE_LABEL } from '../format';
+import { osLabel, sortVms } from '../domain/roles';
+import { AGENT_LABEL, canStartVm, canStopVm, STATE_HEALTH, STATE_LABEL, VM_ACTION_LABEL } from '../format';
 import styles from './pages.module.css';
 import { ResourceAdjustmentPanel } from './ResourceAdjustmentPanel';
 import { VcpuPinningPanel } from './VcpuPinningPanel';
 import { VmOperationNotice } from './VmOperationProgress';
 import { useVmOperationProgress } from './useVmOperationProgress';
+import { LiveDataAlert } from '../layout/LiveDataAlert';
 
 const VM_ACCENTS = ['var(--x-app-autonomous)', 'var(--x-app-manual)', 'var(--x-app-interaction)'] as const;
-
-const AGENT_LABEL: Record<NonNullable<Vm['agent_status']>, string> = {
-  ONLINE: '온라인',
-  STALE: '갱신 지연',
-  OFFLINE: '오프라인',
-  UNKNOWN: '상태 확인 대기',
-};
 
 function pinningSummary(mappings: { vcpu: number; pcpus: number[] }[]): string {
   if (!mappings.length) return '조회 대기';
@@ -37,17 +31,22 @@ export function ControlVmDetailPage() {
   const toast = useToast();
   const navigate = useNavigate();
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const index = vms.data?.items.findIndex((item) => item.vm_id === vmId) ?? -1;
+  // 삭제 요청은 길게 걸릴 수 있다. 그사이 다른 화면으로 갔으면 끝났을 때 /control 로 끌고 가지 않는다
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const index = sortVms(vms.data?.items ?? []).findIndex((item) => item.vm_id === vmId);
   const accent = (index >= 0 ? VM_ACCENTS[index % VM_ACCENTS.length] : undefined) ?? 'var(--x-primary)';
 
   const run = (target: Vm, kind: VmAction) =>
     vmOperations.run(target, kind, {
       onSuccess: () => {
-        toast.show(
-          `${target.name}: ${kind === 'start' ? '시작' : kind === 'stop' ? '정지' : '삭제'} 요청 완료`,
-          'ok',
-        );
-        if (kind === 'delete') navigate('/control');
+        toast.show(`${target.name}: ${VM_ACTION_LABEL[kind]} 요청 완료`, 'ok');
+        if (kind === 'delete' && mounted.current) navigate('/control');
       },
       onError: (_error, message) => toast.show(message, 'fault', 5000),
     });
@@ -78,7 +77,8 @@ export function ControlVmDetailPage() {
       </header>
 
       {vm.isPending && <div className={styles.statePanel}>VM 관리 정보를 불러오는 중입니다…</div>}
-      {vm.error && (
+      <LiveDataAlert />
+      {vm.error instanceof ApiError && vm.error.status === 404 && (
         <div className={styles.statePanel} role="alert">
           {vm.error instanceof ApiError ? `${vm.error.message} (${vm.error.code})` : String(vm.error)}
         </div>
@@ -100,14 +100,8 @@ export function ControlVmDetailPage() {
                   <strong>{osLabel(vm.data)}</strong>
                 </div>
                 <div className={styles.identityFact}>
-                  <span className={styles.identityLabel}>연결</span>
-                  <span
-                    className={styles.identityStatus}
-                    data-tone={vm.data.guest_kind === 'zephyr' || vm.data.ipv4 ? 'ok' : 'waiting'}
-                  >
-                    <i aria-hidden="true" />
-                    {vm.data.guest_kind === 'zephyr' ? 'vchan · dom0 중계' : (vm.data.ipv4 ?? 'IP 할당 대기')}
-                  </span>
+                  <span className={styles.identityLabel}>예약 IPv4</span>
+                  <strong>{vm.data.assigned_ipv4 ?? '—'}</strong>
                 </div>
                 <div className={styles.identityFact}>
                   <span className={styles.identityLabel}>템플릿</span>
@@ -147,14 +141,14 @@ export function ControlVmDetailPage() {
               <div className={styles.lifecycleActions}>
                 <Button
                   onClick={() => run(vm.data, 'start')}
-                  disabled={vm.data.state === 'running' || operationPending}
+                  disabled={!canStartVm(vm.data.state) || operationPending}
                 >
                   VM 시작
                 </Button>
                 <Button
                   variant="secondary"
                   onClick={() => run(vm.data, 'stop')}
-                  disabled={vm.data.state !== 'running' || operationPending}
+                  disabled={!canStopVm(vm.data.state) || operationPending}
                 >
                   VM 정지
                 </Button>

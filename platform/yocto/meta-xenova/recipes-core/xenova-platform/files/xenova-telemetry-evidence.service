@@ -1,7 +1,8 @@
 [Unit]
 Description=Archive filtered execution evidence from xenconsoled
+Requisite=xenova-first-boot.service
 RequiresMountsFor=/srv/xenova
-After=xenconsoled.service
+After=xenova-first-boot.service xenconsoled.service
 
 [Service]
 Type=oneshot

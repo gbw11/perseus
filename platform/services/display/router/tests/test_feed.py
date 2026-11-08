@@ -9,7 +9,8 @@ from fastapi.testclient import TestClient
 import pytest
 from starlette.websockets import WebSocketDisconnect
 
-from xenova_display.config import Binding, DISPLAY_DRIVE_TOPIC, DISPLAY_DRIVE_TYPE, FeedSettings
+from xenova_display.config import Binding, FeedSettings
+from xenova_display.gateway import normalize
 from xenova_display.main import create_app
 from xenova_display.state import StateStore
 
@@ -38,10 +39,24 @@ def domains(primary_domid=18):
 
 
 def message(vm=VM1, kind="app.heartbeat", seq=1, boot="boot-1", instance="publisher-1", **payload):
-    app = {VM1: "primary-drive", VM2: "backup-drive", VM3: "message-board"}[vm]
+    app = {VM1: "primary-drive", VM2: "backup-drive", VM3: "interaction"}[vm]
     return {"schema_version": "1.0", "message_id": f"m-{seq}", "vm_id": vm,
             "boot_id": boot, "agent_instance_id": instance, "type": kind, "seq": seq,
             "app_id": app, "sent_at": "2099-01-01T00:00:00Z", "payload": payload}
+
+
+GATEWAY_HOST = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+GATEWAY_EXECUTION = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+
+
+def gateway_drive(store, *, generation, active=VM1, mode="AUTO"):
+    """Synthetic Gateway context read: the only source of display driving state."""
+    context = dict(host_boot_id=GATEWAY_HOST, owner=active, generation=generation, mode=mode,
+                   phase="APPLIED", output_permitted=True, storage_uncertain=False,
+                   targets={vm: dict(execution_id=GATEWAY_EXECUTION, boot_id=GATEWAY_HOST,
+                                     intent_revision=1, lifecycle_generation=1) for vm in (VM1, VM2)})
+    value = normalize(context, host_boot_id=GATEWAY_HOST, drive_ids={VM1, VM2})
+    store.gateway_success(value, observed_mono=store.clock())
 
 
 def app(store, vm=VM1, **kwargs):
@@ -121,19 +136,13 @@ def test_mqtt_disconnect_does_not_change_xen_state(store):
     assert vm["app_state"] == "unknown"
 
 
-def test_mode_and_active_vm_are_independent_and_retained_control_is_not_live(store):
-    control = message(kind=DISPLAY_DRIVE_TYPE, mode="MANUAL", active_vm_id=VM1)
-    control.pop("vm_id")
-    control["source_id"] = "dom0-gateway"
-    topic = DISPLAY_DRIVE_TOPIC
-    assert not store.ingest(topic, control, retained=True)
-    assert store.ingest(topic, control)
+def test_mode_and_active_vm_are_independent_and_expire_without_gateway_reads(store):
+    assert store.snapshot()["drive"]["source"]["status"] == "unknown"
+    gateway_drive(store, generation=1, mode="MANUAL")
     assert store.snapshot()["drive"]["active_vm_id"] == VM1
     assert store.snapshot()["drive"]["mode"] == "MANUAL"
-    assert not store.ingest(topic, control)
-    control.update(seq=2)
-    control["payload"]["active_vm_id"] = VM2
-    assert store.ingest(topic, control)
+    gateway_drive(store, generation=2, active=VM2, mode="MANUAL")
+    assert store.snapshot()["drive"]["active_vm_id"] == VM2
     assert store.snapshot()["drive"]["mode"] == "MANUAL"
     store.now[0] += 3
     assert store.snapshot()["drive"]["mode"] == "unknown"
@@ -182,7 +191,9 @@ def test_malformed_and_unregistered_sources_do_not_change_state(store):
     assert not store.ingest(f"xenova/v1/vms/{VM1}/command", command)
     env = message(state=["active"])
     assert not store.ingest("xenova/v1/apps/primary-drive/events", env)
-    env = message(kind=DISPLAY_DRIVE_TYPE, mode=["AUTO"])
+    # The retired display drive-state MQTT path is not a driving-state source.
+    env = message(kind="display.drive_state", mode="AUTO", active_vm_id=VM1)
     env.pop("vm_id"); env["source_id"]="dom0-gateway"
-    assert not store.ingest(DISPLAY_DRIVE_TOPIC, env)
+    assert not store.ingest("xenova/v1/display/drive-state", env)
+    assert store.snapshot()["drive"]["mode"] == "unknown"
     assert store.snapshot()["vms"][0]["app_state"] == "unknown"

@@ -35,6 +35,48 @@ def device():
         assert not owner.thread.is_alive() and not virtual.thread.is_alive()
 
 
+def test_queued_stop_precedes_feedback_after_idle_wakeup(monkeypatch):
+    from threading import Event
+    from xenova_gateway.sink import MockSink
+
+    first_poll = Event()
+    release_poll = Event()
+    idle = Event()
+    calls = []
+
+    class FeedbackSink(MockSink):
+        snapshot = {}
+
+        def poll(self, now):
+            calls.append('poll')
+            if not first_poll.is_set():
+                first_poll.set()
+                assert release_poll.wait(1)
+
+        def write(self, frame, now):
+            calls.append('write')
+            return super().write(frame, now)
+
+    owner = OutputOwner(FeedbackSink(), command_timeout_s=.1)
+    try:
+        assert first_poll.wait(1)
+        wait_on_condition = owner.condition.wait
+
+        def wait_until_notified(delay):
+            idle.set()
+            return wait_on_condition(1 if not owner.closing else delay)
+
+        monkeypatch.setattr(owner.condition, 'wait', wait_until_notified)
+        release_poll.set()
+        assert idle.wait(1)
+        owner.write(StopFrame(42, 0, 1), time.monotonic())
+        wait(lambda: len(calls) >= 3)
+        assert calls[:3] == ['poll', 'write', 'poll']
+    finally:
+        release_poll.set()
+        owner.close()
+
+
 def test_c13_pty_partial_roundtrip_stages_and_missing_sensor_is_unknown(device):
     owner,sink,virtual=device
     sent=owner.write(DriveFrame(42,0,.1,0),time.monotonic())
@@ -92,6 +134,111 @@ def test_c13_bounded_resynchronization_and_fixed_vector():
     assert wire.hex()==fixed['command_stop']
     assert hello(pi).hex()==fixed['hello'] and hello_ack(pi,dev,19).hex()==fixed['hello_ack']
     assert report(pi,dev,1,frame,2,1,stationary=True).hex()==fixed['applied_stationary']
+
+
+def test_feedback_frames_are_consumed_before_the_remaining_batch():
+    pi,dev=str(uuid4()),str(uuid4());frame=StopFrame(42,0,1)
+    first=report(pi,dev,1,frame,2,1);second=report(pi,dev,2,frame,2,2)
+    parser=Framer();stream=parser.frames(first+b'bad\0'+second)
+    assert next(stream)==unpack(first)
+    assert parser.invalid==0  # Following input has not been decoded yet.
+    assert list(stream)==[unpack(second)]
+    assert parser.invalid==1 and not parser.buffer
+
+
+def test_poll_cannot_use_its_old_timestamp_to_accept_expired_ack(monkeypatch):
+    master,slave=os.openpty();now=[0.]
+    sink=FeedbackSerialSink(os.ttyname(slave),timeout_ms=500,clock=lambda:now[0])
+    try:
+        sink.ready=True;sink.device_session=str(uuid4());sink.capabilities=CAP_ACCEPT|CAP_APPLY|CAP_STATIONARY
+        frame=StopFrame(42,7,1);sent=sink.write(frame,0.)
+        wire=report(sink.pi_session,sink.device_session,sent.metadata['command_sequence'],frame,2,1,stationary=True)
+        os.write(master,wire)
+        assert __import__('select').select([sink._serial.fileno()],[],[],1)[0]
+        read=sink._serial.read
+        def delayed(size):
+            value=read(size);now[0]=.6;return value
+        monkeypatch.setattr(sink._serial,'read',delayed)
+        sink.poll(.1)
+        assert sink.rejected==1 and not sink.pending[1]['applied']
+        assert sink.fault=='DEVICE_APPLY_TIMEOUT'
+        assert sink.snapshot['applied'] is None and sink.snapshot['physical_stop'] is None
+    finally:sink.close();os.close(master);os.close(slave)
+
+
+def test_real_serial_wait_wakes_for_rx_and_queued_stop_without_another_reader(device,monkeypatch):
+    import threading
+    owner,sink,virtual=device
+    entered=threading.Event();wait_io=owner._wait_io
+    def wait_longer(_):
+        entered.set();return wait_io(5)
+    monkeypatch.setattr(owner,'_wait_io',wait_longer)
+    assert entered.wait(1)
+    submission=owner.submit_stop(StopFrame(42,0,1),time.monotonic())
+    wait(lambda:submission.outcome() is not None)
+    wait(lambda:owner.device_view()['applied'] is True)
+    assert virtual.commands[-1][3].generation==42
+    assert owner._wake_read is not None and owner.thread.is_alive()
+
+
+def test_ack_receive_stamp_is_read_completion_not_later_decode(monkeypatch):
+    master,slave=os.openpty();now=[0.]
+    sink=FeedbackSerialSink(os.ttyname(slave),timeout_ms=500,clock=lambda:now[0])
+    try:
+        sink.ready=True;sink.started=0.;sink.device_session=str(uuid4())
+        sink.capabilities=CAP_ACCEPT|CAP_APPLY|CAP_STATIONARY
+        frame=StopFrame(42,7,1);sent=sink.write(frame,0.)
+        os.write(master,report(sink.pi_session,sink.device_session,
+            sent.metadata['command_sequence'],frame,2,1,stationary=True))
+        assert __import__('select').select([sink._serial.fileno()],[],[],1)[0]
+        frames=sink.framer.frames
+        def slow_decode(data):
+            for value in frames(data):
+                now[0]=.6
+                yield value
+        monkeypatch.setattr(sink.framer,'frames',slow_decode)
+        now[0]=.49;sink.poll(.1)
+        assert sink.pending[1]['applied'] and sink.fault is None
+        assert sink.snapshot['observed_monotonic']==.49
+        assert sink.snapshot['physical_stop'] is True
+        now[0]=1.
+        assert sink._view()['applied'] is None and sink._view()['physical_stop'] is None
+    finally:sink.close();os.close(master);os.close(slave)
+
+
+def test_partial_ack_uses_the_completing_read_and_cannot_borrow_first_read_time():
+    master,slave=os.openpty();now=[0.]
+    sink=FeedbackSerialSink(os.ttyname(slave),timeout_ms=500,clock=lambda:now[0])
+    try:
+        sink.ready=True;sink.started=0.;sink.device_session=str(uuid4());sink.capabilities=CAP_ACCEPT|CAP_APPLY
+        frame=StopFrame(42,7,1);sent=sink.write(frame,0.)
+        wire=report(sink.pi_session,sink.device_session,sent.metadata['command_sequence'],frame,2,1)
+        for at,data in ((.49,wire[:10]),(.6,wire[10:])):
+            now[0]=at;os.write(master,data)
+            assert __import__('select').select([sink._serial.fileno()],[],[],1)[0]
+            sink.poll(at)
+        assert sink.rejected==1 and not sink.pending[1]['applied']
+        assert sink.fault=='DEVICE_APPLY_TIMEOUT'
+    finally:sink.close();os.close(master);os.close(slave)
+
+
+def test_serial_disconnect_uses_bounded_fallback_and_closes_wakeup_fds():
+    import errno
+    master,slave=os.openpty();sink=FeedbackSerialSink(os.ttyname(slave),timeout_ms=400)
+    owner=OutputOwner(sink,command_timeout_s=.1);fds=(owner._wake_read,owner._wake_write)
+    try:
+        os.close(master);master=None
+        wait(lambda:owner.device_view()['fault']=='DEVICE_LINK_UNAVAILABLE')
+        assert owner._read_fd is None and owner.first_failure is not None
+        owner.close()
+        assert not owner.thread.is_alive()
+        for fd in fds:
+            with pytest.raises(OSError) as raised:os.fstat(fd)
+            assert raised.value.errno==errno.EBADF
+    finally:
+        owner.close()
+        if master is not None:os.close(master)
+        os.close(slave)
 
 
 def test_c13_write_only_profile_still_emits_only_legacy_bytes():

@@ -1,0 +1,6 @@
+{
+  "guest_ip": "192.168.77.20",
+  "ssh_exit": 255,
+  "terminal_input_bytes_sent": 0,
+  "failure_class": "host_key_not_trusted"
+}

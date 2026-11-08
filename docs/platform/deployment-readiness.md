@@ -20,6 +20,12 @@
 `xenova-platform`의 provisioning/profile/registration·Bootstrap·first-boot와 broker provider를 같은 내부 후보로 설치한다.
 일반 full HTTP 호출자까지 새 journal 선택이나 동일 commit 교체를 요구하지 않는다.
 
+병렬 binding 후속의 `xenova_drive_binding`은 같은 후보 `xenova_management.ReadContext.validate_one`의
+call-local 반환 근거를 사용한다. 둘은 기존 `xenova-platform` 패키지에 함께 설치하며 신 reader와 옛 Manager를
+따로 섞지 않는다. Gateway의 feedback/output owner도 같은 패키지 후보로 교체한다. 외부 Worker·HTTP 호출자에게
+새 인자·저장 버전 선택을 요구하지 않는다. [최신 검증 범위](../verification/recovery-scenario-closure-20261030.md#parallel-binding-feedback-20261106)의
+ARM 모듈 설치 fixture와 전체 RPM/이미지·운영 교체를 구분한다. 이번 보드 시험은 임시 module path만 사용한다.
+
 <a id="registration-api"></a>
 ### 등록 조회·FastAPI 통지의 교체
 
@@ -196,11 +202,34 @@ env example의 선택 입력이다. 파일/차량/시간 승인값은 설치 담
 |---|---|---|
 | 생성 시간 정책 / 플랫폼·운영 승인 | `/etc/xenova/creation-policy.json`을 승인값으로 별도 공급. `/usr/share/xenova/creation-policy.json.example`의 null은 활성값이 아님 | 신규 Linux create 운영 수락 대기. 기존 완료 회수·지원 수습·조회/stop까지 전역 차단하지 않음. 승인 없는 fallback 숫자 없음 |
 | CPU / 플랫폼·운영 | `/etc/xenova/cpu-policy-preset.json`은 최초 공급, 현재 `/srv/xenova` 정책·anchor와 이번 host receipt는 기존 CPU 경로가 소유 | empty placements도 정상 현재 정책. 과거 factory가 현재 해제를 덮지 않음. 준비 오류는 새 start/recover 허가를 제한하고 정확한 기존 실행 stop은 별도 guard |
-| Gateway / 플랫폼·Gateway·차량 | `/usr/share/xenova/gateway.env.example`에서 승인한 설정만 root:root 0600 `/etc/xenova/gateway.env`로 별도 공급. 실제 UUID 쌍·profile·broker/ACL·device·root 소유 차량 한계 필요 | 필수 env 부재는 unit 시작 실패. 미승인 예시를 active로 복사하지 않음. 해당 차량 기능만 대기 |
+| Gateway / 플랫폼·Gateway·차량 | `/usr/share/xenova/gateway.env.example`에서 승인한 설정만 root:root 0600 `/etc/xenova/gateway.env`로 별도 공급. 실제 UUID 쌍·profile·broker/ACL·device·root 소유 차량 한계 필요 | 운영 설정과 승인된 자산이 없으면 실제 차량 출력 대기. factory 기본의 mock 기동 조건은 아래 절 참조 |
 | Authority·binding / Gateway·신원 공급 | 기존 `/srv/xenova/drive-control`, `/run/xenova/drive-bindings.json`, 단일 Gateway lease와 현재 host 검증 | package hook의 initialize/backup 복원/자동 이동 없음. 설치·프로세스 생존이 재무장·출력 허가가 아님 |
 | MQTT·네트워크 / 플랫폼·계정 운영 | 기존 `xenova-mqtt-broker` 계정/ACL 세대, 보호된 env의 credential. API token과 broker 계정은 별도 | 익명·`#` ACL·전역 raw 수집·bridge 추가로 우회하지 않음. broker 준비와 각 제품 인증/수신은 별도 |
 | Worker·Agent / 제품 담당 | 기존 unit 환경/override와 runtime 경로, Agent별 identity·필수 앱 제공물 | `/run`의 host 재부팅 보존 한계·episode 정책을 영속 이관/SQLite/새 상수로 바꾸지 않음 |
 | 콘솔·진단 / 플랫폼·각 제품 | 기존 optional recorder·trace와 공개 CLI/PTY, 각 제품 logging 설정 | 선택 진단과 필수 원장·Authority·receipt를 분리. 인증/console lease·필수 프로토콜/원 PTY를 보존 |
+
+### 보드별 Recovery Worker와 factory Gateway 설정
+
+`xenova-recovery-config.service`는 첫 설치 성공 뒤 기존 MQTT 원본에서
+`dom0-server` 자격을 읽어 `/etc/xenova/recovery-worker.env`를 0600으로 공급한다.
+기존 운영 파일이 있으면 보존한다. 계정을 재발급하거나 브로커를 reload하지 않는다.
+필요할 때 기존 `xenova-broker export-account dom0-server --format recovery-env`로
+보호된 새 파일에 한 번 내보낼 수 있다. Manager 패키지는 Gateway의 client 하위
+패키지에 의존한다. Gateway 서버는 별도 설치 단위다.
+
+warm 주행 firmware를 설치한 factory A/B는 현재 등록 UUID와 기존 private
+`drive.json`·`telemetry.json`의 경로를 사용한다. 자동 설정은 `/run/xenova`에 둔다.
+일반 VM과 역할이 빠진 구성은 자동 주행 쌍으로 선택하지 않는다. 운영
+`gateway.env`가 있으면 운영자가 지정한 Gateway·Worker 설정을 따른다.
+새 factory 보드에서 Gateway 서버가 설치된 경우 mock sink를 기동할 수 있다.
+기존 초기화 경로가 최초 등록이 끝난 이번 부팅에서 Authority를 한 번
+`SAFE_STOP`·`DISARMED`로 초기화한다. 이미 설치한 보드의 Authority가 없거나
+초기화가 중단된 경우에는 보호 상태를 확인한 뒤 기존 명시 초기화 절차를 쓴다.
+저장된 Authority를 자동으로 고치거나 다시 발급하는 경로는 없다.
+
+자동 mock 기동은 차량 출력 승인과 별개다. 실제 시리얼, 장치 피드백, 보호 요청의
+이력 정책과 재무장에는 기존 승인과 수락이 필요하다. Worker 인증과 실제
+Agent·앱 메시지 전달, Gateway `control.sock` 조회를 각각 확인한다.
 
 ## unit과 backend 수명
 
@@ -267,3 +296,49 @@ fixture의 실제 UUID/template/version/key·기존 예산·관측 지점과 정
 | DEC/ARCH·D03-G / Gateway·입력·장치 | 승인한 profile/세션·전환/재무장과 실제 장치 적용을 각 단계에서 관측 | 새 generation의 가짜 진행·옛 입력/백업 복원·미승인 재무장·미적용. 실제 STOP/장치 안전 종료는 해당 owner 책임 |
 
 현장에서 DB/env/권한·기본 VM을 임의 변경해 통과시키지 않는다. 시간·횟수의 기준은 기존 계약/승인 시험 계획을 사용한다.
+
+
+## 2026-11-04 선택 주행앱 메모리 계측 제공 단위
+
+`1.0.8`의 로컬 제공 단위는 실제 ARM `zephyr.bin/elf/map/config`·불변 firmware manifest·
+빌드 receipt와 MQTT 2.1 계약이다. 수동 입력 getter, pending/running/result getter,
+합성 `lattice_memory.c`, Diagnostics 모델과 Telemetry codec/worker를 함께 빌드한다.
+기존 firmware 설치 경로를 재사용하므로 별도 서비스·런처·운영 설정을 추가하지 않는다.
+
+소비 측은 `manual_input/manual_pending/manual_running/manual_result`와 `payload.buffer`를
+이 계약으로 해석해야 한다. 기존 AUTO 벡터를 유지하지만 4영역만 허용하는 옛 strict parser가
+새 영역도 처리한다고 가정하지 않는다. 상단은 같은 memory 표본의 관리 total/free만 사용하고,
+최근 유효 관측과 원 관측 시각을 표시하고, 원 표본 기준 6초가 지나면 비율을 보류한다. 새 boot/publisher는 그래프 구간을 분리하며, 독립적인 현재 실행 확인은 표시 선행조건이 아니다.
+[현재 D02·D08 소비 작업](../requests/20261029-request-http-spring-ui.md)으로 인계한다.
+
+운영 템플릿 선택·보드 설치·서비스 변경은 이번에 실행하지 않았다. ARM/QEMU·부분 포장과
+실제 설치는 [검증 보고서](../verification/recovery-scenario-closure-20261030.md)에서 구분한다.
+확정된 recipe 입력에 새 불변 firmware를 선택하는 작업은 다음 설치 승인 때 수행하며,
+기존 manifest/hash를 덮거나 검증을 우회하지 않는다. 스택 화면과 EC2 배포는 보류한다.
+
+RAM 표시 기준의 최신 후속은 [최근 관측 계약 마감](../verification/recovery-scenario-closure-20261030.md#ram-recent-observation-20261104)이다. 계약·참조 도구의 별도 제공물은 `ram-recent-observation-contract-2.1-20261104.tar.gz`다. 기존 불변 `1.0.8` firmware와 이전 bundle을 덮지 않는다. 이 후속은 host 소비 참조·문서 변경이며 FastAPI 응답·권한·서비스·운영 설정을 확장하지 않는다.
+
+2026-11-05 다음 이미지 선택은 주행 A/B 공통 1.0.8로 맞췄다. default lock·factory metadata·조립 예시는 동일한 불변 manifest를 참조한다. 로컬 release/seed 검증과 실제 전체 이미지 빌드·운영 VM 전환은 [선택 검증](../verification/recovery-scenario-closure-20261030.md#image-default108-20261105)에서 구분한다. 기존 설치·UUID·자격·운영 firmware는 바꾸지 않는다.
+
+2026-11-06 lattice 연결 슬롯 보완은 새 불변1.0.9로 ARM 빌드·포장하고 **소유 시험 B만** 설치했다.
+기존 TCP/UDP 공통 슬롯에 DHCP 직접 handler를 포함하도록 프로필 최소값을 검증한다.
+기본 이미지 lock·factory 선택은1.0.8을 유지하며 새 제공물·실제 TCP4+DHCP1·시험 경계는
+[보드 예산 후속](../verification/recovery-scenario-closure-20261030.md#budget-board-observations-20261106)에 연결한다.
+설치·기동·MQTT 연결 성공은 앱 준비·출력 허가·물리 장치 수락이 아니다.
+
+2026-11-06 저녁~11-07 후속의 1.0.10/1.0.11/1.0.12는 같은 16MiB/1vCPU의 불변 시험 후보다.
+callback 수신 시각·선택 진단·제한 0 명령 시도를 구분하며 기본 image/factory 선택은1.0.8이다.
+Gateway의 첫 제출 odom·외부 Paho loop·native owner read는 기존 package의 관련 모듈을 함께 교체할 대상이다.
+새 42모듈 설치 fixture의 ARM import는 통과했으나 정규 RPM/이미지 갱신은 하지 않았다.
+ARM/QEMU PTY ioctl 실패와 실제 B 시험의 남은 입력 지연·미수락 baseline은
+[제출 경계 후속](../verification/recovery-scenario-closure-20261030.md#clock-retry-submit-20261106)에서 구분한다.
+B는1.0.8·원 통신 설정으로 복원했고 Worker/mock Gateway 복구·소유 broker/자격 사본 정리를 확인했다.
+시험용 `/run` 소스를 운영 설치본으로 취급하거나 새 firmware를 검증된 기본값으로 승격하지 않는다.
+
+2026-11-07 장애 범위 보완의 FW1.0.33은 새 불변 bundle로 ARM 빌드하고 보드 A/B에 개별 적용했다.
+Python은 기존 Manager/Execution/binding·Worker·Gateway·공용 MQTT 설치 경로의 같은 후보를 대조한다.
+paired binding은 기존 `${libexecdir}/xenova-domain-identities-native`를 재사용한다.
+`xenova-platform_1.0.bb`가 이미 이 helper를 빌드해 0755로 설치하므로 새 runtime 의존성이나 recipe 분해는 없다.
+새 필수 공개 옵션·journal 버전 선택·운영 예산은 추가하지 않았다.
+실제 import·설치 파일 hash·서비스 복구는 [시연 범위 검증](../verification/recovery-scenario-closure-20261030.md#recovery-demo-20261107)에 기록한다.
+이는 정규 RPM·전체 이미지 재빌드, 이미지/factory 기본 firmware 변경, 주행 종단 수락의 증거가 아니다.

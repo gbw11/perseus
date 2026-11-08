@@ -11,8 +11,13 @@
 |---|---|---|
 | broker J `xenova/v1/world/snapshot.pb` | mapper → 각 VM의 전용 world 수신자 | `WorldSnapshot`, QoS0·non-retained·단일 PUBLISH·비압축·32KiB 이하 |
 | broker P `xenova/v1/vehicle/state.pb` | Gateway의 단일 serial/odom 소유자 → 각 VM의 기존 작은 제어 수신자 | `VehicleSample`, 2KiB 이하 |
-| broker P `xenova/v1/vms/<UUID>/drive/link/out` | 그 VM의 state 소유자 → Gateway binary 수신자 | `DriveLink`의 probe/snapshot/applied |
-| broker P `xenova/v1/vms/<UUID>/drive/link/in` | Gateway → 그 VM의 state 소유자 | `DriveLink`의 clock/accepted |
+| broker P `xenova/v1/vms/<UUID>/drive/link/out` | 그 VM의 state 소유자 → Gateway binary 수신자 | `DriveLink`의 probe/snapshot/applied/budget_request |
+| broker P `xenova/v1/vms/<UUID>/drive/link/in` | Gateway → 그 VM의 state 소유자 | `DriveLink`의 clock/accepted/mission_grant/budget_reply/scene_grant |
+
+Pi 원 SceneGrant의 VM 전달 tag10·원 기한·retained 소비와 legacy live-only 호환은
+[지도 사용권 소비 계약](scene-grant-consumption.md)을 따른다.
+State33·Pi↔VM clock receipt/명시 ACK·실제 방향 증거와 command3의 원 clock 참조는
+[경로·시각·방향 증거 계약](state-clock-and-direction-witness.md)을 함께 배포한다.
 
 지도와 전체 path는 G1 UDS·작은 JSON latest 슬롯에 넣지 않는다. Gateway actor는
 권위와 G2 출처·적용 metadata를 소유한다. 큰 사본의 decode/encode는 binary I/O 소유자가
@@ -52,10 +57,31 @@ Pi 제어·차량 상태 연결까지 막는 전역 readiness gate가 아니다.
 - Pi 차량 시각은 mapper trust 없이도 교환한다. 차량의 device/odom epoch·Pi session·표본
   순서·센서 품질·시각 및 pose/steering 오차를 확인한다. 지원되지 않는 측정 steering은 0으로 채우지 않는다.
 
+`ClockReply.pi_receive_us`는 binary 수신자의 원 수신 시각이고, `pi_send_us`는 같은 Pi 단조 시계의
+Paho publish 진입 직전 시각이다. actor의 응답 준비·직렬화·mailbox 대기를 송신 시각으로 사용하지 않는다.
+Gateway는 한 번 검증·직렬화한 불변 응답에서 이 uint64와 protobuf 길이만 갱신한다. probe 신원·순번,
+차량 원 표본·trust 만료는 갱신하지 않는다. 이 경계는 커널 송신 완료·PUBACK·guest 수신을 뜻하지 않으며,
+그 뒤 실제 전달 지연은 guest의 기존 RTT 기반 오차 검사에 남는다. 시각 갱신 실패는 해당 응답을
+`CLOCK_SEND_TIME`으로 제한하고 다음 유효 응답의 정상 진행을 허용한다. wire 버전과 기존 오차 한도는 같다.
+
+DriveLink의 같은 I/O owner는 Paho의 `socket`·`want_write`·`loop_read`·`loop_write`·`loop_misc`로
+bounded select를 처리한다. `loop`/`loop_start`와 혼용하거나 자기 thread를 깨우는 socketpair를
+별도로 만들지 않는다. 이전 packet이 아직 송신 대기 중이면 새 latest 슬롯을 꺼내지 않는다.
+따라서 작은 mailbox의 교체가 QoS 0의 Paho 내부 무제한 대기로 옮겨 가지 않는다. 이 제한은
+G1 원 작업·필수 저장을 폐기하는 정책이 아니며 clock wire·오차·lease 의미도 바꾸지 않는다.
+
+guest의 네 번째 시각은 `link_received()` 진입에서 얻은 같은 µs 시계값이다. 전체 binary payload가
+callback에 도착한 경계이며 protobuf decode·context 조회 뒤 시각이나 소켓 첫 바이트 도착 시각이 아니다.
+원 lease도 이 수신 시각부터 계산한다. 이후 `dl_clock_get()`의 현재 시각·context·만료 확인은 유지한다.
+transport callback의 별도 `received` 인자는 uptime **ms**이므로 이 네 시각에 섞지 않는다.
+
 모든 required field는 실제 존재해야 한다. decode 전 wire 크기와 중복 singular/oneof,
 문자열·repeated 수·부분 frame을 검사하고 decode 후 유한값·배열·의미를 검사한다.
 알 수 없는 optional field는 무시하지만 지원하지 않는 `required_features` bit는 거절한다.
-현재 지원 값은 과거 의미 0과 아래 도로 우선 의미 1이다.
+공용 codec은 과거 지도 의미 0·1과 lane/localization/whole-cell permission을 포함한 11,
+주차 후보를 더한 15를 검사한다. codec의 형식 지원은 실제 임무 실행 지원과 별개다.
+새 profile의 주행 소비자는 LANE grant를 요구하며 후진 주차 실행·전체 phase 승인은
+별도 구현 대상이다. 아직 지원하지 않는 parking state를 FOLLOW로 바꾸어 승인하지 않는다.
 Python은 검사하지 않은 unknown bytes를 사본 fingerprint에 넣거나 다시 relay하지 않는다.
 문자열 식별자는 공통 ASCII 범위이며 C 문자열의 NUL 뒤 suffix로 신원을 다르게 표현할 수 없다.
 
@@ -140,11 +166,24 @@ C/Python reader는 불일치·중복을 거절한다. 필드가 없는 과거 �
 Gateway binary relay가 보존하고, target은 경로 채택 후에만 근거를 자기 실행에 적용한다.
 다른 도로 revision에서 경로 자체가 검증돼도 과거 revision의 통과 근거는 가져오지 않는다.
 
-wire major는 1을 유지한다. A/B의 `lattice`·`engine`·`lattice_app`과 C/Python 생성물·공용 codec,
+새 feature11/15 profile의 `WorldSnapshot`은 major1/minor2이며,
+`DriveState`·`DriveLink`는 major2/state_features7이다.
+nested `VehicleSample`·`MissionGrant`는 major1을 유지한다. A/B의 `lattice`·`engine`·`lattice_app`과 C/Python 생성물·공용 codec,
 이를 실제로 로드한 Gateway binary 수신 프로세스를 같은 지원 후보로 맞춘다. 옛 Gateway는
 모르는 선택 필드를 버리므로 새 통과 근거를 보존하는 혼합 실행은 지원하지 않는다.
 Worker는 raw 사본이나 이 필드를 직접 읽을 필요가 없다. Gateway의 출처·권위 검사는
 계속 필요하며, 설치만으로 재무장하지 않는다.
+
+공용 계약의 major2 전환은 기존 major1 runtime과의 혼합 운영을 지원하지 않는다.
+Gateway의 `DriveLink` 생성·수신, Zephyr의 link/state 생성·수신 및 planner의 mission metadata를
+같은 지원 후보로 전환해야 한다. 이 선행 계약만 교체한 상태는 운영 가능한 통합 구성이 아니다.
+기존 `PreparedClock`과 송신 직전 시각 갱신·bounded MQTT I/O·차량 관측/진단 수명은 유지한다.
+
+`MapperClockProbe.mapper_trust`(선택 tag13)는 Pi clock owner가 이미 수락한 원 J/Pi lease다.
+초기 probe에는 없으며 현재 왕복의 Pi 수신 완료 시각이나 새 승인을 대신하지 않는다.
+`mapper_clock.py`는 원 probe/lease·과거 관측 support window와 만료를 검사한다.
+`dw_pool_refresh`는 같은 source의 정상 clock lease 갱신에서 held map의 관측 시각·원 만료를
+갱신하거나 reader/writer를 fence하지 않는다. 다른 source/정책은 기존 source 전환과 같이 fence한다.
 
 Gateway는 당시 현재 owner의 완전 사본만 G2로 채택한다. 권한 종료 뒤 늦게 도착한 source
 갱신은 거절한다. 이미 유효할 때 받은 사본은 현재 호환성·target의 실제 적용을 거쳐 사용할 수 있다.

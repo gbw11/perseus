@@ -16,6 +16,7 @@ import stat
 import subprocess
 
 MARKER = Path("/etc/xenova/display-mobile-first")
+RUNTIME_MARKER = Path("/run/xenova-display-mode/mobile")
 UNITS = (
     "xenova-display-feed.service", "xenova-display-hdmi.service", "xenova-display.target",
     "xenova-display-graphics.service", "xenova-display-kiosk.service", "xenova-display-stream.service",
@@ -30,7 +31,9 @@ def option(command, name, value):
 
 def guard_installed(paths):
     for item in paths.split():
-        if not item.endswith("/xenova-display-hdmi.service.d/50-mobile-first.conf"):
+        guards = {"50-mobile-first.conf": MARKER, "60-display-mode.conf": RUNTIME_MARKER}
+        name = Path(item).name
+        if name not in guards or not item.endswith("/xenova-display-hdmi.service.d/" + name):
             continue
         path = Path(item)
         try:
@@ -40,7 +43,7 @@ def guard_installed(paths):
                 continue
             lines = [s.strip() for s in path.read_text().splitlines()
                      if s.strip() and not s.lstrip().startswith(("#", ";"))]
-            if lines == ["[Unit]", f"ConditionPathExists=!{MARKER}"]:
+            if lines == ["[Unit]", f"ConditionPathExists=!{guards[name]}"]:
                 return True
         except (OSError, UnicodeError):
             pass
@@ -98,18 +101,21 @@ def snapshot_summary(value):
 def inspect(*, port=8082, environment=None, marker=MARKER, query_units=units, get=local_get,
             check_guard=guard_installed):
     env = os.environ if environment is None else environment
+    runtime_selection = marker == MARKER and (RUNTIME_MARKER.exists() or RUNTIME_MARKER.is_symlink())
+    if runtime_selection:
+        marker = RUNTIME_MARKER
     checks = {}
     report = {"schema_version": 1, "read_only": True, "checks": checks,
               "physical_phone_verified": False, "usb_verified": False}
     try:
         metadata = marker.lstat()
         checks["phone_first_marker"] = (stat.S_ISREG(metadata.st_mode) and metadata.st_uid == 0
-                                        and not metadata.st_mode & 0o022 and metadata.st_size == 0)
+            and not metadata.st_mode & (0o077 if runtime_selection else 0o022)
+            and (marker.read_bytes() == b"mobile\n" if runtime_selection else metadata.st_size == 0))
     except OSError:
         checks["phone_first_marker"] = False
     observations = env.get("XENOVA_OBSERVATIONS_PATH", "")
     checks["shared_observations_configured"] = bool(observations and Path(observations).is_absolute())
-    checks["gateway_read_configured"] = env.get("XENOVA_DISPLAY_DRIVE_TRANSPORT") == "gateway"
     try:
         info = query_units()
         feed = info.get(UNITS[0], {})
@@ -123,7 +129,8 @@ def inspect(*, port=8082, environment=None, marker=MARKER, query_units=units, ge
             and "xenova-display.target" not in feed.get("PartOf", "").split())
         checks["feed_active"] = feed.get("ActiveState") == "active"
         checks["hdmi_guard_installed"] = (hdmi.get("LoadState") == "loaded"
-            and check_guard(hdmi.get("DropInPaths", ""))
+            and check_guard(" ".join(p for p in hdmi.get("DropInPaths", "").split()
+                if p.endswith("/60-display-mode.conf") == runtime_selection))
             and "xenova_display.native_session" in hdmi.get("ExecStart", ""))
         # Also fail for activating/deactivating/failed instead of calling a transition successful.
         checks["hdmi_inactive"] = hdmi.get("ActiveState") == "inactive"

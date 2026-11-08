@@ -12,9 +12,10 @@
 
 from __future__ import annotations
 
+from binascii import crc_hqx
 import math
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass,field
 
 DRIVE_ID = 0x0100
 STOP_ID = 0x0010
@@ -44,6 +45,9 @@ class DriveFrame:
     counter: int
     v_mps: float
     steer_rad: float
+    issued_pi_us: int | None = field(default=None,compare=False)
+    expires_pi_us: int | None = field(default=None,compare=False)
+    witness: object = field(default=None,compare=False)
 
 
 @dataclass(frozen=True)
@@ -51,6 +55,7 @@ class StopFrame:
     generation: int
     counter: int
     reason: int
+    witness: object = field(default=None,compare=False)
 
 
 Frame = DriveFrame | StopFrame
@@ -58,12 +63,7 @@ Frame = DriveFrame | StopFrame
 
 def crc16(data: bytes) -> int:
     """CRC-16/CCITT-FALSE. 검증 벡터 b"123456789" → 0x29B1."""
-    crc = 0xFFFF
-    for byte in data:
-        crc ^= byte << 8
-        for _ in range(8):
-            crc = ((crc << 1) ^ 0x1021) & 0xFFFF if crc & 0x8000 else (crc << 1) & 0xFFFF
-    return crc
+    return crc_hqx(data, 0xFFFF)
 
 
 def cobs_encode(data: bytes) -> bytes:

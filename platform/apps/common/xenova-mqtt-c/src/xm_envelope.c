@@ -86,7 +86,7 @@ int xm_envelope_encode(char *out, size_t n, const struct xm_identity *id, const 
 	if (rc) {
 		return -ENOSPC;
 	}
-	if (pos > xm_policy_max_bytes(xm_policy_for(type))) {
+	if (pos > xm_message_max_bytes(type,(struct xm_span){payload_json,(uint16_t)strlen(payload_json)})) {
 		return -EMSGSIZE;
 	}
 	return (int)pos;

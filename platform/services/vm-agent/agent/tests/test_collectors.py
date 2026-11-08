@@ -247,6 +247,8 @@ def test_inventory_reads_the_running_guest(tmp_path):
     assert inv["interfaces"] == [{"name": "eth0", "mac": "02:bb:06:62:42:53", "addresses": [
         {"address": "192.168.77.20", "family": "ipv4"}, {"address": "fe80::ff:fe62:4253", "family": "ipv6"}]}]
     assert inv["capabilities"]["metrics"][0] == "cpu_percent_allocated" and inv["capabilities"]["commands"] == []
+    enabled = inventory.collect(roots, hostname=lambda: "debian-dev", ipv4_of=lambda name: None, commands=("stress", "agent_exit"))
+    assert enabled["capabilities"]["commands"] == ["stress", "agent_exit"]
 
 
 def test_inventory_required_fields_are_never_blank(tmp_path):

@@ -5,6 +5,7 @@
   inject_next_create("timeout"|"insufficient"), set_healthy(False) → /healthz 503.
 - 가짜 메트릭: collect_stats 가 계약 2.4 통계 객체를, get_stats 가 요약 dict 를 돌려주고 inject_load 로 부하를 올린다.
 - seed_samples(): 배포판 3종 샘플 VM. vm_id 는 고정(uuid5)이라 백엔드·프론트엔드가 그대로 쓸 수 있다.
+- MockProvisioner 는 등록의 템플릿·자원값과 자원 변경의 키별 원 결과를 메모리에 둔다(S15P31E110-368).
 """
 
 from __future__ import annotations
@@ -12,14 +13,14 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
-from ..errors import DriverTimeout, InsufficientResources, VMExists, VMNotFound
-from ..models import VmState
+from ..errors import DriverTimeout, InsufficientResources, InvalidArgument, InvalidState, VMExists, VMNotFound
+from ..models import ResourceUpdate, VmResources, VmState
 from .base import CreateSpec, Domain, DomainStats, Driver, HostInfo, InstancePaths, Provisioner, StatsSample
 
 SAMPLE_VMS: dict[str, tuple[UUID, int, int]] = {
@@ -41,20 +42,31 @@ class _MockDomain:
     hang: bool = False
     load: float = 0.1  # 0.0~1.0, CPU 사용률 흉내
     started_at: float = 0.0
-    pins: dict[int, list[int]] = field(default_factory=dict)
-    weight: int = 256
     net_rx_bytes: int = 0
     net_tx_bytes: int = 0
 
 
+@dataclass
+class _MockInstance:
+    template_id: str
+    template_version: str
+    vcpus: int
+    memory_mib: int
+
+
 class MockProvisioner(Provisioner):
-    def __init__(self) -> None:
-        self._instances: dict[UUID, tuple[str, str]] = {}
+    def __init__(self, *, running: Callable[[UUID], bool] | None = None) -> None:
+        """running: 도메인이 떠 있는가(MockDriver.has_domain). 없으면 실행 상태를 보지 않는다."""
+        self._instances: dict[UUID, _MockInstance] = {}
+        self._running = running
+        self._resource_updates: dict[str, tuple[UUID, int, int, ResourceUpdate]] = {}  # 키 → (vm_id, vcpus, memory_mib, 원 결과)
+        self._lock = threading.Lock()
 
     def ensure_instance(
         self, vm_id: UUID, template_id: str, template_version: str, *, name: str, vcpus: int, memory_mib: int
     ) -> InstancePaths:
-        self._instances.setdefault(vm_id, (template_id, template_version))
+        with self._lock:
+            self._instances.setdefault(vm_id, _MockInstance(template_id, template_version, vcpus, memory_mib))
         root = Path("/mock/instances") / str(vm_id)
         return InstancePaths(vm_id=vm_id, root=root, kernel=root / "Image", ramdisk=root / "initrd", disk=root / "root.raw")
 
@@ -62,10 +74,39 @@ class MockProvisioner(Provisioner):
         return vm_id in self._instances
 
     def delete_instance(self, vm_id: UUID) -> None:
-        self._instances.pop(vm_id, None)
+        with self._lock:
+            self._instances.pop(vm_id, None)
 
     def template_of(self, vm_id: UUID) -> tuple[str, str] | None:
-        return self._instances.get(vm_id)
+        instance = self._instances.get(vm_id)
+        return None if instance is None else (instance.template_id, instance.template_version)
+
+    def resources_of(self, vm_id: UUID) -> VmResources | None:
+        instance = self._instances.get(vm_id)
+        return None if instance is None else VmResources(vcpus=instance.vcpus, memory_mib=instance.memory_mib)
+
+    def update_resources(self, vm_id: UUID, *, vcpus: int, memory_mib: int, key: str) -> ResourceUpdate:
+        with self._lock:
+            original = self._resource_updates.get(key)
+            if original is not None:
+                if original[:3] != (vm_id, vcpus, memory_mib):
+                    raise VMExists(f"Idempotency-Key {key!r} belongs to another request; nothing was changed")
+                return original[3]
+            instance = self._instances.get(vm_id)
+            if instance is None:
+                raise VMNotFound(f"instance {vm_id} not registered")
+            if instance.template_id.startswith("zephyr"):
+                raise InvalidArgument("Zephyr resources are fixed by its firmware profile")
+            if self._running is not None and self._running(vm_id):
+                raise InvalidState(f"vm {vm_id} is running; stop it before changing resources")
+            result = ResourceUpdate(
+                vm_id=vm_id, operation_id=None, applies_on_next_start=True,
+                before=VmResources(vcpus=instance.vcpus, memory_mib=instance.memory_mib),
+                after=VmResources(vcpus=vcpus, memory_mib=memory_mib),
+            )
+            instance.vcpus, instance.memory_mib = vcpus, memory_mib
+            self._resource_updates[key] = (vm_id, vcpus, memory_mib, result)
+            return result
 
 
 class MockDriver(Driver):
@@ -148,7 +189,7 @@ class MockDriver(Driver):
     def health(self) -> bool:
         return self._healthy
 
-    # ---- v2 (Mock 은 미리 구현해 복구 엔진·리소스 제어 개발에 쓴다) ----
+    # ---- v2 (Mock 은 미리 구현해 복구 엔진 개발에 쓴다) ----
 
     def reboot(self, vm_id: UUID) -> None:
         with self._lock:
@@ -158,28 +199,6 @@ class MockDriver(Driver):
             self._next_domid += 1
             domain.started_at = self._clock()
             self.events.append(("reboot", vm_id, {"domid": domain.domid}))
-
-    def set_vcpus(self, vm_id: UUID, vcpus: int) -> None:
-        with self._lock:
-            if vcpus > self._host_cpus:
-                raise InsufficientResources("vcpus", vcpus, self._host_cpus)
-            self._get(vm_id).vcpus = vcpus
-
-    def set_memory(self, vm_id: UUID, memory_mib: int) -> None:
-        with self._lock:
-            domain = self._get(vm_id)
-            free = self._free_memory_mib() + domain.memory_mib
-            if memory_mib > free:
-                raise InsufficientResources("memory_mib", memory_mib, free)
-            domain.memory_mib = memory_mib
-
-    def pin_vcpu(self, vm_id: UUID, vcpu: int, pcpus: list[int]) -> None:
-        with self._lock:
-            self._get(vm_id).pins[vcpu] = list(pcpus)
-
-    def set_sched_weight(self, vm_id: UUID, weight: int) -> None:
-        with self._lock:
-            self._get(vm_id).weight = weight
 
     def get_stats(self, vm_id: UUID) -> dict[str, Any]:
         with self._lock:

@@ -4,6 +4,6 @@
   "bindings": [
     {"vm_id":"11111111-1111-4111-8111-111111111111","role":"primary_drive","expected_os":"zephyr","app_id":"autonomous","agent_supported":false},
     {"vm_id":"22222222-2222-4222-8222-222222222222","role":"backup_drive","expected_os":"zephyr","app_id":"manual","agent_supported":false},
-    {"vm_id":"33333333-3333-4333-8333-333333333333","role":"interaction","expected_os":"debian","app_id":"message-board","agent_supported":true}
+    {"vm_id":"33333333-3333-4333-8333-333333333333","role":"interaction","expected_os":"debian","app_id":"interaction","agent_supported":true}
   ]
 }

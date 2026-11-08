@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from xenova_mqtt.envelope import EnvelopeError, validate
 
-from .config import DISPLAY_DRIVE_TOPIC, DISPLAY_DRIVE_TYPE, FeedSettings
+from .config import FeedSettings
 from .app_reports import report_app
 
 
@@ -35,16 +35,12 @@ class StateStore:
             "boot_id": None, "retired_boots": set(), "channels": {}, "retired_epochs": set(),
             "app_instances": {}, "retired_apps": set(), "app_sequences": {}, "pending_inventory": {},
         } for b in settings.bindings}
-        self.control = None
-        self.control_epoch = None
-        self.control_retired = set()
+        # Driving state has one source: the dom0 Gateway context (gateway.py).
         self.gateway_observation = None
         self.gateway_connected = False
         self.gateway_identity = None
 
     def gateway_success(self, value, *, observed_mono):
-        if self.settings.drive_transport != "gateway":
-            raise ValueError("Gateway drive source is not selected")
         with self.lock:
             identity = (value["authority"]["generation"],
                         value["authority"]["selected_vm_id"], value["authority"]["selected_mode"])
@@ -135,8 +131,6 @@ class StateStore:
         with self.lock:
             if not self.topic_available(topic):
                 return False
-            if topic == DISPLAY_DRIVE_TOPIC:
-                return self._control(env, retained)
             vm_id = env.get("vm_id")
             if not isinstance(vm_id, str) or env.get("source_id") is not None:
                 return False
@@ -185,7 +179,8 @@ class StateStore:
                         observed_at=env["sent_at"], source_id=topic, source_epoch=list(epoch),
                         sequence=env["seq"], retained=retained, _mqtt_generation=self.mqtt_generation)
                     return False  # Deferred; not yet accepted as displayed OS evidence.
-            # Only a non-retained heartbeat establishes a boot, not historical inventory.
+            # A live heartbeat or opted-in warm supervision may establish a
+            # reported boot; retained inventory never proves current liveness.
             boot = env["boot_id"]
             if boot != g["boot_id"]:
                 if retained or kind in ("agent.inventory", "app.readiness") or boot in g["retired_boots"] or len(g["retired_boots"]) >= 128:
@@ -213,7 +208,7 @@ class StateStore:
                             return False
                         g["retired_apps"].add((app_id, current))
                     # A publisher restart invalidates only this app's readiness.
-                    for app_kind in ("app.heartbeat", "app.readiness"):
+                    for app_kind in ("app.heartbeat", "app.readiness", "app.lifecycle", "app.lifecycle.work"):
                         g["channels"].pop((app_id, app_kind), None)
                     g["app_instances"][app_id] = epoch
                     g["app_sequences"].pop(app_id, None)
@@ -235,10 +230,31 @@ class StateStore:
                             or int(new["progress_seq"]) < int(old["progress_seq"])
                             or (new["readiness"] == "READY" and int(new["progress_seq"]) == int(old["progress_seq"]))):
                         return False
+                if scoped and kind == "app.lifecycle":
+                    old, new = previous["value"], env["payload"]
+                    if (new["applied_generation"] < old["applied_generation"]
+                            or int(new["check_seq"]) <= int(old["check_seq"])
+                            or int(new["progress_seq"]) < int(old["progress_seq"])):
+                        return False
                 if previous["source_epoch"] != list(epoch):
                     if len(g["retired_epochs"]) >= 128:
                         return False
                     g["retired_epochs"].add((key, tuple(previous["source_epoch"])))
+            if scoped and kind == "app.lifecycle":
+                work_key = (app_id, "app.lifecycle.work")
+                payload = env["payload"]
+                if payload["readiness"] != "READY":
+                    g["channels"].pop(work_key, None)
+                elif previous is not None and payload["applied_generation"] != previous["value"]["applied_generation"]:
+                    g["channels"].pop(work_key, None)
+                    if int(payload["progress_seq"]) > int(previous["value"]["progress_seq"]):
+                        g["channels"][work_key] = self.observation(payload, observed_at=env["sent_at"],
+                            source_id=topic, source_epoch=list(epoch), sequence=env["seq"],
+                            retained=False, _mqtt_generation=self.mqtt_generation)
+                elif previous is None or int(payload["progress_seq"]) > int(previous["value"]["progress_seq"]):
+                    g["channels"][work_key] = self.observation(payload, observed_at=env["sent_at"],
+                        source_id=topic, source_epoch=list(epoch), sequence=env["seq"],
+                        retained=False, _mqtt_generation=self.mqtt_generation)
             g["channels"][key] = self.observation(env["payload"], observed_at=env["sent_at"],
                 source_id=topic, source_epoch=list(epoch), sequence=env["seq"], retained=retained,
                 _mqtt_generation=self.mqtt_generation)
@@ -268,11 +284,25 @@ class StateStore:
         if xen_live and source["status"] == "fresh":
             state = "failed" if heartbeat["value"]["state"] == "error" else "ready"
         observation = g["channels"].get((app_id, "app.readiness")) if scoped else None
-        readiness_source = self.mqtt_source(observation, .3, topic, supported=scoped)
+        readiness_source = self.mqtt_source(observation, .3, topic,
+            supported=scoped and b.report_profile == "verified-drive-1")
         current = (xen_live and state == "ready" and readiness_source["status"] == "fresh")
-        return {"app_id": app_id, "topic": topic, "app_state": state,
+        warm = scoped and b.report_profile == "warm-drive-1"
+        lifecycle = g["channels"].get((app_id, "app.lifecycle")) if warm else None
+        lifecycle_source = self.mqtt_source(lifecycle, .3, topic, supported=warm)
+        work = g["channels"].get((app_id, "app.lifecycle.work")) if warm else None
+        work_source = self.mqtt_source(work, .3, topic, supported=warm)
+        lifecycle_current = (deepcopy(lifecycle["value"]) if lifecycle is not None
+            and xen_live and lifecycle_source["status"] == "fresh"
+            and (lifecycle["value"]["readiness"] != "READY" or work_source["status"] == "fresh") else None)
+        if warm and state == "ready" and (lifecycle_current is None or lifecycle_current["readiness"] != "READY"):
+            state = "unknown"  # Fresh supervision/qualification is not completed work.
+        return {"app_id": app_id, "topic": topic, "app_state": state, "report_profile": b.report_profile,
                 "reported_app_state": heartbeat["value"]["state"] if heartbeat else None,
                 "source": source,
+                "lifecycle": {"reported": deepcopy(lifecycle["value"]) if lifecycle else None,
+                    "current": lifecycle_current, "source": lifecycle_source,
+                    "calculation_source": work_source, "execution_verified": False, "authority_verified": False},
                 "readiness": {"reported": deepcopy(observation["value"]) if observation else None,
                     "current": deepcopy(observation["value"]) if current else None,
                     "source": readiness_source, "execution_verified": False, "authority_verified": False}}
@@ -292,37 +322,6 @@ class StateStore:
         state = ("failed" if any(a["app_state"] == "failed" for a in rows)
                  else "ready" if all(a["app_state"] == "ready" for a in rows) else "unknown")
         return source, state
-
-    def _control(self, env, retained):
-        if self.settings.drive_transport != "mqtt":
-            return False  # No fallback or competing source in explicit Gateway mode.
-        p = env["payload"]
-        # Old active_app semantics must not be used to infer a VM or a driving mode.
-        if (retained or env.get("source_id") != self.settings.control_source
-                or env.get("vm_id") is not None or env["type"] != DISPLAY_DRIVE_TYPE):
-            return False
-        if p.get("mode") not in ("AUTO", "MANUAL", "SAFE_STOP", "AUTO_READY"):
-            return False
-        if "active_vm_id" not in p:
-            return False
-        active = p["active_vm_id"]
-        if active is not None and (not isinstance(active, str) or active not in self.guests or self.guests[active]["binding"].role == "interaction"):
-            return False
-        epoch = (env["boot_id"], env["agent_instance_id"])
-        if epoch in self.control_retired:
-            return False
-        if self.control is not None:
-            if epoch == self.control_epoch and env["seq"] <= self.control["sequence"]:
-                return False
-            if epoch != self.control_epoch:
-                if len(self.control_retired) >= 128:
-                    return False
-                self.control_retired.add(self.control_epoch)
-        self.control_epoch = epoch
-        self.control = self.observation({"active_vm_id": active, "mode": p["mode"]},
-            observed_at=env["sent_at"], source_id=self.settings.control_source,
-            source_epoch=list(epoch), sequence=env["seq"], _mqtt_generation=self.mqtt_generation)
-        return True
 
     def snapshot(self):
         with self.lock:
@@ -358,16 +357,13 @@ class StateStore:
                         "inventory": self.mqtt_source(inv, 30,
                             f"xenova/v1/vms/{vm_id}/inventory", supported=b.agent_supported)},
                     "screen_source": {"kind": "status", "handle": None}})
-            control_source = self.mqtt_source(self.control, 3, DISPLAY_DRIVE_TOPIC)
-            drive = {"active_vm_id": None, "mode": "unknown", "ai_status": "unknown", "source": control_source}
-            if control_source["status"] == "fresh":
-                drive.update(self.control["value"])
-            if self.settings.drive_transport == "gateway":
-                source = self.source(self.gateway_observation, 3, connected=self.gateway_connected)
-                drive = {"active_vm_id": None, "mode": "unknown", "ai_status": "unknown",
-                         "source": source, "authority": None}
-                if source["status"] == "fresh":
-                    drive.update(deepcopy(self.gateway_observation["value"]))
+            # No Gateway read yet (e.g. no socket on a development PC), failure or
+            # expiry all stay unknown; there is no MQTT or retained fallback.
+            source = self.source(self.gateway_observation, 3, connected=self.gateway_connected)
+            drive = {"active_vm_id": None, "mode": "unknown", "ai_status": "unknown",
+                     "source": source, "authority": None}
+            if source["status"] == "fresh":
+                drive.update(deepcopy(self.gateway_observation["value"]))
             return {"schema_version": 1, "type": "display.state", "source_epoch": self.epoch,
                     "sequence": self.sequence, "generated_at": utc_now(),
                     "mqtt_connected": self.mqtt_connected, "binding_scope": self.settings.binding_scope,

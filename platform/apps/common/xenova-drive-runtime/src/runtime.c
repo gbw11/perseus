@@ -64,6 +64,9 @@ static int64_t cleanup_end(void)
 }
 static struct xm_zclient *app_client;
 static int64_t retry_at;
+#if defined(CONFIG_XENOVA_DRIVE_WARM)
+static atomic_t lifecycle_queued,lifecycle_rejected,lifecycle_first_rejection;
+#endif
 static uint64_t app_start_ms;
 #if defined(CONFIG_XENOVA_RUNTIME)
 static int network_rc = -EAGAIN;
@@ -86,6 +89,7 @@ static struct row rows[CONFIG_XENOVA_DRIVE_CAPTURE_ROWS];
 static struct xd_delivery deliveries[CONFIG_XENOVA_DRIVE_CAPTURE_ROWS];
 #endif
 static struct xd_inputs cycle_inputs;
+static int cycle_inputs_status;
 static const struct xd_received *command_input=&cycle_inputs.input;
 static int64_t command_valid_until;
 static struct xd_candidate candidate;
@@ -332,6 +336,20 @@ int xd_command_bound(int64_t valid_until_ms){
  if(valid_until_ms<=0)return -EINVAL;
  command_valid_until=valid_until_ms;return 0;
 }
+int xd_command_bound_us(uint64_t original_valid_until_guest_us){
+ /* xdiag counter-us and k_uptime ms are different clocks. Bracket the actual
+  * conversion; before+floor(remaining) cannot make the original E later. */
+ int64_t before=k_uptime_get();uint64_t counter;
+ int rc=xdiag_clock_us(&counter);if(rc)return rc;
+ int64_t after=k_uptime_get();
+ if(before<0||after<before)return -ERANGE;
+ if(original_valid_until_guest_us<=counter)return -ETIME;
+ uint64_t remaining=(original_valid_until_guest_us-counter)/1000;
+ if(remaining>(uint64_t)(INT64_MAX-before))return -EOVERFLOW;
+ int64_t bound=before+(int64_t)remaining;
+ if(bound<=after)return -ETIME;
+ return xd_command_bound(bound);
+}
 int xd_publish(struct xm_zclient *client,const char *topic,const char *type,const char *payload)
 {
 	ARG_UNUSED(client);
@@ -349,6 +367,7 @@ int xd_iteration_begin(void)
 	current.iteration_begin = now_us();
  command_input=&cycle_inputs.input;command_valid_until=0;
 	int rc = xd_io_snapshot(&cycle_inputs);
+	cycle_inputs_status = rc;
 	if (rc) {
 		/* Do not wait or mix generations. Missing input follows the existing
 		 * algorithm's idle/stop rules; a busy snapshot is not fresh data. */
@@ -358,6 +377,7 @@ int xd_iteration_begin(void)
 	return current.iteration_begin == UINT64_MAX ? -EIO : 0;
 }
 void xd_inputs_copy(struct xd_inputs *out) { if (out) { *out = cycle_inputs; } }
+int xd_inputs_status(void) { return cycle_inputs_status; }
 int xd_publish_completed(const char *topic,const char *type,const char *payload,
  uint64_t progress,int64_t produced_ms,const struct xd_inputs *source)
 {
@@ -365,7 +385,16 @@ int xd_publish_completed(const char *topic,const char *type,const char *payload,
 }
 int64_t xd_cleanup_deadline_ms(void) { return cleanup_end(); }
 int xd_publish_supervision(const char *topic,const char *payload,uint64_t check,int64_t at,const struct xd_inputs *context)
-{return admit()?xd_io_report_at(topic,"app.lifecycle",payload,check,context,at):-ESHUTDOWN;}
+{
+ int rc=admit()?xd_io_report_at(topic,"app.lifecycle",payload,check,context,at):-ESHUTDOWN;
+#if defined(CONFIG_XENOVA_DRIVE_WARM)
+ if(rc){
+  atomic_inc(&lifecycle_rejected);
+  (void)atomic_cas(&lifecycle_first_rejection,0,rc);
+ }else atomic_inc(&lifecycle_queued);
+#endif
+ return rc;
+}
 void xd_app_cleanup_error(int error)
 {
  if(error){atomic_set(&app_close_error,error);(void)xdiag_error("drive-app-cleanup",error);}
@@ -457,7 +486,25 @@ void xd_command(struct xm_zclient *client, const char *topic, const char *json, 
 		if(command_valid_until)candidate.expires_ms=MIN(candidate.expires_ms,command_valid_until);
 		if ((v_mps!=0.0f||steer_rad!=0.0f) && command_input && !command_input->error)
 			candidate.expires_ms=MIN(candidate.expires_ms,command_input->received_ms+input_timeout_ms+1);
-		if (strlen(topic)>=sizeof(candidate.topic)||strlen(json)>=sizeof(candidate.json)) current.rc=-EMSGSIZE;
+		struct xm_drive_command2 modern;
+		struct xm_drive_command3 clocked;
+		int source_rc=0;
+		struct xm_span command_span={json,(uint16_t)strlen(json)};
+		int parsed=xm_drive_command3_parse(command_span,&clocked);
+		if(!parsed)modern=clocked.command;
+		else parsed=xm_drive_command2_parse(command_span,&modern);
+		if(!parsed&&
+		   !strcmp(modern.producer_role,"MANUAL")&&strcmp(modern.command_kind,"STOP")){
+			candidate.modern_manual=true;
+			if(!command_input||command_input->error)source_rc=-ENODATA;
+			else source_rc=xm_manual_input_parse((struct xm_span){command_input->payload,(uint16_t)command_input->length},&candidate.manual_source);
+			if(!source_rc&&(!command_valid_until||!candidate.manual_source.valid||
+			   strcmp(modern.driver_session,candidate.manual_source.session)||modern.driver_action_seq!=candidate.manual_source.action||
+			   modern.driver_state_seq!=candidate.manual_source.state||
+			   modern.valid_until_pi_us>candidate.manual_source.expires_pi_us))source_rc=-EXDEV;
+		}
+		if(source_rc)current.rc=source_rc;
+		else if (strlen(topic)>=sizeof(candidate.topic)||strlen(json)>=sizeof(candidate.json)) current.rc=-EMSGSIZE;
 		else { strcpy(candidate.topic,topic);strcpy(candidate.json,json);current.rc=xd_io_command(&candidate); }
 	}
 	current.submit_end = current.rc ? now_us() : candidate.queued_us;
@@ -698,6 +745,17 @@ static int drive_cmd_inner(const struct shell *sh, size_t argc, char **argv)
 	if ((!records || (sends && !offset)) && !io_status) {
 		emit(sh,"XD_IO {\"enqueued\":\"%" PRIu64 "\",\"replaced\":\"%" PRIu64 "\",\"expired\":\"%" PRIu64 "\",\"context_dropped\":\"%" PRIu64 "\",\"stopped\":\"%" PRIu64 "\",\"attempted\":\"%" PRIu64 "\",\"sent\":\"%" PRIu64 "\",\"failed\":\"%" PRIu64 "\",\"event_dropped\":\"%" PRIu64 "\",\"heartbeat_replaced\":\"%" PRIu64 "\",\"heartbeat_dropped\":\"%" PRIu64 "\",\"heartbeat_expired\":\"%" PRIu64 "\",\"readiness_replaced\":\"%" PRIu64 "\",\"readiness_dropped\":\"%" PRIu64 "\",\"readiness_expired\":\"%" PRIu64 "\",\"prepare_max_us\":\"%" PRIu64 "\",\"poll_max_us\":\"%" PRIu64 "\",\"exchange_max_us\":\"%" PRIu64 "\",\"delivery_rows\":%zu,\"delivery_overflow\":\"%" PRIu64 "\",\"transmissions_complete\":%s,\"close_error\":%d}",
 		 io.enqueued,io.replaced,io.expired,io.context_dropped,io.stopped,io.attempted,io.sent,io.failed,io.event_dropped,io.heartbeat_replaced,io.heartbeat_dropped,io.heartbeat_expired,io.readiness_replaced,io.readiness_dropped,io.readiness_expired,io.prepare_max_us,io.poll_max_us,io.exchange_max_us,delivery_size,delivery_lost,sends_complete ? "true" : "false",io.close_error);
+#if defined(CONFIG_XENOVA_DRIVE_WARM)
+		struct xd_context_status context;
+		int context_rc=xd_context_status_get(&context);
+		emit(sh,"XD_REPORT {\"queued\":%u,\"queue_rejected\":%u,\"first_queue_rc\":%d,\"sent\":\"%" PRIu64 "\",\"first_send_rc\":%d}",
+		     (unsigned)atomic_get(&lifecycle_queued),(unsigned)atomic_get(&lifecycle_rejected),
+		     (int)atomic_get(&lifecycle_first_rejection),io.lifecycle_sent,io.lifecycle_first_send_error);
+		if(!context_rc){
+			emit(sh,"XD_CONTEXT {\"loads\":\"%" PRIu64 "\",\"failures\":\"%" PRIu64 "\",\"first_rc\":%d,\"last_rc\":%d,\"available\":%s}",
+			     context.loads,context.failures,context.first_error,context.last_error,context.available?"true":"false");
+		}
+#endif
 		if (!io.stack_error) {
 			emit(sh,"XD_CLOCK {\"frequency_hz\":%u,\"io_clock_rc\":%d,\"snapshot_busy\":\"%" PRIu64 "\",\"stack_rc\":0,\"stack_unused_bytes\":%zu}",
 			 sys_clock_hw_cycles_per_sec(),io.clock_error,io.snapshot_busy,io.stack_unused_bytes);

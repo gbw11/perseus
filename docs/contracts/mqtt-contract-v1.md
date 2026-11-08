@@ -23,6 +23,12 @@ VM 에이전트, RC카 앱 VM, dom0 서버·게이트웨이, 젯슨이 주고받
 | 크기 | 메시지 64 KB 이하. 주행 토픽(`drive.command`, `vehicle/*`)은 1 KB 이하 |
 | 세션 | clean session. 오프라인 큐에 기대지 않는다 |
 
+Python 공통 클라이언트의 내부 `Message.received_monotonic`은 Paho 수신 콜백에 진입한
+단조 시각이다. JSON·신원·중복 검사나 handler 대기를 마친 시각으로 갱신하지 않는다.
+현재 실행의 신원·권한은 검사 시점에 별도로 확인한다. 이 값은 봉투에 추가한 필드가 아니며,
+콜백 전에 생긴 Paho·TCP·브로커 대기나 발행자의 원 입력 나이를 측정하지 않는다.
+`sent_at`과 다른 장치의 단조 시각을 빼서 그 구간을 채우지 않는다.
+
 ## 2. 공통 봉투
 
 공통 봉투를 사용한다. Spring의 `AgentEnvelope`와 `AgentMessageHandler`는 Linux 에이전트 메시지를 검사한다. Zephyr MQTT-03의 시각·누적값 처리 조건은 3.1절을 따른다.
@@ -72,7 +78,7 @@ Linux·Zephyr 명령 발행은 백엔드에 구현돼 있다.
 | MQTT-01 | `xenova/v1/vms/{vm_id}/heartbeat` | `agent.heartbeat` | 에이전트 → 백엔드 | 1 | X | `{}` (봉투만) |
 | MQTT-02 | `xenova/v1/vms/{vm_id}/inventory` | `agent.inventory` | 에이전트 → 백엔드 | 1 | **O** | `os{id, version_id, pretty_name}`, `kernel_release`, `hostname`, `interfaces[{name, mac, addresses[{address, family}]}]`, `agent_version`, `capabilities{commands[], metrics[]}` |
 | MQTT-03 | `xenova/v1/vms/{vm_id}/metrics` | `agent.metrics` | Linux Agent·Zephyr Publisher → 백엔드 | 0 | X | 공통 `window_ms`·`values[]`. Linux는 `processes[]`·`process_collection`, Zephyr는 `observed_uptime_ms`(3.1절) |
-| MQTT-04 | `xenova/v1/vms/{vm_id}/command` | `agent.command` | 백엔드 → 에이전트/drive-v1 | 1 | X | `command_id`, `operation_id`, `expected_boot_id`, `expires_at`, `action`(`stress`/`agent_exit`/`auto_delay`/`cpu_stress`/`memory_stress`), `parameters` |
+| MQTT-04 | `xenova/v1/vms/{vm_id}/command` | `agent.command` | 백엔드 → 에이전트/drive-v1 | 1 | X | `command_id`, `operation_id`, `expected_boot_id`, `expires_at`, `action`(`stress`/`agent_exit`/`auto_delay`), `parameters` |
 | MQTT-05 | `xenova/v1/vms/{vm_id}/command-result` | `agent.command_result` | 에이전트 → 백엔드 | 1 | X | `command_id`, `operation_id`, `status`(`ACCEPTED`/`RUNNING`/`SUCCEEDED`/`FAILED`/`REJECTED`), `started_at`, `finished_at`, `duration_ms`, `result`, `error` |
 
 - inventory는 retained다. 최초 기동과 OS·네트워크 정보가 바뀔 때 전체를 다시 보낸다. retained 메시지는 마지막 보고일 뿐 지금 `ONLINE`이라는 증거가 아니다. VM을 삭제하면 백엔드가 그 VM의 retained inventory를 지운다.
@@ -108,6 +114,50 @@ Linux·Zephyr 명령 발행은 백엔드에 구현돼 있다.
 - 초기 미관측·미지원·수집 실패·포화·만료에는 값 대신 null과 각각 `first_sample`, `not_supported`, `read_failed`, `counter_saturated`, `stale_sample` 사유를 보낸다. `source_rc`는 원 오류 코드이며 유효한 값은 `0`이다. 실제 0 바이트는 `"0"`이다. `sent_at`은 검증된 UTC를 사용하며 미확보 시 null이다. 소비자는 이때 수신 시각을 조회 시각으로 삼고, 차분 간격에는 관측 단조 시각을 사용한다.
 - 프로세스 목록과 수집 상태는 이 표본에 없다. Spring 연동은 VM 종류에 따라 출처를 구분하고 메트릭만 저장하며, 숫자로 바꾸기 전에 누적값의 원 정밀도를 보존해야 한다. 자원 지표 수신을 Agent나 앱 생존으로 해석하지 않는다.
 - 직접 계측한 `rx_bytes_per_s`와 패킷·힙·풀·스레드 상세는 [Telemetry 2.1](../../platform/guests/zephyr/telemetry/contract/CONTRACT.md)을 따른다.
+
+<a id="demo-commands"></a>
+### 3.2 데모 명령 (MQTT-04·05)
+
+격리·자동 복구 시연용 명령이다. Linux의 `stress`·`agent_exit`는 에이전트 설정 `XENOVA_AGENT_DEMO_COMMANDS=1`일 때만 실행한다. Zephyr drive-v1은 같은 VM command 토픽에서 `auto_delay`를 실행한다. CPU 사용률과 주행 deadline 장애 시연은 AUTO 스레드가 busy wait하는 `auto_delay`로 수행한다.
+
+**명령 (MQTT-04)**: 봉투는 2장 예외(`boot_id`·`agent_instance_id`·`seq` 없음)이고 `vm_id` 는 대상 VM, `type` 은 `agent.command` 다. 에이전트는 command 토픽에 온 다른 type 은 실행하지 않고 버린다. payload:
+
+| 필드 | 규칙 |
+| --- | --- |
+| `command_id` | 필수. 128자 이하 문자열. 결과와 중복 판정의 키. 없으면 결과를 보내지 않고 버린다 |
+| `operation_id` | 선택. 주면 문자열이어야 한다(아니면 `INVALID_COMMAND`). 결과에 그대로 돌려준다 |
+| `expected_boot_id` | 필수. 대상 VM 의 현재 boot_id(inventory 나 heartbeat 봉투에서 얻는다). 다르면 `BOOT_MISMATCH` |
+| `expires_at` | 필수. ISO-8601 UTC. 봉투 `sent_at` 보다 늦고 300초 이내여야 한다(`INVALID_COMMAND`). 받은 시각이 이 시각 이후면 `EXPIRED` |
+| `action` | `stress` / `agent_exit` / `auto_delay`. 그 밖은 `UNSUPPORTED_ACTION` |
+| `parameters` | 객체. Linux `stress`: `cpu_workers` 0..4, `memory_mib` 0..512, `duration_s` 1..120. `agent_exit`: 빈 객체. Zephyr `auto_delay`: `delay_ms` 1..100, `duration_s` 1..120. 모두 정수(bool·실수 불가)이며 명시되지 않은 키는 거절 |
+
+- 시각: 에이전트는 자기 UTC 시계로 만료를 판정한다. `sent_at` 이 에이전트 시계보다 30초 넘게 앞서면 시계를 믿을 수 없다고 보고 `CLOCK_UNTRUSTED` 로 거절한다
+- retained 로 온 명령은 실행하지 않는다(`INVALID_COMMAND`). 명령은 retain 하지 않는다
+- 중복: 같은 `command_id` 에 같은 요청(`action`·`parameters`·`expected_boot_id`·`operation_id`, 만료 시각은 제외)이 다시 오면 실행하지 않고 마지막 결과를 다시 보낸다. 요청이 다르면 `IDEMPOTENCY_CONFLICT` 로 거절하고 원래 기록은 그대로 둔다. 에이전트는 실행 전에 기록을 부팅 동안 남기므로(`/run`) 같은 부팅 안에서 에이전트가 다시 시작해도 반복하지 않는다. 부팅이 바뀌면 `expected_boot_id` 로 거절된다
+- 기록을 남기지 못하면 실행하지 않는다(`STATE_UNAVAILABLE`). 기록 파일을 읽지 못하거나 손상됐으면 중복을 가를 수 없으므로 모든 명령을 `STATE_UNAVAILABLE` 로 거절한다
+- `stress` 는 한 번에 하나다. 도는 중이면 `BUSY`. `memory_mib` 이 대상 VM 의 MemAvailable − 64MiB 를 넘으면 `RESOURCE_UNAVAILABLE`
+
+**결과 (MQTT-05)**: 일반 봉투. payload 는 아래 키를 모두 갖고 해당 없는 값은 null 이다.
+
+| 필드 | 뜻 |
+| --- | --- |
+| `command_id`, `operation_id` | 명령의 값 |
+| `status` | `REJECTED`(검사 실패, 끝) / `RUNNING`(stress 시작) / `SUCCEEDED`(stress 시간을 채움, 끝) / `FAILED`(끝) / `ACCEPTED`(agent_exit 수락, 끝) |
+| `started_at`, `finished_at` | ISO-8601 UTC. `REJECTED` 는 `finished_at` 만, `RUNNING`·`ACCEPTED` 는 `started_at` 만 |
+| `duration_ms` | stress 의 실제 실행 시간(끝난 결과만) |
+| `result` | stress 의 적용 값 `{cpu_workers, memory_mib, duration_s}` |
+| `error` | `{code, message}`. 코드: `INVALID_COMMAND`, `UNSUPPORTED_ACTION`, `DEMO_DISABLED`, `BOOT_MISMATCH`, `CLOCK_UNTRUSTED`, `EXPIRED`, `INVALID_PARAMETERS`, `BUSY`, `RESOURCE_UNAVAILABLE`, `STRESS_FAILED`(부하 프로세스가 일찍 죽음), `AGENT_EXITING`(agent_exit 가 stress 를 끝냄, 또는 종료를 기다리는 동안 온 새 명령), `AGENT_STOPPING`(에이전트 정지·재시작으로 끝남), `IDEMPOTENCY_CONFLICT`(같은 `command_id` 의 다른 요청), `STATE_UNAVAILABLE`(명령 기록을 남기거나 읽지 못함) |
+
+- `stress`: `RUNNING` 다음에 `SUCCEEDED` 나 `FAILED` 하나가 온다. 부하는 에이전트와 다른 프로세스에서 내며, 시간이 지나면 남은 부하를 반드시 끝낸다
+- Zephyr `auto_delay`는 AUTO 주행 스레드에서 `delay_ms`만큼 busy wait하므로 CPU 사용률 증가와 주행 deadline miss를 함께 시연한다. 별도 합성 CPU·메모리 부하 스레드는 두지 않는다.
+- `agent_exit`: 종결 결과는 `ACCEPTED` 하나다. 에이전트는 그 발행의 PUBACK 을 확인한 뒤에만 종료하고 다시 시작하지 않는다. 연결이 없거나 PUBACK 이 늦으면 다른 결과를 내지 않고 기다린다(QoS 1 발행은 늦게라도 전달될 수 있어 실패 결과를 따로 내면 모순된다). 기다리는 동안 새 명령은 `AGENT_EXITING` 으로 거절한다. PUBACK 전에 에이전트가 다시 시작하면 같은 `ACCEPTED` 를 다시 제출하고 확인되면 종료한다. 종료 완료를 기록하지 못하면 종료하지 않고 기록될 때까지 다시 시도한다. 확인 뒤 종료한 에이전트를 사람이 다시 시작했다면 다시 종료하지 않는다. 종료가 실제로 일어났는지는 heartbeat 가 끊기는 것(3장)으로 확인한다. 이후 복구는 Recovery Worker 의 판정을 따른다
+- 결과를 받지 못하면(만료까지) 보낸 쪽은 결과 없음으로 처리한다. 같은 `command_id` 로 다시 보내면 실행 없이 마지막 결과만 돌아온다
+- MQTT-05 는 QoS 1 이라 같은 결과가 두 번 이상 올 수 있다(재전달, 재시작 뒤 재제출). 백엔드는 `(vm_id, command_id)` 를 한 명령의 집계 키로 쓴다. 같은 `status`·같은 payload 의 재전달은 무시하고, `RUNNING` → `SUCCEEDED`/`FAILED` 는 정상 상태 전이로 처리한다. 종결 상태 뒤에 다른 종결 상태가 오면 계약 위반으로 기록한다
+- Zephyr `auto_delay`는 UTC 시계가 없으므로 `expires_at`의 형식과 상한은 명령을 발행하는 백엔드가 검증한다. drive-v1은 현재 boot 일치, retained 여부와 파라미터를 검증하고 단조 시계로 실행 시간을 제한한다. 결과의 UTC 시각 필드는 null이다.
+- 현재 소스의 FW1.0.33 후보는 AUTO 지연·heap 비율을 `vm.trust`로 발행하지 않는다. 실제 AUTO 작업이 원 release deadline을 넘으면 해당 결과를 즉시 제한하고 기존 `app.lifecycle`의 NOT_READY로 보고한다. 원 errno·health failure·주입 명령의 결과는 각각 보존한다. 명령의 `SUCCEEDED`는 설정된 주입 기간의 종결이며 실제 AUTO 계산·준비·승계 성공이 아니다.
+- `AUTO_DEADLINE_MISS`의 `consecutive_misses`, `command_id`는 AUTO 기능 실패 근거다. 현재 binding·boot·app과 일치하는 비-retained 보고만 소비한다. Gateway는 해당 AUTO 자격을 제한하고 현재 후보로 승계/정지를 판단하며, Worker는 이를 진단으로 보관하고 이 보고만으로 `VM_UNTRUSTED` latch·새 복구 시도를 만들지 않는다.
+- 과거 Authority `distrusted`와 원 보호 기록은 기존 형식으로 읽고 자동 변환·삭제하지 않는다. 실제 VM 장애의 원 복구는 Gateway 보호→기존 `recover_once`→새 execution의 receipt·binding·준비 확인→정당한 protection 종결→Standby 재합류를 따른다. 현재 Active를 자동 탈환하지 않는다. 입력/기능 회복의 AUTO 재개는 현재 Active와 기존 명시 요청·카운트다운·제어 적용을 사용하고 사용자 `manual_hold`를 보존한다.
+- 관측창 종료는 주입 기간 종료·취소·미수락의 근거가 아니다. 동일 요청은 원 key·boot·명세로 회수하며, 실행 교체 뒤 새 boot에 명령을 자동 재주입하지 않는다. 같은 원 표본이나 같은 결과 재전달을 새 위반/새 계산으로 세지 않는다. MQTT-04/05 필드·토픽과 Telemetry 2.1 형식은 바꾸지 않는다.
 
 ## 4. RC카 구성과 app_id
 
@@ -201,6 +251,19 @@ MANUAL/AUTO 재무장도 이 요청을 사용하며 legacy의 AUTO_READY 전용 
 ```
 
 이는 전체 envelope가 아닌 관련 필드 예시다. 공통 필수 신원·seq 필드는 §2를 따른다.
+
+받아들인 재개는 `drive.resume.accepted`(`switch_in_ms: 3000`)로 알리고 3초 뒤 AUTO로 바꾼다.
+그 3초 동안 운영자는 같은 토픽(`console/resume`)으로 `drive.resume.cancel_requested`를 보내 취소할 수 있다(v1.7).
+취소 요청도 `causation_id`(현재 control message_id)와 payload `expected_generation`(카운트다운을 시작한 세대)을 가진다.
+둘이 맞고 카운트다운 중이면 Gateway는 카운트다운을 멈추고 `drive.resume.cancelled`(`reason: "operator_cancelled"`)를 낸다.
+모드는 바꾸지 않으며(AUTO_READY 등 그대로), 다시 AUTO로 가려면 새 재개 요청이 필요하다. 자동 복귀는 없다.
+카운트다운이 없거나 문맥이 맞지 않는 취소 요청은 이벤트 없이 무시한다. 취소는 반복돼도 결과가 같으므로 영구 중복 기록을 남기지 않는다.
+
+```json
+{"type":"drive.resume.cancel_requested","causation_id":"<현재 control message_id>",
+ "payload":{"expected_generation":42,"requested_by":"operator"}}
+```
+
 소비자 이행과 설치는 [공통 펌웨어 안내](../../platform/apps/drive/README.md)에 있다.
 Spring/표시 소비자의 새 토픽·재개 문맥·정지 중 입력 공급은 아직 제품 연결이 필요하다.
 
@@ -283,10 +346,16 @@ ESP32가 시리얼로 보낸 상태를 게이트웨이가 바꿔 발행한다. �
 | MQTT-06 | `xenova/v1/apps/autonomous/events` | `perception.event` | 자율 VM → 인터랙션 VM | 1 | `kind`(obstacle 등), `detail` |
 | MQTT-06 | `xenova/v1/apps/interaction/events` | `message.posted` | 인터랙션 VM → 주행 화면 | 1 | `text`, `level` |
 | MQTT-06 | `xenova/v1/apps/interaction/events` | `drive.resume.requested` | 인터랙션 VM → 게이트웨이 | 1 | `requested_by` |
+| — | `xenova/v1/console/resume` | `drive.resume.requested` | 백엔드(운영자 콘솔) → 게이트웨이 | 1 | `expected_generation`, `requested_by` (+ envelope `causation_id`) |
+| — | `xenova/v1/console/resume` | `drive.resume.cancel_requested` | 백엔드(운영자 콘솔) → 게이트웨이 | 1 | `expected_generation`, `requested_by` (+ envelope `causation_id`) — v1.7 |
+| MQTT-06 | `xenova/v1/apps/vehicle/events` | `drive.resume.accepted` | 게이트웨이 → 백엔드, 주행 화면 | 1 | `switch_in_ms`(3000), `generation`, `requested_by` |
+| MQTT-06 | `xenova/v1/apps/vehicle/events` | `drive.resume.cancelled` | 게이트웨이 → 백엔드, 주행 화면 | 1 | `reason`, `generation`, (`operator_cancelled` 일 때) `requested_by` |
 | MQTT-06 | `xenova/v1/apps/vehicle/events` | `drive.mode.changed` | 게이트웨이 → 인터랙션 VM, 주행 화면, 백엔드 | 1 | `from`, `to`, `generation`, `reason` |
 | MQTT-06 | `xenova/v1/apps/vehicle/events` | `drive.fault.detected` | 게이트웨이 → 인터랙션 VM, 백엔드 | 1 | `app_id`, `vm_id`, `reason`, `detected_at` |
 
 - Legacy의 `drive.resume.requested`는 `AUTO_READY`일 때만 받아들인다. 다른 모드에서는 무시하고 `drive.mode.changed`를 내지 않는다.
+- `drive.resume.cancelled`의 `reason`: `operator_cancelled`(운영자 취소, v1.7), `readiness_lost`(대상 VM·앱 준비 상실·세대 변경), 그 밖에는 카운트다운을 끝낸 모드 전환의 reason(`autonomous_lost`, `command_timeout`, `no_fresh_standby` 등). 운영자 취소만 모드를 바꾸지 않는다.
+- `console/resume` 토픽에는 노션 계약 ID가 아직 없다(코드 주석의 "MQTT-13"은 11장 `recovery/health`와 겹치는 옛 표기).
 - 백엔드는 `drive.mode.changed`, `drive.fault.detected`를 콘솔 이벤트 로그(REST-18, `/ws/v1/events`)에 남긴다. 심각도는 모드 전환 `INFO`, `SAFE_STOP` 진입·장애 `WARNING`.
 
 ### 6.1 앱 생존 신호 `app.heartbeat`
@@ -538,7 +607,7 @@ VM 간 메시지 지연은 왕복 시간(RTT)으로 잰다. 일방향 지연이�
 
 ## 10. 미확정
 
-- 명령 만료 판정에 쓰는 시각 오차 허용 범위와 동기화 방식 (MQTT-04 `CLOCK_UNTRUSTED`)
+- 게스트 시계 동기화 방식. 명령 만료의 허용 범위(3.2절의 30초)는 실보드 Debian·Ubuntu 게스트의 시간 동기 상태를 확인한 뒤 확정한다
 - 와치독 300 ms, 전환 100 ms, `AUTO_READY` 3초는 실보드 측정 후 확정
 
 ## 11. 복구 이벤트 (dom0 → 백엔드)
@@ -622,8 +691,22 @@ Worker 가 VM 마다 내는 현재 건강이다(주행 명세 3.3 의 게이트�
 | `yaw` | float | 진행 방향 (rad, −π ~ π) |
 | `v_mps`, `steer_rad` | float | 지금 속도(구동 바퀴 둘레 속도)·전륜각 (모델 값). 후진이면 `v_mps` < 0 |
 | `world_revision` | uint32 | 이 위치를 계산할 때의 `sim.world.revision` |
-| `surface` | string | 차 중심이 있는 노면 `road` · `grass` · `dirt` |
-| `race` | object | 선택. 출발 신호·랩 `{phase, lights_on, lap, lap_ms, last_lap_ms, best_lap_ms, jump_start}`. 지금 시뮬레이터는 보내지 않는다 (화면은 없으면 표시하지 않는다) |
+| `surface` | string | 차 중심이 있는 노면 `road` · `grass` · `dirt`. 잔디·흙에서 차는 최고 0.3 m/s (넘으면 1.2 m/s² 로 줄어든다) |
+| `race` | object | 선택. 출발 신호·랩 `{phase, lights_on, lap, lap_ms, last_lap_ms, best_lap_ms, jump_start}` — 아래 표. 시뮬레이터는 늘 보낸다. 받는 쪽은 없으면 표시하지 않는다 |
+
+`race` (F1 방식 출발 신호, [RC카 시나리오](../scenario-rc-car.md)와 같은 시연 규칙 P7)
+
+| 필드 | 타입 | 설명 |
+| --- | --- | --- |
+| `phase` | string | `lights`(출발 신호 중) · `go`(출발 뒤) |
+| `lights_on` | uint8 | 켜진 빨간 불 0 ~ 5. 다시 출발 0.7 초 뒤부터 1 초마다 하나씩 켜지고, 다섯 개가 켜진 뒤 0.2 ~ 3.0 초 사이 무작위로 모두 꺼지면 `go`. `go` 면 0 |
+| `lap` | uint32 | 끝낸 바퀴 수. 반 바퀴를 지난 뒤 출발선(`track.start_index`)을 넘으면 1 오른다 |
+| `lap_ms` | uint32 | 지금 바퀴 경과 (ms, 시뮬레이터 시간). `lights` 면 0 |
+| `last_lap_ms`, `best_lap_ms` | uint32 \| null | 지난·최고 랩 (ms). 아직 없으면 null |
+| `jump_start` | bool | 부정 출발: 불이 하나라도 켜진 동안 수동 앱이 전진을 명령함. 첫 바퀴 랩 시간에 +5 초 |
+
+- 출발 신호 중에는 시뮬레이터가 수동이 아닌 활성 앱(자율)의 전진을 막아 출발선에 둔다 — 자율 앱은 신호를 보지 않는다. 수동은 막지 않는다.
+- 활성 앱은 `vehicle.control` 로 안다. 시뮬레이터가 게이트웨이 시리얼 프레임을 받는 구성(MQTT 를 보지 않음)에서는 활성 앱을 몰라 늘 막고, `jump_start` 는 false 다.
 
 **`sim.world`**
 
@@ -661,12 +744,18 @@ Worker 가 VM 마다 내는 현재 건강이다(주행 명세 3.3 의 게이트�
 | `obstacle.remove` | `obstacle_id` | 치우기 |
 | `estop` | `engaged` (bool) | E-stop 걸기·풀기 |
 | `push` | `dy_m` | 차를 진행 방향 기준 옆으로 옮긴다 (+ 왼쪽, \|dy_m\| ≤ 0.5). 자율주행이 차선으로 돌아오는지 보이는 시연용 |
-| `track.select` | `track_id` | 트랙 바꾸기. 장애물을 모두 치우고 차를 출발선에 세운다 |
-| `race.start` | — | 다시 출발. 차를 출발선에 세운다 |
+| `track.select` | `track_id` | 트랙 바꾸기. 장애물을 모두 치우고 차를 출발선에 세운다. 출발 신호도 처음부터 |
+| `race.start` | — | 다시 출발. 차를 출발선에 세우고 출발 신호·랩 기록(지난·최고·부정 출발)을 처음부터 |
 
 - 모든 명령에 `request_id`(string)를 넣는다. 시뮬레이터는 명령마다 MQTT-18 `sim.command.result` 를 한 번 낸다. 적용되면 `sim.world`(revision +1)도 다시 낸다 — `push`·`race.start` 는 `sim.pose` 에만 보인다.
 - 모르는 `op`·범위 밖 값은 `ok: false`, `code: INVALID` 로 답한다 (9번째 장애물, \|dy_m\| > 0.5, 없는 `track_id`, 없는 `obstacle_id`).
-- **배치 검사**: 차 몸과 겹치면 `ON_CAR`, 벽 밖이면 `OUT_OF_TRACK` 으로 거부한다. 관리 콘솔 mock 의 `NO_GAP`·`TOO_DENSE`·`TOO_CLOSE`(회피 주행을 미리 돌려 보기)는 지금 자율 앱이 장애물을 피하지 않고 서기만 하므로 시뮬레이터가 내지 않는다. 받는 쪽은 이 코드도 그대로 처리할 수 있어야 한다.
+- **배치 검사** (`obstacle.add`·`obstacle.move`, 관리 콘솔 mock checkPlacement 와 같은 식·순서). 앞에서부터 처음 걸린 것으로 거부한다. 옮기기는 옛 자리를 빼고 본다.
+  1. `OUT_OF_TRACK`: 장애물이 벽 밖으로 조금이라도 나감 (\|옆 거리\| > 벽 − 폭/2)
+  2. `ON_CAR`: 차 몸(길이 0.42·폭 0.20)과 겹침
+  3. `NO_GAP`: 장애물 앞뒤(차 길이 + 폭)를 3 cm 마다 보아, 가장 넓은 틈(벽~장애물~벽)이 0.26 m(차 폭 0.20 + 양쪽 0.03) 보다 좁음. `gap_m`·`need_m` 을 채운다
+  4. `TOO_DENSE`: 틈은 있지만, 기준 회피 주행(mock 의 자율 규칙: 인지 4 m → 틈 고르기 → pure pursuit·속도 계획)을 장애물 묶음 4.8 m 앞에서 출발시켜 보면 서거나 닿음
+  5. `TOO_CLOSE`: 출발 뒤(`race.phase` = `go`)이고 차 바로 앞(−0.3 ~ 4.8 m)이라, 지금 차 상태로 4 를 돌려 봐도 못 지나감
+- 4·5 의 기준 회피 주행은 화면 판정용이다. 지금 자율 앱은 장애물을 피하지 않고 앞에서 선다.
 
 **`sim.command.result`** (MQTT-18)
 
@@ -675,9 +764,9 @@ Worker 가 VM 마다 내는 현재 건강이다(주행 명세 3.3 의 게이트�
 | `request_id` | string | 받은 명령의 `request_id` |
 | `op` | string | 받은 명령의 `op` |
 | `ok` | bool | 적용했나 |
-| `code` | string \| null | 거부 사유 `ON_CAR` · `OUT_OF_TRACK` · `INVALID` (예약: `NO_GAP` · `TOO_DENSE` · `TOO_CLOSE`). `ok` 이면 null |
+| `code` | string \| null | 거부 사유 `OUT_OF_TRACK` · `ON_CAR` · `NO_GAP` · `TOO_DENSE` · `TOO_CLOSE` · `INVALID`. `ok` 이면 null |
 | `message` | string \| null | 화면에 그대로 띄울 한 줄 |
-| `gap_m`, `need_m` | float \| null | `NO_GAP` 일 때 모의 단위 틈·필요 폭. 지금은 null |
+| `gap_m`, `need_m` | float \| null | `NO_GAP` 일 때 모의 단위 가장 넓은 틈·필요 폭(0.26). 다른 경우 null |
 
 ### 12.2 콘솔 API (백엔드)
 
@@ -725,7 +814,10 @@ Worker 가 VM 마다 내는 현재 건강이다(주행 명세 3.3 의 게이트�
 | v1.5 (보완) | 2026-11-02 | 백엔드가 v2 `telemetry/metrics` 를 구독해 Zephyr CPU·메모리를 메트릭 표본(`source = zephyr_telemetry`)으로 저장한다(3장). `backend` 계정에 이 토픽 읽기 권한 추가(9장). v1 토픽·payload 는 그대로 |
 | v1.5 (보완) | 2026-11-03 | 백엔드가 v2 `telemetry/heartbeat` 도 구독해 VM 별 Publisher 상태(`publisher_state`·마지막 수집 성공 경과·실패 누계)를 `GET /api/v1/vms/{vm_id}/telemetry/heartbeat` 로 보인다(3장, S15P31E110-358). `backend` 읽기 권한 표기를 실제 정책 `xenova/v2/vms/+/telemetry/+` 로 맞춤(9장). v1 토픽·payload 는 그대로 |
 | v1.6 | 2026-10-29 | 시뮬레이터 전용 12장 추가 (S15P31E110-261·-270·-271): MQTT-15 `sim.pose`·MQTT-16 `sim.world`·MQTT-17 `sim.command`·MQTT-18 `sim.command.result`, 콘솔 REST-30~37·WS-06. vehicle 브랜치 초안(그쪽 번호 v1.3·v1.4 §11)을 옮기며 바꾼 점: 구독자에서 인지 대역을 뺐다(젯슨은 전방 카메라 화면만), 트랙은 실제 서킷 10개, 배치 검사는 `ON_CAR`·`OUT_OF_TRACK` 만, `race` 는 선택. 계정 `simulator` 추가, `backend` 에 `sim/command` 쓰기, `perception` 읽기에서 `sim/#` 제외(9장). 기존 토픽·payload 는 그대로 |
+| v1.6 (보완) | 2026-11-03 | 12장 시뮬레이터 남은 항목 구현 (S15P31E110-319): `sim.pose.race` 를 늘 보냄(출발 신호·랩·부정 출발 규칙, 출발 신호 중 자율 차는 출발선에서 대기), 배치 검사 `NO_GAP`·`TOO_DENSE`·`TOO_CLOSE` 를 예약에서 구현으로(관리 콘솔 mock 과 같은 판정, `NO_GAP` 이면 `gap_m`·`need_m`), `OUT_OF_TRACK` 을 mock 과 같이 "벽 밖으로 조금이라도 나가면"으로 맞춤, 잔디·흙 최고 0.3 m/s 명시, `race.start`·`track.select` 가 출발 신호를 처음부터. 필드 이름·타입은 그대로 |
 | v1.6 (보완) | 2026-11-02 | 12장 WS-06: `sim.command.result` 는 모든 콘솔 연결에 방송, 결과가 REST 202 보다 먼저 올 수 있음을 명시 (구현과 같음, S15P31E110-267). 토픽·payload 는 그대로 |
+| v1.7 | 2026-11-04 | 재개 카운트다운 운영자 취소 (S15P31E110-280): `console/resume` 에 `drive.resume.cancel_requested`(`causation_id`·`expected_generation`·`requested_by`) 추가, `drive.resume.cancelled` reason `operator_cancelled`(모드 유지, 자동 복귀 없음)(5.2 verified, 6장). 6장 표에 그동안 게이트웨이 README 에만 있던 `drive.resume.accepted`·`cancelled` 와 `console/resume` 재개 요청 행을 올림. 기존 토픽·payload·ACL 은 그대로 |
+| v1.8 | 2026-11-04 | 3.2절 데모 명령 규칙 추가 (S15P31E110-123): MQTT-04 payload 필드·범위(`stress` 의 `cpu_workers`·`memory_mib`·`duration_s`), 유효 기간 300초·시계 허용 30초(`CLOCK_UNTRUSTED`), 같은 `command_id`·같은 요청은 재실행 없이 마지막 결과 재전송, 다른 요청은 `IDEMPOTENCY_CONFLICT`, 기록을 남기지 못하면 실행하지 않음(`STATE_UNAVAILABLE`), MQTT-05 상태 흐름과 오류 코드, `agent_exit` 의 종결 결과는 `ACCEPTED` 하나이고 PUBACK 확인 뒤 종료(PUBACK 전 재시작은 이어서 진행), MQTT-05 중복은 백엔드가 `(vm_id, command_id)` 집계 키로 처리(같은 결과 재전달은 무시, `RUNNING` → 종결은 전이, 종결 뒤 다른 종결은 계약 위반). 데모 설정이 꺼진 에이전트는 `DEMO_DISABLED`. 10장 미확정에서 명령 만료 허용 범위 제외 |
 
 공식 전송 경계 참고: [MQTT 3.1.1](https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html)의
 QoS 교환은 메시지 전달을 위한 것이며 앱/장치 적용 확인을 대신하지 않는다.

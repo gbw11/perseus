@@ -18,7 +18,7 @@ LOG_MODULE_REGISTER(xenova_manual, LOG_LEVEL_INF);
 static struct xm_zclient client;
 int main(void)
 {
-	char events[XM_TOPIC_MAX], control[XM_TOPIC_MAX], input[XM_TOPIC_MAX], json[160];
+	char events[XM_TOPIC_MAX], control[XM_TOPIC_MAX], input[XM_TOPIC_MAX], json[XM_COMMAND2_BYTES+1];
 	struct manual_cfg cfg;
 	const char *last_state = NULL;
 
@@ -32,6 +32,7 @@ int main(void)
 
 	int64_t start = k_uptime_get();
 	int64_t next_beat = start;
+	uint64_t calculation_sequence=0;
 
 	while (!xd_stopping()) {
 		int io_rc = xd_client_prepare(&client, control, input);
@@ -52,7 +53,25 @@ int main(void)
 			if (xd_step_begin()) { break; }
 			manual_step(&cfg, &in, &cmd, &state);
 			if (xd_step_end()) { break; }
-			int encoded = xm_drive_command_json(json, sizeof(json), cmd.generation, cmd.v_mps, cmd.steer_rad);
+			if(calculation_sequence==UINT64_MAX){rc=-EOVERFLOW;break;}
+			++calculation_sequence;
+			struct xm_manual_input source;
+			int modern=xm_manual_input_parse(in.input_payload,&source);
+			int encoded;
+			if(!modern){
+				/* The standalone legacy app has no actual Vehicle/clock owner.
+				 * Modern propulsion runs in the integrated drive-manual app; a
+				 * keys-only fallback here would invent both safety witnesses. */
+				uint64_t completed;if((rc=xdiag_clock_us(&completed)))break;
+				struct xm_drive_command2 stop={.generation=cmd.generation,
+				 .calculation_sequence=calculation_sequence,.completed_guest_us=completed,
+				 .driver_action_seq=source.action,.driver_state_seq=source.state};
+				strcpy(stop.producer_role,"MANUAL");strcpy(stop.command_kind,"STOP");
+				strcpy(stop.mission_id,"00000000-0000-0000-0000-000000000000");
+				strcpy(stop.driver_session,source.session);
+				struct xm_drive_command3 safe={.command=stop,.clock_probe_sequence=0};
+				encoded=xm_drive_command3_json(json,sizeof(json),&safe);
+			}else encoded=xm_drive_command_json(json, sizeof(json), cmd.generation, cmd.v_mps, cmd.steer_rad);
 			xd_command(&client, events, json, encoded, cmd.generation, cmd.v_mps, cmd.steer_rad, input_seq, control_seq, in.input_age_ms, cfg.input_timeout_ms);
 
 			if (ready && !xd_stopping() && now >= next_beat) {

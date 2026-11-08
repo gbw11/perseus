@@ -99,7 +99,11 @@ def create_app(endpoint, feed, pairing, *, rotate_signal=False):
             response = JSONResponse({"code": "PHONE_ORIGIN_REQUIRED"}, status_code=403)
         else:
             response = await call_next(request)
-        response.headers.update({"Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
+        # Native form navigation under no-referrer sends Origin: null in Chrome.
+        # Keep the exact Origin check; allow referrers only within this origin
+        # on the pairing document so its form supplies the real same-origin value.
+        referrer_policy = "same-origin" if request.url.path == "/connect" else "no-referrer"
+        response.headers.update({"Cache-Control": "no-store", "Referrer-Policy": referrer_policy,
             "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY",
             "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"})
         return response

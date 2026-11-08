@@ -44,6 +44,10 @@ int drive_workers_offer(enum drive_task, const struct drive_job *);
  * current trusted context; no prior context is accepted on a new revision. */
 int drive_workers_read(enum drive_task, uint64_t context_revision, struct drive_completion *);
 int drive_workers_status(enum drive_task, struct drive_task_status *);
+/* MANUAL pending/running/retained-result slots only. No payload copy/parse or
+ * consumption. Busy is unavailable; callback ownership survives cancellation.
+ * source_ms is original input receive time, not a new observation timestamp. */
+int drive_workers_memory_read(struct xdr_app_region out[3], struct xdr_app_buffer detail[3]);
 /* App-local ownership operations. Lifetime is an internal stale-work guard,
  * never permission to mint an MQTT identity. The trusted runtime must approve
  * a new instance before using restarted results outside this owner. */

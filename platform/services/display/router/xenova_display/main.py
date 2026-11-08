@@ -21,6 +21,7 @@ from .mqtt import MqttSource
 from .state import StateStore
 from .policy import DisplayPolicy, RenderAck, Selection
 from .gateway import GatewayReader
+from .shared import SharedFollower
 
 log = logging.getLogger(__name__)
 
@@ -35,16 +36,23 @@ def create_app(settings=None, *, driver=None, store=None, mqtt_factory=MqttSourc
     policy = DisplayPolicy(settings, store.epoch, clock=store.clock)
     sessions = {}
 
-    async def poll_gateway(reader):
+    async def poll_gateway():
+        reader = None
         unavailable = False
         while True:
             started = time.monotonic()
             try:
+                if reader is None:
+                    # Built lazily and retried: a missing Gateway client or host boot id
+                    # (e.g. a development PC) leaves driving state unknown instead of
+                    # failing startup. Without a reader there is no observation to expire.
+                    reader = gateway_factory(settings)
                 value, observed = await asyncio.to_thread(reader.read)
                 store.gateway_success(value, observed_mono=observed)
                 unavailable = False
             except Exception as error:
-                store.gateway_failure()
+                if reader is not None:
+                    store.gateway_failure()
                 if not unavailable:
                     log.warning("Gateway display context unavailable (%s)", type(error).__name__)
                 unavailable = True
@@ -53,32 +61,37 @@ def create_app(settings=None, *, driver=None, store=None, mqtt_factory=MqttSourc
 
     async def poll():
         unavailable = False
+        follower = SharedFollower(driver) if isinstance(driver, ObservationFile) else None
+        interval = .25 if follower is not None else 1
         while True:
+            started = time.monotonic()
             try:
-                if isinstance(driver, ObservationFile):
-                    domains, observed = await asyncio.to_thread(driver.read)
-                    store.poll_success(domains, observed_mono=observed)
+                if follower is not None:
+                    update = await asyncio.to_thread(follower.read_changed)
+                    if update is not None:
+                        domains, observed = update
+                        store.poll_success(domains, observed_mono=observed)
                 else:
                     # Explicitly injected test/probe adapters only.
                     domains = await asyncio.to_thread(driver.list_domains)
                     store.poll_success(domains)
                 unavailable = False
             except Exception as error:
+                if follower is not None:
+                    follower.invalidate()
                 store.poll_failure()
                 if not unavailable:
                     log.warning("Shared VM display observation unavailable (%s)", type(error).__name__)
                 unavailable = True
-            await asyncio.sleep(1)
+            await asyncio.sleep(max(0, interval - (time.monotonic() - started)))
 
     @asynccontextmanager
     async def lifespan(app):
         source = mqtt_factory(store)
-        # Missing client installation in opt-in mode is a startup error, not a
-        # silent switch to MQTT/retained or raw Authority-file reads.
-        reader = gateway_factory(settings) if settings.drive_transport == "gateway" else None
-        tasks = [asyncio.create_task(poll())]
-        if reader is not None:
-            tasks.append(asyncio.create_task(poll_gateway(reader)))
+        # Driving state is read only from the Gateway context; an unavailable
+        # Gateway is reported as unknown, never replaced by MQTT/retained or raw
+        # Authority-file reads.
+        tasks = [asyncio.create_task(poll()), asyncio.create_task(poll_gateway())]
         try:
             source.start()
             yield
@@ -101,7 +114,8 @@ def create_app(settings=None, *, driver=None, store=None, mqtt_factory=MqttSourc
     async def service_auth(request, call_next):
         path = request.url.path
         read_screen = request.method == "GET" and (
-            path in {"/display/monitor-1", "/display/monitor-2", "/display/mobile", "/api/v1/display/presentation"}
+            path in {"/display/monitor-1", "/display/monitor-2", "/display/combined", "/display/mobile",
+                     "/api/v1/display/presentation"}
             or path.startswith("/assets/"))
         ack_screen = request.method == "POST" and path in {
             "/api/v1/display/outputs/monitor-1/ack", "/api/v1/display/outputs/monitor-2/ack"}
@@ -164,7 +178,8 @@ def create_app(settings=None, *, driver=None, store=None, mqtt_factory=MqttSourc
 
         @app.get("/display/{output_id}", include_in_schema=False)
         def monitor_page(output_id: str):
-            if output_id not in {"monitor-1", "monitor-2", "mobile"}:
+            # monitor-1·2 는 vm-screens 가 합친 차량 화면(/display/combined)으로 넘긴다. 새로고침해도 열리게 둔다
+            if output_id not in {"monitor-1", "monitor-2", "combined", "mobile"}:
                 raise HTTPException(404)
             return FileResponse(root / "index.html")
 

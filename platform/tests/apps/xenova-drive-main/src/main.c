@@ -15,6 +15,8 @@ static int64_t fixture_origin;
 static bool replace_context;
 static int64_t last_finished_ms;
 static unsigned health_records;
+static bool snapshot_probe;
+static int snapshot_status;
 
 void __real_xd_health_record(const struct xdh_health *,const struct xdh_health *);
 void __wrap_xd_health_record(const struct xdh_health *automatic,const struct xdh_health *manual)
@@ -60,6 +62,7 @@ int __wrap_xd_io_start_dual(struct xm_zclient *c,const char *control,const char 
 {ARG_UNUSED(c);ARG_UNUSED(control);ARG_UNUSED(input);ARG_UNUSED(perception);return 0;}
 int __wrap_xd_io_snapshot(struct xd_inputs *out)
 {
+ if(snapshot_probe&&snapshot_status){memset(out,0xa5,sizeof(*out));return snapshot_status;}
  memset(out,0,sizeof(*out));
  int64_t now=k_uptime_get();
  snapshot_revision=replace_context&&now-fixture_origin>=60?2:1;
@@ -120,6 +123,25 @@ void __wrap_exit(int result)
 int main(void)
 {
  const char *scenario=getenv("XL_CASE");assert(scenario);
+ if(!strcmp(scenario,"snapshot-status")){
+  snapshot_probe=true;
+  const int statuses[]={0,-EBUSY,-EIO,-EAGAIN,0,-EBUSY,0};
+  for(size_t i=0;i<ARRAY_SIZE(statuses);i++){
+   snapshot_status=statuses[i];assert(!xd_iteration_begin());
+   assert(xd_inputs_status()==snapshot_status);
+   struct xd_inputs actual;xd_inputs_copy(&actual);
+   if(snapshot_status){
+    struct xd_inputs expected={0};
+    expected.control.error=expected.input.error=expected.perception.error=snapshot_status;
+    assert(!memcmp(&actual,&expected,sizeof(actual)));
+   }else{
+    assert(actual.connected&&actual.dual_mode&&actual.control_revision==1);
+    assert(!actual.control.error&&!strcmp(actual.vm_id,"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"));
+   }
+  }
+  printf("PASS actual runtime snapshot status: %zu transitions; cleared input on failure; recovered source; status int=%zu bytes\n",
+   ARRAY_SIZE(statuses),sizeof(int));__real_exit(0);
+ }
  replace_context=!strcmp(scenario,"context");fixture_origin=k_uptime_get();
  setenv("XD_TEST_DURATION_MS","350",1);
  return product_main();

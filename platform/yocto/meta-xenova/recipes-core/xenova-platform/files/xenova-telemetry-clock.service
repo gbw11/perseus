@@ -1,7 +1,8 @@
 [Unit]
 Description=Bounded Xenova guest UTC correspondence
+Requisite=xenova-first-boot.service
 RequiresMountsFor=/srv/xenova
-After=xenstored.service
+After=xenova-first-boot.service xenstored.service
 ConditionPathExists=/proc/xen/capabilities
 
 [Service]

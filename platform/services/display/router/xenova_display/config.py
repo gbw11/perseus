@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -9,8 +10,21 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-DISPLAY_DRIVE_TOPIC = "xenova/v1/display/drive-state"
-DISPLAY_DRIVE_TYPE = "display.drive_state"
+log = logging.getLogger(__name__)
+
+# Retired 2026-11-06: driving state is read only from the dom0 Gateway context
+# (the xenova/v1/display/drive-state MQTT path had no publisher). Old deployment
+# files may still set these; they are ignored, never a startup error.
+RETIRED_ENV = ("XENOVA_DISPLAY_DRIVE_TRANSPORT", "XENOVA_DISPLAY_CONTROL_SOURCE")
+
+
+def warn_retired_env(environ=os.environ):
+    for name in RETIRED_ENV:
+        value = environ.get(name)
+        if value is None or (name == "XENOVA_DISPLAY_DRIVE_TRANSPORT" and value == "gateway"):
+            continue  # Unset, or already the only remaining behaviour.
+        log.warning("%s=%r is retired and ignored; driving state is read from the Gateway context",
+                    name, value)
 
 
 class Binding(BaseModel):
@@ -21,10 +35,13 @@ class Binding(BaseModel):
     app_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,64}$")
     app_ids: tuple[str, ...] = Field(default=(), max_length=2)
     app_topic_scope: Literal["legacy", "vm_scoped"] = "legacy"
+    report_profile: Literal["verified-drive-1", "warm-drive-1"] = "verified-drive-1"
     agent_supported: bool = False
 
     @model_validator(mode="after")
     def app_mapping(self):
+        if self.report_profile == "warm-drive-1" and self.app_topic_scope != "vm_scoped":
+            raise ValueError("warm profile requires VM-scoped drive apps")
         if self.app_topic_scope == "legacy":
             if self.app_id is None or self.app_ids:
                 raise ValueError("legacy requires one app_id and no app_ids")
@@ -101,15 +118,14 @@ class FeedSettings:
     mqtt_port: int = 1883
     mqtt_username: str | None = None
     mqtt_password: str | None = None
-    control_source: str = "dom0-gateway"
     binding_scope: Literal["legacy", "candidate", "deployment", "configured"] = "configured"
-    drive_transport: Literal["mqtt", "gateway"] = "mqtt"
     gateway_socket: str = "/run/xenova-gateway/control.sock"
     gateway_budget_s: float = 0.5
 
     def __post_init__(self):
-        if self.drive_transport not in {"mqtt", "gateway"}:
-            raise ValueError("invalid display drive transport")
+        if any(b.report_profile == "warm-drive-1" for b in self.bindings):
+            # Explicit profile opt-in must not silently run with an older parser.
+            from xenova_mqtt.lifecycle import parse  # noqa: F401
         if not PurePosixPath(self.gateway_socket).is_absolute() or '\0' in self.gateway_socket:
             raise ValueError("Gateway socket path must be absolute")
         if type(self.gateway_budget_s) not in (int, float) or not 0 < self.gateway_budget_s <= 1:
@@ -133,6 +149,7 @@ class FeedSettings:
 
     @classmethod
     def from_env(cls):
+        warn_retired_env()
         bindings, scope = load_bindings(os.environ["XENOVA_DISPLAY_BINDINGS"],
             allow_candidate=os.environ.get("XENOVA_DISPLAY_ALLOW_CANDIDATE_BINDINGS") == "1")
         return cls(
@@ -142,9 +159,7 @@ class FeedSettings:
             mqtt_port=int(os.environ.get("XENOVA_DISPLAY_MQTT_PORT", "1883")),
             mqtt_username=os.environ.get("XENOVA_DISPLAY_MQTT_USERNAME"),
             mqtt_password=os.environ.get("XENOVA_DISPLAY_MQTT_PASSWORD"),
-            control_source=os.environ.get("XENOVA_DISPLAY_CONTROL_SOURCE", "dom0-gateway"),
             binding_scope=scope,
-            drive_transport=os.environ.get("XENOVA_DISPLAY_DRIVE_TRANSPORT", "mqtt"),
             gateway_socket=os.environ.get("XENOVA_DISPLAY_GATEWAY_SOCKET", "/run/xenova-gateway/control.sock"),
             gateway_budget_s=float(os.environ.get("XENOVA_DISPLAY_GATEWAY_BUDGET_S", "0.5")),
         )

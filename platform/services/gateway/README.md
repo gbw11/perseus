@@ -26,6 +26,17 @@ Jetson 연결 대기로 묶지 않는다. 이 파일의 시험값을 운영 설�
 기존 차량 출력 한계·ACK 기한·현재 session 검증은 그대로다. 새 MANUAL의 실제 정지 확인,
 같은 운전자 MANUAL A/B 연속, 사용자 `manual_hold`, 명시 AUTO 복귀를 구분한다.
 
+feedback-2는 원 probe echo와 첫 serial 제출 시각을 구분한다. packet 준비 대기를 실제
+장치 왕복 오차에 합치지 않되, 첫 제출 뒤 write·수신 지연과 원 probe 보존 기한은 유지한다.
+송신 전/회수 시 원 기한 만료는 `ODOM_PROBE_EXPIRED`, 실제 왕복 불확실성은
+`ODOM_CLOCK_UNCERTAIN`이다. 장치의 probe 수신 뒤 표본 래치와 실제 MCU 수락 조건은
+[정식 계약](../../../docs/contracts/gateway-provider-v1.md#명시-선택-feedback-2와-pi-로컬-odometry)에 있다.
+DriveLink MQTT는 같은 owner의 공인 외부 event loop를 사용하며, 송신 정체 중에는 기존
+packet과 latest 슬롯만 보관한다. 설치·import 통과가 보드의 지연 한도 충족을 뜻하지는 않는다.
+native POSIX serial의 owner 경로는 기존 readiness 뒤 한 번 읽어 pyserial 내부의 중복 select를
+줄인다. idle/HUP·부분 frame·첫 실패·read 완료 시각·STOP/종료 우선순위는 유지한다.
+직접 `poll()`의 공개 취소와 socket URL/custom backend는 기존 pyserial 경로를 사용한다.
+
 이력은 `--history-policy <private-file>`의 `retry_ms`와 `retention_ms`를 명시 공급할 때
 정당하게 종결하고 보존 약속·참조를 해소한 기록만 새 내구 수락에서 정리한다.
 `GatewayClient.history()`는 읽기 전용이다. `new_request_id(host_boot_id)`는 최초 송신 전에
@@ -252,9 +263,21 @@ Paho가 이미 받은 QoS1 bytes가 취소됐다고 가정하지 않는다. 구�
 
 `submissions`의 제한된 기록은 원 명령의 VM·execution·boot·instance·app·message_id·seq,
 수신 단조 시각, generation, 인코딩 hex/counter, serial_result/accepted_bytes를 제공한다.
-시리얼 실패는 OUTPUT_PATH_FAILED와 출력 금지로 반영된다. 장치 적용은 미연결이므로
-`device_applied=null`이다. `vehicle.status.applied_generation`을 만들어내지 않는다.
-STOP 재전달과 기존 watchdog/E-stop은 유지한다.
+시리얼 쓰기 실패는 OUTPUT_PATH_FAILED와 출력 금지로 반영된다.
+submissions.device_applied는 null이며 feedback 프로필의 실제 적용 결과는 별도 device view와
+원 요청의 original.device에서 확인한다.
+
+기동·주기 STOP은 기존 단일 장치 소유자에게 제출하고 actor에서 스레드 기상을 기다리지 않는다.
+큐에 있는 동안 serial_result=pending, serial_wait=queued로 기록한다. 같은 STOP의 실제
+완료를 회수하기 전에는 새 STOP이나 DRIVE를 제출하지 않는다. 완료하면 원 기록을 accepted로
+갱신하고 원 submitted_monotonic을 보존한다. serial_completed_monotonic은 actor가 완료를
+회수한 시각이다. 장치 수락·적용·물리 정지는 각 feedback 근거로 따로 확인한다.
+
+직접 write 호출의 10ms 대기가 끝난 STOP은 call_budget_exhausted로 표시하고 같은 소유 작업을
+회수한다. 필수 보호 저장 직전의 직접 STOP 제출은 기존 동기 경계를 사용한다. DRIVE의 기존
+10ms 대기 실패와 후속 STOP, 원 명령 만료, 실제 쓰기 실패·장치 적용 기한·종료 확인은 계속
+검사한다. 실제 소유 스레드가 종료되거나 쓰기가 실패하면 해당 오류로 출력 금지를 확정한다.
+STOP 대기 상태는 원 Authority나 작업 기록을 대신하지 않는다.
 
 ## Legacy 분리 앱
 
@@ -268,8 +291,9 @@ STOP 재전달과 기존 watchdog/E-stop은 유지한다.
 | --- | --- | --- | --- |
 | 구독 | `xenova/v1/apps/{autonomous,manual}/events` | `drive.command` | 신선도 판정, 활성 앱이면 전달 |
 | 구독 | `xenova/v1/apps/{autonomous,manual}/events` | `app.heartbeat` | `AUTO_READY` 조건 (D8). 전환 판정에는 쓰지 않는다 |
-| 구독 | `xenova/v1/apps/message-board/events` | `drive.resume.requested` | 재개 요청 (메시지 보드 VM, MQTT-06). QoS 1 |
+| 구독 | `xenova/v1/apps/interaction/events` | `drive.resume.requested` | 재개 요청 (인터랙션 VM, MQTT-06). QoS 1 |
 | 구독 | `xenova/v1/console/resume` | `drive.resume.requested` | 재개 요청 (운영자 콘솔 → 백엔드 발행, MQTT-13). QoS 1. 위와 똑같이 처리 |
+| 구독 | `xenova/v1/console/resume`, `xenova/v1/apps/interaction/events` | `drive.resume.cancel_requested` | 재개 카운트다운 운영자 취소 (계약 v1.7). QoS 1. verified 는 재개와 같은 `causation_id` 검사 |
 | 구독 | `xenova/v1/vehicle/control` | `vehicle.control` | 시작할 때 이전 세대 읽기만 (재시작해도 세대를 되돌리지 않는다) |
 | 발행 | `xenova/v1/vehicle/control` | `vehicle.control` | QoS 1 retained. 시작·전환마다 |
 | 발행 | `xenova/v1/apps/vehicle/events` | `drive.mode.changed`, `drive.fault.detected`, `drive.resume.accepted`, `drive.resume.cancelled` | QoS 1 |
@@ -306,7 +330,8 @@ STOP 재전달과 기존 watchdog/E-stop은 유지한다.
 AUTO_READY ──재개 요청──▶ drive.resume.accepted {switch_in_ms: 3000, generation, requested_by}
               │            (모드 AUTO_READY 유지, 수동이 계속 제어. 화면이 3·2·1 을 센다)
               ├─ 3초 뒤 조건 여전히 충족 ─▶ AUTO, 세대 +1, drive.mode.changed reason resume_requested
-              └─ 그 사이 AUTO_READY 를 벗어남 ─▶ drive.resume.cancelled {reason, generation} → MANUAL 또는 SAFE_STOP
+              ├─ 그 사이 AUTO_READY 를 벗어남 ─▶ drive.resume.cancelled {reason, generation} → MANUAL 또는 SAFE_STOP
+              └─ 그 사이 운영자 취소 ─▶ drive.resume.cancelled {reason: operator_cancelled, generation, requested_by} → AUTO_READY 유지
 ```
 
 - 받는 조건: 모드 `AUTO_READY` 이고 카운트다운 중이 아님. 카운트다운 중 재요청, 같은 판정 주기의 두 번째 요청은 무시합니다 (이벤트 없음, `MEASURE event=resume_ignored`).
@@ -314,6 +339,9 @@ AUTO_READY ──재개 요청──▶ drive.resume.accepted {switch_in_ms: 300
 - `cancelled.reason`은 그 전환의 `reason` 그대로입니다. 자율 명령·heartbeat 가 끊기면 `autonomous_lost` (→ `MANUAL`), 수동 명령이 끊기면 `no_fresh_standby` (→ `SAFE_STOP`).
 - `accepted`·`cancelled`의 `generation`은 수락 때의 세대(`AUTO_READY` 세대)입니다. `cancelled`는 그 전환의 `vehicle/control`·`drive.mode.changed`보다 먼저 냅니다 (`SAFE_STOP`이면 정지 프레임이 맨 앞).
 - `requested_by`는 요청 payload 의 문자열 그대로, 없으면 `null`.
+- **운영자 취소** (계약 v1.7, S15P31E110-280): `drive.resume.cancel_requested` 를 받으면 다음 판정 주기에서 카운트다운을 멈추고 `cancelled {reason: "operator_cancelled", generation, requested_by}` 를 냅니다. 모드·세대·control 은 그대로이고 다시 AUTO 로 가려면 새 재개 요청이 필요합니다 (자동 복귀 없음). 같은 판정 주기에 3초가 차도 취소가 먼저입니다.
+  - 카운트다운이 없으면 이벤트 없이 무시합니다.
+  - verified 는 envelope `causation_id` = 현재 control message_id, payload `expected_generation` = 카운트다운을 시작한 세대여야 받습니다. 영구 중복 기록은 남기지 않고 최근 64개 `message_id` 만 메모리에 둬 QoS 1 재전달이 같은 세대의 다음 카운트다운을 끄지 않게 합니다.
 
 ## 실행
 
@@ -397,7 +425,7 @@ python tools/measure_failover.py --port 18832 --runs 10
 | 도구 | 하는 일 |
 | --- | --- |
 | `tools/mock_drive_app.py` | 주행 앱 목. `vehicle/control` 세대로 `drive.command` 50 Hz + `app.heartbeat` 1초 |
-| `tools/send_resume.py` | 재개 요청 목. `drive.resume.requested` 한 번. 기본은 메시지 보드 경로, `--console` 이면 `xenova/v1/console/resume` (계정 `backend`, `source_id: dom0-server`) |
+| `tools/send_resume.py` | 재개 요청 목. `drive.resume.requested` 한 번. 기본은 인터랙션 VM 경로, `--console` 이면 `xenova/v1/console/resume` (계정 `backend`, `source_id: dom0-server`) |
 | `tools/measure_failover.py` | 위 둘과 게이트웨이·수동 앱을 띄워 AUTO→MANUAL→AUTO_READY→(재개 3초)→AUTO 를 N회, 끝에 SAFE_STOP 을 잰다 |
 
 ## 검증 현황 (2026-10-21, 개발 PC Windows + Docker mosquitto 2.0.21, 목 싱크)
@@ -422,3 +450,165 @@ python tools/measure_failover.py --port 18832 --runs 10
 - 실제 ESP32 연결, 프레임 확정·계약 v1.1 (S15P31E110-241), `vehicle.status` 중계
 - 코어 고정·실시간 우선순위와 실제 서비스/장치 수락은 미완료다. 2026-11-01 정규 recipe·비활성 unit 포장은 추가했으며 실제 설치와 구분한다.
 - 시리얼 쓰기 연속 실패 시 처리 (지금은 로그·횟수만, 최종 정지는 ESP32 와치독)
+# 선택적 Pi J-uplink와 실제 mapper clock
+
+기존 warm/feedback-2/drive-link 실행에 `--mapper-uplink-profile /etc/xenova/mapper-uplink.json`을
+명시할 때만 독립 Linux spawn process를 연다. static `--world-trust`와 함께 사용할 수 없다.
+profile이 없거나 잘못됐거나 실제 왕복이 없으면 mapper clock을 승인하지 않는다.
+J 네트워크 I/O는 child만 수행하고 Gateway의 MANUAL/ESP STOP은 이 clock 준비를 기다리지 않는다.
+패키지는 기존 world extra의 Paho2.1.0/protobuf와 내부 `xenova_drive_world`를 사용하며 자동 설치하지 않는다.
+
+private JSON은 같은 euid 소유·group/other 접근 불가·regular 단일 링크 파일(최대8192B)이다.
+기본 top keys는 `version(1),clock,host,port,username,password,tof_profiles,tof_max_age_us`이며,
+선택적 `scene_policy`만 추가할 수 있다.
+계정/암호 파일은 저장소에 넣지 않는다. `host`는 numeric IPv4이고 J broker 인증/ACL·배포 전송 보호는
+운영자가 수락해야 한다. MQTT payload/topic 이름 자체를 publisher 인증 증거로 보지 않는다.
+
+`clock`의 exact keys는 `vehicle,device,configuration,calibration,primitive,timestamp_error_us,drift_ppm,
+max_offset_width_us,lease_us,vehicle_max_age_us,lookback_us`다. 실제 등록 ID/보정과 수락한 오차 상한을
+넣어야 하며 코드 예시값을 물리 수락값으로 제공하지 않는다. `device`는 승인 topic component,
+primitive는 hex64다. lease≤1s, lookback≤1s이며 H는 원 Vehicle/ToF/카메라 history를 덮어야 한다.
+`calibration`은 차량 전체 보정 bundle의 등록 ASCII ID(1..64자)이며 SHA256 형식 강제 필드가 아니다.
+ClockPolicy·원 Vehicle·World·Scene의 같은 등록 ID를 exact-match한다. `encoder-lab-1` 같은
+native 시험 프로필은 합성 lab 등록이며 실제 OAK/차량 보정을 수락했다는 뜻이 아니다.
+`tof_profiles`는 최대2개의 `[sensor_id(0/1),leaf_sha256,config_revision]`이고 없는 센서는 빈 목록이다.
+ToF leaf를 전체 vehicle calibration ID와 같다고 가정하지 않는다.
+
+Gateway actor가 P에 준 같은 원 VehicleSample bytes를 direct J 사본으로 준다. P broker를 subscribe해
+relay하지 않는다. 실제 ToF producer는 `runner.submit_mapper_tof(raw)`로 sensor별 최신 한 장을 전달하고,
+실제 scene 내구 승인 뒤 actor가 `runner.publish_mapper_scene_after_commit(raw)`를 호출한다.
+이 저장소의 기존 feedback-2는 Vehicle producer만 제공하므로 ToF/Scene 값을 합성해서 채우지 않는다.
+
+local frame은14장8.1의 header9필드와 little-endian length framing을 사용한다. header≤2048/body≤2048,
+전체≤4096을 각각 검사한다. Probe tag13 결정에 맞춰 PROBE_PLAN JSON은 원 필드+`prior_trust` hex/null로
+cap2048을 명시 적용했다. 최초2회에는 prior가 없고 실제 수락한 원 WorldTrust만 다음 probe에 전달한다.
+Probe≤1024/Reply≤1024이며 TRUST_CANDIDATE는 추가로 `12+실제probe길이+실제reply길이≤2048`이어야 한다.
+
+clock owner는 원 nonce/P1/P4/200ms deadline, 동일 source의 연속2회와 interval 일관성을 검사한다.
+상대 rate `|dP/dJ-1|≤rho`에 따라 Pi 기간을 J 기간으로 환산한 drift를 RTT+max(lease,H)에 보수 합성한다.
+원 expiry=P1+lease는 늘리지 않는다. time lease 갱신과 source admission revision은 별개다.
+J의 returned-lease helper는 원 전체 source와 고정 지원 window만 검증하며 모르는 P4를 만들지 않는다.
+자동 child 재시작 정책은 추가하지 않았고, 명시 restart도 old 실제 종료 확인 후 통로/client만 교체한다.
+실제 broker/프로세스·장비 지연/오차의 운영 수락은 별도 검증한다.
+
+`scene_policy`를 명시하면 같은 Gateway actor에 `SceneAuthority`를 연결한다. exact fields는
+`coverage_profile_sha256,required_sensor_mask,atlas_cell_capacity,max_anchor_position_m,
+max_anchor_heading_rad,summary_max_age_us,stationary`이며, `stationary`는
+`window_us,max_gap_us,max_age_us,metres_per_tick,max_wheel_mps,max_yaw_rps,
+unobserved_wheel_mps,unobserved_yaw_rps`를 모두 요구한다. 설치된 보정·정지 상한을 넣어야 하며
+실측되지 않은 기본값을 제공하지 않는다. 기존 profile과 빈 `tof_profiles`는 그대로 지원한다.
+
+내부 `runner.submit_scene(SceneSubmission)`은 전역 operator 원장이 예약한 원
+`SceneRequest`와 실제 feedback3 ingress의 `SceneGate/MatchedStop`만 받는다. 반환 Future는
+actor 수락이며 fsync 성공·mapper 반영·이동 허가가 아니다. `update_scene_gate`도 원 STOP과
+센서 표본의 시각·식별자를 보존한다. 공개 MQTT/IPC 명령, 전역 operator2 원장과
+FOLLOW/주차 MissionGrant 발급자는 이 포트가 대신하지 않는다. 기존 feedback2/serial write를
+matched STOP으로 변환하지 않으므로 실제 feedback3 producer가 없으면 Scene 승인은 열리지 않는다.
+
+Scene journal은 기존 `AuthorityStore/control.json`에만 저장한다. 추가 thread는 journal worker
+하나, job/result 각 한 개이며 새 transport thread/socket/권위 파일은 없다. actor가 enqueue 전에
+busy를 세우고 worker가 기존 store lock을 반납한 뒤 내린다. 그 사이 provider/전환/내구 feedback은
+원 큐·원 기한으로 지연하고 RAM 철회·현재 입력과 명령 기한·STOP은 계속 처리한다. UNKNOWN/lost
+ack는 원 proposal/commit hold로 남으며 자동 성공이나 새 journal 재시도로 바꾸지 않는다.
+
+내구 완료 grant는 기존 `mapper/<device>/scene.pb`로, VM 사본은 기존 DriveLink state 연결의
+tag10/latest scene slot으로 전달한다. ADMITTED는 실제 원 Mapper APPLIED 뒤에만 VM에 제공한다.
+새 Scene/명시 복원·철회와 실제 RAM negative event는 clock owner의 source 의미 revision을 전진시킨다.
+clock 수학의 원 lease는 유지하고 다음 실제 probe가 새 revision을 확인하기 전 긍정 사용권을 열지 않는다.
+RAM negative는 철회할 원 fullRef/source revision/nonce/시각·frozen 증거를 보존하고 lifecycle revision만
+전진시켜 즉시 전달한다. 재접속·재전달은 revision이나 원 expiry를 연장하지 않는다.
+명시 operator revoke도 같은 원 grant key를 유지한다. 새 철회 요청의 nonce/fingerprint와 실제
+source 의미 revision은 기존 Authority journal의 원 requests row에 별도로 기록한다. pending
+COMMIT 중 철회는 peer에 실제 전달한 본문을 기준으로 하며 미반영 frozen 증거를 끼워 넣지 않는다.
+Scene에 결박된 임무·명령·held plan은 철회/만료 시 제한하되 일반 live-only·MANUAL·기존 A/B 복구는
+Scene 준비를 이유로 일괄 전환하거나 재arm하지 않는다.
+
+
+### operator2와 연속 키보드 opt-in
+
+기존 `control.sock` G1 관리 API는 유지한다. `--operator-profile /절대/설치정책.json`을
+지정하면 같은 Gateway process 안의 `operator.sock`(length-prefixed JSON v2)과
+`keyboard.sock`(SOCK_SEQPACKET keyboard-source-1)을 연다. warm + feedback-3의 명시
+조합이 필요하며 `--operator-socket`, `--keyboard-socket`으로 사설 경로를 지정할 수 있다.
+두 endpoint는 root 전용 runtime directory/peer credential/같은 Gateway lease를 사용한다.
+
+`xenova-drive status`, `mode manual`, `auto resume|cancel`, `parking start --strategy reverse|forward`,
+`parking cancel`, `stop`, `request get REQUEST_KEY`가 operator2를 사용한다.
+`manual nudge forward|backward --duration-ms 100`, `manual neutral`은 원 입력 lease를
+사용한다. `manual keyboard --device ALIAS`는 foreground K를 실행한다. Scene은
+`scene survey begin --policy static-flat-survey-1 [--allow-mapper-restore]`,
+`scene survey commit`, `scene revoke`다. CLI는 원 요청 key를 먼저 출력하고
+`--wait-ms` 동안 원 key만 조회한다. timeout을 취소나 새 key 재실행으로 해석하지 않는다.
+
+설치 정책은 root 소유·0600·single-link regular JSON이며 unknown field를 거절한다.
+operator profile의 exact top fields는 `manual`, `guest_clock`,
+`keyboard_profile_directory`, `planner_manifest`, `planner_asset_sha256`다.
+manifest는 root 소유·외부 쓰기 금지·single-link regular 설치 파일(최대32KiB)이고,
+원 canonical profile/generator/asset SHA와 고정 asset pin 및 compiled clock 정책을 검사한다.
+이 검사가 설치된 C 실행 바이너리 자체의 동일성을 증명하지는 않는다. `manual`은 `forward_mps`, `reverse_mps`, `steer_rad`의
+등록 차량 한계다. `guest_clock`은 `timestamp_error_us`, `drift_ppm`,
+`max_roundtrip_us`, `max_offset_width_us`, `lease_us`다. Pi와 C의 paired 설치 정책은
+같은 timestamp/drift 상한을 사용해야 한다. software lab 상한은 실측 수락 증거가 아니다.
+K 장치의 `/etc/xenova/keyboards/ALIAS.json`에는 등록 device identity/kernel ABI/독립
+수락 hash와 유선·무선 정책이 필요하다. USB 수신기의 생존이나 OS key repeat를 RF
+물리 연결 증거로 쓰지 않는다. 미검증 무선 장치는 HELD를 열지 않으며 PULSE/NEUTRAL은
+독립적으로 사용할 수 있다.
+
+`--serial-profile feedback-3 --feedback3-profile /절대/직렬정책.json`은 기존
+`--odometry-config`, `--vehicle-limits`, `--feedback-timeout-ms`도 요구한다.
+feedback3 profile exact fields는 `Feedback3Profile`의 등록 config/firmware SHA,
+`timestamp_error_us`, `drift_ppm`, `max_offset_width_us`, `lease_us`,
+`probe_timeout_us`, `j_cutoff_us`, `j_apply_us`, `stationary`, `phase_budget_us`,
+`steering_tolerance_rad`, `steering_settle_us`다. `stationary`는 Scene의
+`StationaryPolicy`와 같은 exact 단위·필드를 쓴다. 실제 firmware와 hash/capability를
+검산하고, 원 CLOCK_INSTALL ACK 전에는 DRIVE를 전달하지 않는다. STOP은 별도다.
+ToF source가 없는 구성은 유효하다. 이 adapter는 TOF_FRAGMENT3를 지원한다고 광고하지
+않으며 수신 fragment를 거절한다. 등록 ToF assembler는 독립 센서 연결부가 담당한다.
+
+actor는 권한·입력·기한을 판정하고, serial owner 하나가 실제 출력/feedback을 소유한다.
+Scene과 operator의 내구 쓰기는 worker1/job1/result1 하나를 공유한다. operator/keyboard
+소켓 I/O owner는 각 고정 thread1이며 권한 판정·fsync·serial 쓰기를 수행하지 않는다.
+K는 foreground 입력 process1이고 MQTT·Authority·serial을 직접 변경하지 않는다.
+일반 입력·STOP·RAM 철회는 journal fsync를 기다리지 않는다. 임무/취소/드라이버의 원
+ID와 deadline/budget은 같은 Authority 원장에 결박된다. 정상 같은 SID MANUAL 승계는
+실제 CONTINUE_SESSION/current registry와 원 남은 입력 E를 검산하며 generation 변경만으로
+새 Enter를 요구하지 않는다. neutral anchor는 입력 action floor이고 현재 clock/physical
+정지·방향 증거의 수명과 별개다.
+
+worker가 저장을 마친 뒤에도 actor가 원 결과 ACK를 소비·적용하기 전에는 새 내구
+전환을 시작하지 않는다. 이전 generation의 READY/delivery로 새 PENDING을 적용하는
+일을 막는 경계이며, 현재 입력 만료·RAM 철회·STOP은 이 ACK를 기다리지 않는다.
+주차 임무의 원 총 상한은 발급 시각부터120초이고, SEARCH 상한은 원 총 상한과
+발급 시각+90초 중 이른 쪽이다. owner 승계·grant 재전달은 이 시각을 다시 시작하지 않는다.
+
+`examples/virtual_feedback3.py`는 명시 PTY 시험 대역이다. 실제 ESP32 펌웨어, 실차 제동,
+RF 수락, 주차 geometry·완료 판정의 대체 증거가 아니다. 실제 주차 계산 owner는 기존
+MissionGrant/Budget/검산된 State progress 포트를 사용해야 한다.
+
+Pi/guest clock 원 raw와 confirmed 수치 registry는 현재 등록 VM2×role2의 source4개,
+source당32개(총128)로 제한한다. 50ms probe/원1s lease 동안 다른 peer의 트래픽이
+유효한 clock job을 FIFO로 밀어내지 않는다. 원E 경과 또는 실제 등록 source 교체 때만
+제거하며, 해당 source가 가득 차면 그 source의 새 수락만 거절한다. raw DriveLink의
+계약 최대32768B 기준 순수 raw 상한은128×32768=4MiB이며 Python 객체/confirmed/probe
+metadata와 기존 I/O mailbox는 별도다. 실제 메시지가 작다는 가정으로 상한을 줄여
+기재하지 않는다. 등록 source를 유지한 control generation 변경은 clock row를 지우거나
+원E를 늘리는 사건이 아니다.
+
+operator startup/retired floor는 같은 snapshot의 `operator_host_boot_id` 범위다.
+Pi 재부팅의 uptime0에 이전 boot의 큰 issued floor를 적용하지 않는다. Gateway 재시작은
+현재 임무를 HOLD/fence하고 미종결 요청을 FAILED로 종결한다. 원 original의 app/device/
+physical 미확인 값은 그대로 null이며 과거 효과가 없었다고 주장하지 않는다. 다른 boot의
+기록은 현재 startup 기준60초 조회 보존 후 admission 때 정리하며 old key를 실행하지 않는다.
+auto.cancel은 원 countdown만 취소한다. 새 global HOLD/arm/session을 발급하지 않고,
+이미 사용자에게 허용된 같은 MANUAL 문맥은 현재 입력·기한·준비 guard로 다시 평가한다.
+
+정지 상태에서 이후 새 조작을 준비하려면 MCU는 같은 원 STOP pin에 대해 실제 새
+report_seq/source_sample/time의 stationary 보고를 계속 생산해야 한다. cached ACK
+재전송은 원 시각 그대로이며 fresh 정지 증거가 아니다. 관측 cadence/상한을 만족하지
+못하면 STOP은 유지하고 새 이동 수락을 열지 않는다.
+
+`tests/test_command3_gateway_flow.py`는 실제 C 완료 serializer의 원문을 Gateway
+수신·command3 검산·actor·OutputOwner로 연결하고 원 만료/RAM fence를 검사한다.
+operator/journal과 원 ClockReply stamp/P4 확인은 실제 코드지만 lifecycle·Vehicle·장치
+관측은 명시 typed 시험 입력이다. 실물 READY·RF·serial feedback3·World planner·MANUAL
+주행의 통합 성공이나 성능 수치로 해석하지 않는다.

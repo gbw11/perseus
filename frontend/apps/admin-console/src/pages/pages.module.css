@@ -56,6 +56,337 @@
   color: var(--x-text-muted);
   font-weight: 600;
 }
+
+/* ---- Simulator VM load test ---- */
+.simulatorTabs {
+  display: inline-flex;
+  width: fit-content;
+  padding: 4px;
+  border: 1px solid var(--x-border);
+  border-radius: 10px;
+  background: var(--x-surface-2);
+}
+.simulatorTabs a {
+  padding: 8px 14px;
+  border-radius: 7px;
+  color: var(--x-text-muted);
+  font-size: var(--x-text-sm);
+  font-weight: 700;
+  text-decoration: none;
+}
+.simulatorTabs a[aria-current='page'] {
+  background: var(--x-surface);
+  color: var(--x-text);
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--x-text) 10%, transparent);
+}
+.stressLab {
+  scroll-margin-top: var(--x-space-5);
+}
+.stressVmSection {
+  display: grid;
+  gap: var(--x-space-3);
+}
+.stressSectionTitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--x-space-4);
+}
+.stressSectionTitle > div {
+  display: flex;
+  align-items: center;
+  gap: var(--x-space-3);
+}
+.stressSectionTitle > div > span {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--x-primary) 13%, var(--x-surface-2));
+  color: var(--x-primary);
+  font: 800 11px var(--x-font-mono);
+}
+.stressSectionTitle h2,
+.stressSectionTitle p {
+  margin: 0;
+}
+.stressSectionTitle h2 {
+  font-size: var(--x-text-lg);
+}
+.stressSectionTitle p,
+.stressSectionTitle small {
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+}
+.stressVmGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--x-space-3);
+}
+.stressVmGrid button {
+  position: relative;
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: var(--x-space-4);
+  border: 1px solid var(--x-border);
+  border-radius: 12px;
+  background: var(--x-surface);
+  color: var(--x-text);
+  text-align: left;
+  cursor: pointer;
+}
+.stressVmGrid button:hover {
+  border-color: var(--x-border-strong);
+  background: var(--x-surface-2);
+}
+.stressVmGrid button[data-selected='true'] {
+  border-color: var(--x-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--x-primary) 12%, transparent);
+}
+.stressVmGrid button > strong {
+  margin-top: 4px;
+  font-size: var(--x-text-md);
+}
+.stressVmGrid button > small {
+  overflow: hidden;
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stressVmGrid button > i {
+  position: absolute;
+  top: var(--x-space-3);
+  right: var(--x-space-3);
+  color: var(--x-ok);
+  font: normal 700 9px var(--x-font-mono);
+}
+.stressOsBadge {
+  width: fit-content;
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--x-primary) 11%, var(--x-surface-2));
+  color: var(--x-primary);
+  font: 800 9px var(--x-font-mono);
+  text-transform: uppercase;
+}
+.stressOsBadge[data-kind='linux'] {
+  background: color-mix(in srgb, var(--x-app-interaction) 12%, var(--x-surface-2));
+  color: var(--x-app-interaction);
+}
+.stressScenarioGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--x-space-3);
+  margin-top: var(--x-space-3);
+}
+.stressScenarioGrid[data-count='2'] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.stressScenarioGrid[data-count='1'] {
+  grid-template-columns: minmax(0, 1fr);
+}
+.stressScenarioGrid .stressControlCard {
+  padding: var(--x-space-4);
+  background: var(--x-surface);
+}
+.stressScenarioGrid .stressSubhead {
+  justify-content: flex-start;
+}
+.stressScenarioGrid .stressSubhead > div:last-child {
+  display: grid;
+  gap: 3px;
+}
+.stressScenarioGrid .stressSubhead p,
+.stressTelemetry .stressSubhead p {
+  margin: 0;
+  color: var(--x-text-muted);
+  font-size: 11px;
+}
+.stressScenarioIcon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--x-primary) 11%, var(--x-surface-2));
+  color: var(--x-primary);
+  font: 800 9px var(--x-font-mono);
+}
+.stressObservationGrid {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.75fr) minmax(0, 1.25fr);
+  gap: var(--x-space-3);
+  margin-top: var(--x-space-3);
+}
+.stressToolbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: var(--x-space-4);
+  margin-bottom: var(--x-space-4);
+}
+.stressToolbar label {
+  display: grid;
+  gap: 6px;
+  min-width: min(100%, 360px);
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+}
+.stressToolbar select {
+  min-height: 42px;
+  padding: 8px 36px 8px 12px;
+  border: 1px solid var(--x-border-strong);
+  border-radius: 9px;
+  background: var(--x-surface);
+  color: var(--x-text);
+  font: 700 var(--x-text-sm) inherit;
+}
+.stressVmMeta {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+}
+.stressVmMeta strong {
+  color: var(--x-primary);
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-sm);
+}
+.stressVmMeta span {
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+}
+.stressWorkspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(340px, 0.85fr);
+  gap: var(--x-space-4);
+}
+.stressControls,
+.stressObserve {
+  display: grid;
+  align-content: start;
+  gap: var(--x-space-3);
+}
+.stressControlCard,
+.stressTelemetry,
+.stressExecution {
+  display: grid;
+  gap: var(--x-space-3);
+  padding: var(--x-space-3);
+  border: 1px solid var(--x-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--x-surface-2) 76%, transparent);
+}
+.stressSubhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--x-space-3);
+}
+.stressSubhead strong {
+  font-size: var(--x-text-sm);
+}
+.stressSubhead span {
+  color: var(--x-text-muted);
+  font-family: var(--x-font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+.stressFields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--x-space-2);
+}
+.stressField {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.stressField > span {
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+}
+.stressField > small {
+  color: var(--x-text-muted);
+  font-size: 10px;
+}
+.stressGauge {
+  display: grid;
+  gap: 7px;
+}
+.stressGauge > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.stressGauge span {
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+}
+.stressGauge strong {
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-lg);
+}
+.stressTableWrap {
+  overflow-x: auto;
+}
+.stressExecution .table {
+  min-width: 440px;
+}
+.stressCommand {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--x-space-3);
+  margin-top: var(--x-space-3);
+  padding: var(--x-space-3);
+  border: 1px solid color-mix(in srgb, var(--x-ok) 35%, var(--x-border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--x-ok) 8%, transparent);
+  color: var(--x-ok);
+  font-size: var(--x-text-sm);
+}
+.stressCommand[data-tone='fault'] {
+  border-color: color-mix(in srgb, var(--x-fault) 35%, var(--x-border));
+  background: color-mix(in srgb, var(--x-fault) 8%, transparent);
+  color: var(--x-fault);
+}
+.stressCommand code {
+  color: var(--x-text-muted);
+  font-size: 10px;
+}
+@media (max-width: 1000px) {
+  .stressWorkspace {
+    grid-template-columns: 1fr;
+  }
+  .stressScenarioGrid,
+  .stressScenarioGrid[data-count='2'],
+  .stressScenarioGrid[data-count='1'],
+  .stressObservationGrid {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 640px) {
+  .stressVmGrid {
+    grid-template-columns: 1fr;
+  }
+  .stressToolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .stressVmMeta {
+    justify-items: start;
+  }
+  .stressFields {
+    grid-template-columns: 1fr;
+  }
+  .stressCommand {
+    grid-template-columns: 1fr;
+  }
+}
 .rowActions {
   display: flex;
   gap: var(--x-space-1);
@@ -599,6 +930,19 @@ button.chip:hover:not(.chipOn) {
   gap: var(--x-space-3);
   min-width: 0;
 }
+/* 시뮬레이터 없음 (-262) — 끊기면 카드를 지우지 않고 알리고 조작을 막는다 */
+.simOff {
+  margin: 0 0 var(--x-space-3);
+  padding: var(--x-space-2) var(--x-space-3);
+  border-radius: var(--x-radius-sm);
+  border: 1px solid var(--x-border);
+  color: var(--x-text-muted);
+}
+.simControl[aria-disabled='true'] .simMap {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
 .simGroup {
   display: grid;
   gap: var(--x-space-2);
@@ -733,7 +1077,7 @@ button.chip:hover:not(.chipOn) {
 }
 .overviewSummary {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   overflow: hidden;
   border: 1px solid var(--x-border);
   border-radius: 14px;
@@ -894,9 +1238,11 @@ button.chip:hover:not(.chipOn) {
   display: flex;
   align-items: center;
   gap: 7px;
+  overflow-wrap: anywhere;
   font-size: var(--x-text-sm);
 }
 .statusLine strong i {
+  flex: none;
   width: 8px;
   height: 8px;
   border-radius: 50%;
@@ -983,15 +1329,6 @@ button.chip:hover:not(.chipOn) {
   .vmGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .overviewSummary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .summaryItem:nth-child(2) {
-    border-right: 0;
-  }
-  .summaryItem:nth-child(-n + 2) {
-    border-bottom: 1px solid var(--x-border);
-  }
 }
 /* ---- S15P31E110-311 VM별 RX/TX 데이터 Pool ---- */
 .memoryHeadingMeta {
@@ -1012,11 +1349,12 @@ button.chip:hover:not(.chipOn) {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--x-space-4);
-  align-items: stretch;
+  /* VM별 상세 길이가 달라도 다른 카드에 빈 영역을 만들지 않는다. */
+  align-items: start;
 }
 .memoryVmCard {
   min-width: 0;
-  height: 100%;
+  height: auto;
   border-top: 4px solid var(--vm-accent);
 }
 .memoryVmTitle {
@@ -1036,6 +1374,12 @@ button.chip:hover:not(.chipOn) {
   display: grid;
   justify-items: end;
   gap: 4px;
+}
+.publisherStatus {
+  margin-bottom: var(--x-space-3);
+}
+.publisherStatus strong {
+  font-weight: 600;
 }
 .memoryNotice {
   margin-bottom: var(--x-space-3);
@@ -1082,6 +1426,11 @@ button.chip:hover:not(.chipOn) {
   height: 9px;
   border-radius: 50%;
   background: var(--pool-accent);
+}
+/* 오른쪽 열은 %·여유 중 긴 쪽 폭을 따르므로, 글자 길이와 상관없이 오른쪽 끝에 붙인다 */
+.poolSummaryHead > strong,
+.linuxMemorySummaryHead > strong {
+  justify-self: end;
 }
 .poolSummaryHead > strong {
   color: var(--pool-accent);
@@ -1164,6 +1513,57 @@ button.chip:hover:not(.chipOn) {
 .memoryLegend span[data-tone='tx'] i {
   background: var(--tx-accent);
 }
+/* Network 탭 그래프(현재 값을 보이는 범례, data-values)·툴팁의 라벨과 값은 선과 같은 색. xenova 테마 그래프 배경 대비 RX 10.2:1, TX 5.6:1 (AA 4.5:1 이상) */
+.memoryLegend[data-values] span[data-tone='rx'],
+.chartTooltip span[data-tone='rx'] {
+  color: var(--rx-accent);
+}
+.memoryLegend[data-values] span[data-tone='tx'],
+.chartTooltip span[data-tone='tx'] {
+  color: var(--tx-accent);
+}
+.memoryLegend[data-values] b,
+.chartTooltip b {
+  font-weight: 800;
+}
+.chartPlot {
+  position: relative;
+  cursor: crosshair;
+}
+.chartCursor {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--x-text-muted);
+  pointer-events: none;
+}
+.chartTooltip {
+  position: absolute;
+  top: var(--x-space-1);
+  z-index: 1;
+  display: grid;
+  gap: var(--x-space-1);
+  padding: var(--x-space-1) var(--x-space-2);
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius-sm);
+  background: var(--x-surface);
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-xs);
+  white-space: nowrap;
+  pointer-events: none;
+}
+/* 기준선 오른쪽 끝 근처에서는 왼쪽으로 펼쳐 그래프 밖으로 잘리지 않게 한다 */
+.chartTooltip[data-side='right'] {
+  margin-left: var(--x-space-2);
+}
+.chartTooltip[data-side='left'] {
+  transform: translateX(-100%);
+  margin-left: calc(-1 * var(--x-space-2));
+}
+.chartTooltip time {
+  color: var(--x-text-muted);
+}
 .memoryChart {
   position: relative;
   min-height: 170px;
@@ -1217,6 +1617,10 @@ button.chip:hover:not(.chipOn) {
   color: var(--x-text-muted);
   font-family: var(--x-font-mono);
   font-size: 10px;
+}
+.memoryChartBlock + .linuxMemorySummary,
+.memoryChartBlock + .poolSummaryGrid {
+  margin-top: var(--x-space-3);
 }
 .counterGrid {
   display: grid;
@@ -1304,6 +1708,26 @@ button.chip:hover:not(.chipOn) {
   font-family: var(--x-font-mono);
   font-size: var(--x-text-xs);
 }
+.memoryBasisNote {
+  color: var(--x-text-muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+.memoryBasisBadge {
+  margin-left: var(--x-space-2);
+  padding: 0 var(--x-space-2);
+  border: 1px solid var(--x-border);
+  border-radius: 999px;
+  color: var(--x-text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  vertical-align: middle;
+  cursor: help;
+}
+/* 사용률 그래프 바로 아래 Pool 요약도 다른 블록과 같은 간격(.memoryChartBlock margin-top)을 둔다 */
+.memoryChartBlock + .poolSummaryGrid {
+  margin-top: var(--x-space-3);
+}
 .linuxMemoryBar {
   grid-column: 1 / -1;
   height: 8px;
@@ -1337,6 +1761,136 @@ button.chip:hover:not(.chipOn) {
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 2;
+}
+.appMemorySection {
+  margin-bottom: var(--x-space-4);
+}
+.appMemorySection > header,
+.appMemoryPool > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--x-space-2);
+  flex-wrap: wrap;
+}
+.appMemorySection h3 {
+  margin: 0;
+}
+.appMemorySection small,
+.appMemoryTime {
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+}
+.appMemoryGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--x-space-3);
+}
+.memoryGroup {
+  margin-top: var(--x-space-4);
+}
+.memoryGroup h4 {
+  margin: 0 0 var(--x-space-2);
+}
+.memoryGroupBadge {
+  display: inline-block;
+  padding: 3px 10px;
+  border: 1px solid var(--x-border);
+  border-radius: 999px;
+  font-size: var(--x-text-xs);
+  color: var(--x-text-muted);
+}
+.bufferState {
+  display: grid;
+  gap: 4px;
+  margin-top: var(--x-space-2);
+  font-size: var(--x-text-xs);
+}
+.bufferState span,
+.bufferState small {
+  color: var(--x-text-muted);
+}
+.memorySharedNetwork {
+  grid-column: 1 / -1;
+}
+.managedRamSection {
+  margin-bottom: var(--x-space-4);
+}
+.managedRamNotice {
+  grid-column: 1 / -1;
+}
+.appMemoryPool {
+  min-width: 0;
+  padding: var(--x-space-3);
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius);
+  background: var(--x-surface-2);
+  --pool-accent: var(--vm-accent);
+}
+.appMemoryPool header b {
+  color: var(--vm-accent);
+  font-family: var(--x-font-mono);
+}
+.appMemoryAmount {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: var(--x-space-2) 0;
+  font-family: var(--x-font-mono);
+}
+.appMemoryAmount > strong {
+  font-size: var(--x-text-lg);
+}
+.appMemoryAmount > span,
+.appMemoryPool dt {
+  color: var(--x-text-muted);
+}
+.appMemoryPool dl {
+  margin: var(--x-space-3) 0;
+  display: grid;
+  gap: 6px;
+  font-size: var(--x-text-xs);
+}
+.appMemoryPool dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--x-space-2);
+}
+.appMemoryPool dd {
+  margin: 0;
+  font-family: var(--x-font-mono);
+  overflow-wrap: anywhere;
+}
+.appMemoryNotice {
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+}
+.appPoolChart svg {
+  display: block;
+  width: 100%;
+  height: 80px;
+  overflow: visible;
+}
+.appPoolChart > div:last-child {
+  display: flex;
+  justify-content: space-between;
+  color: var(--x-text-muted);
+  font-size: 10px;
+}
+.appPoolChartEmpty {
+  display: grid;
+  place-items: center;
+  min-height: 80px;
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+}
+.appMemoryDot {
+  fill: var(--vm-accent);
+}
+.appMemoryTime {
+  display: block;
+  margin-top: var(--x-space-2);
 }
 @media (max-width: 1200px) {
   .memoryVmGrid {
@@ -1467,21 +2021,6 @@ button.chip:hover:not(.chipOn) {
 .resourceFacts small {
   color: var(--x-text-muted);
   font-size: var(--x-text-xs);
-}
-.telemetryEmpty {
-  display: grid;
-  place-items: center;
-  gap: var(--x-space-2);
-  min-height: 160px;
-  padding: var(--x-space-5);
-  border: 1px dashed var(--x-border);
-  border-radius: var(--x-radius-sm);
-  color: var(--x-text-muted);
-  text-align: center;
-}
-.telemetryEmpty strong {
-  color: var(--x-text);
-  font-size: var(--x-text-lg);
 }
 .detailEvents {
   display: grid;
@@ -1982,7 +2521,7 @@ button.chip:hover:not(.chipOn) {
 }
 
 .headingLink {
-  padding: 8px 12px;
+  padding: var(--x-space-2) var(--x-space-3);
   border: 1px solid var(--x-border);
   border-radius: var(--x-radius-sm);
   color: var(--x-text-muted);
@@ -2402,6 +2941,129 @@ button.chip:hover:not(.chipOn) {
 .createError > span {
   color: var(--x-text-muted);
 }
+.createProgress {
+  display: grid;
+  gap: var(--x-space-4);
+  padding: var(--x-space-4);
+  border: 1px solid color-mix(in srgb, var(--x-primary) 48%, var(--x-border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--x-primary) 7%, var(--x-surface-2));
+}
+.createProgressHeading {
+  display: flex;
+  align-items: center;
+  gap: var(--x-space-3);
+}
+.createProgressHeading > i,
+.pendingCreationSummary > i,
+.vmCreationCardNotice > i {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  border: 2px solid color-mix(in srgb, var(--x-primary) 28%, transparent);
+  border-top-color: var(--x-primary);
+  border-radius: 50%;
+  animation: vmOperationSpin 0.8s linear infinite;
+}
+.createProgressHeading > div {
+  display: grid;
+  gap: 3px;
+}
+.createProgressHeading strong {
+  color: var(--x-text);
+  font-size: var(--x-text-md);
+}
+.createProgressHeading span,
+.createProgress p {
+  color: var(--x-text-muted);
+  font-size: var(--x-text-sm);
+}
+.createProgress dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--x-border);
+  border-radius: var(--x-radius-sm);
+}
+.createProgress dl > div {
+  display: grid;
+  gap: 5px;
+  padding: var(--x-space-3);
+  border-right: 1px solid var(--x-border);
+}
+.createProgress dl > div:last-child {
+  border-right: 0;
+}
+.createProgress dt {
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+}
+.createProgress dd {
+  margin: 0;
+  color: var(--x-text);
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-lg);
+  font-weight: 800;
+}
+.createProgress p {
+  margin: 0;
+  line-height: 1.55;
+}
+.createTimeoutActions {
+  display: flex;
+  justify-content: flex-end;
+}
+.createLeaveNotice {
+  display: grid;
+  gap: var(--x-space-2);
+  padding: var(--x-space-3);
+}
+.createLeaveNotice strong {
+  color: var(--x-text);
+  line-height: 1.55;
+}
+.createLeaveNotice p {
+  margin: 0;
+  color: var(--x-text-muted);
+  font-size: var(--x-text-sm);
+}
+.pendingCreationSummary {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--x-space-3);
+  padding: var(--x-space-3) var(--x-space-4);
+  border: 1px solid color-mix(in srgb, var(--x-primary) 45%, var(--x-border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--x-primary) 7%, var(--x-surface-2));
+}
+.pendingCreationSummary > div {
+  display: grid;
+  gap: 3px;
+}
+.pendingCreationSummary strong,
+.pendingCreationSummary span {
+  color: var(--x-text);
+}
+.pendingCreationSummary span,
+.pendingCreationSummary small {
+  font-size: var(--x-text-xs);
+}
+.pendingCreationSummary small {
+  color: var(--x-text-muted);
+}
+.vmCreationCardNotice {
+  display: flex;
+  align-items: center;
+  gap: var(--x-space-2);
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--x-primary) 42%, var(--x-border));
+  border-radius: var(--x-radius-sm);
+  background: color-mix(in srgb, var(--x-primary) 7%, var(--x-surface-2));
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+}
 .createSuccess {
   display: grid;
   justify-items: center;
@@ -2484,6 +3146,22 @@ button.chip:hover:not(.chipOn) {
   .createStageHead {
     align-items: flex-start;
     flex-direction: column;
+  }
+  .createProgress dl {
+    grid-template-columns: 1fr;
+  }
+  .createProgress dl > div {
+    border-right: 0;
+    border-bottom: 1px solid var(--x-border);
+  }
+  .createProgress dl > div:last-child {
+    border-bottom: 0;
+  }
+  .pendingCreationSummary {
+    grid-template-columns: auto 1fr;
+  }
+  .pendingCreationSummary > small {
+    grid-column: 2;
   }
   .controlHeadingActions {
     width: 100%;
@@ -3360,4 +4038,151 @@ button.chip:hover:not(.chipOn) {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
+
+/* ---- Network 탭 카드 제목·상태 줄 ---- */
+/* 부제("인터랙션 · Debian 13")는 한 줄. 좁으면 말줄임 */
+.netVmTitle {
+  min-width: 0;
+}
+.netVmTitle small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 제목 아래 얇은 상태 줄. 세 카드 모두 한 줄 높이로 같은 자리에 온다 */
+.netStatusLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--x-space-1) var(--x-space-4);
+  min-height: calc(var(--x-text-xs) * 1.5);
+  margin-bottom: var(--x-space-3);
+  font-size: var(--x-text-xs);
+  line-height: 1.5;
+}
+/* 알약 배경 없이 상태 색 점 + 작은 글자. 글자는 본문 색이라 대비가 상태 색과 무관하다 */
+.netStatusItem {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--x-space-1);
+  color: var(--x-text);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: help;
+}
+.netStatusItem i {
+  width: 0.6em;
+  height: 0.6em;
+  border-radius: 50%;
+  background: var(--x-stopped);
+}
+.netStatusItem[data-tone='ok'] i {
+  background: var(--x-ok);
+}
+.netStatusItem[data-tone='recovering'] i {
+  background: var(--x-recovering);
+}
+.netStatusItem[data-tone='fault'] i {
+  background: var(--x-fault);
+}
+
+/* ---- Network 탭 RX/TX 표 (행 이름 | 간격 | RX 수신 | TX 송신). 숫자는 선과 같은 색, 단위는 작고 흐리게 ---- */
+/* 아래 그래프 블록(.memoryChartBlock)과 같은 좌우 안쪽 여백·테두리 폭을 두어,
+   행 이름은 그래프 제목과, TX 열 오른쪽 끝은 그래프 범례 끝과 같은 세로선에 온다 */
+.netTableBlock {
+  container-type: inline-size;
+  overflow-x: auto;
+  padding: 0 var(--x-space-3);
+  border: 1px solid transparent;
+  border-block: 0;
+}
+/* table-layout: fixed + colgroup → 열 너비가 값이 아니라 아래 간격 변수로만 정해진다.
+   RX·TX 열은 오른쪽부터 같은 폭으로 붙고, 남는 너비는 빈 간격 열이 가져간다.
+   그래서 같은 너비의 Zephyr·Linux 카드에서 RX·TX 열 시작 위치가 같고, 값이 바뀌어도 움직이지 않는다 */
+.netTable {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+/* 행 이름 열: "Pool"·"패킷" 이 들어가는 폭 (32px + 12px) */
+.netLabelCol {
+  width: calc(var(--x-space-6) + var(--x-space-3));
+}
+/* RX·TX 열: 가장 긴 값 "8388.6 KiB/s"(≈106px)와 다음 열 사이 여백이 들어가는 폭 (32px × 4 = 128px) */
+.netValueCol {
+  width: calc(var(--x-space-6) * 4);
+}
+.netTable th,
+.netTable td {
+  overflow: hidden;
+  padding: var(--x-space-1) 0;
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+}
+.netTable tbody th,
+.netTable thead td:first-child {
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+  font-weight: 500;
+}
+/* 제목은 값과 같은 왼쪽 시작점 */
+.netTable thead th {
+  font-size: var(--x-text-xs);
+  font-weight: 700;
+}
+.netTable .netGap {
+  padding: 0;
+}
+/* xenova 테마 카드 배경 대비: RX 11.4:1, TX 6.3:1, 주의 8.2:1, 위험 5.8:1, 단위(muted) 7.5:1 */
+.netTable [data-tone='rx'] {
+  color: var(--rx-accent);
+}
+.netTable [data-tone='tx'] {
+  color: var(--tx-accent);
+}
+.netTable td[data-level='warn'] {
+  color: var(--x-recovering);
+}
+.netTable td[data-level='fault'] {
+  color: var(--x-fault);
+}
+.netNumber {
+  display: flex;
+  align-items: baseline;
+  gap: var(--x-space-1);
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-lg);
+  font-weight: 800;
+  white-space: nowrap;
+}
+.netNumber small {
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+  font-weight: 500;
+}
+/* 보조 줄은 열 폭 안에서 말줄임, 전체 문구는 title 로 본다 */
+.netNote {
+  display: block;
+  overflow: hidden;
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 좁은 카드(표 영역이 행 이름 + RX + TX 폭 합계 300px 미만)에서는 숫자를 16px 로 줄이고
+   RX·TX 열도 32px × 3 = 96px 로 함께 줄인다. 그보다 더 좁으면 표 영역 안에서만 가로 스크롤된다 */
+@container (max-width: 300px) {
+  .netValueCol {
+    width: calc(var(--x-space-6) * 3);
+  }
+  .netNumber {
+    font-size: var(--x-text-md);
+  }
+}
+/* 수치 표와 아래 그래프 사이는 카드 사이 간격(--x-space-4)보다 한 단계 넓게 */
+.netTableBlock + .memoryChartBlock {
+  margin-top: var(--x-space-5);
 }

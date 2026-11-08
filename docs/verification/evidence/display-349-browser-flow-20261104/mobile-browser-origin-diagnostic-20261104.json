@@ -1,0 +1,26 @@
+{
+  "server_started": true,
+  "url": "http://127.0.0.1:18756/display/mobile",
+  "synthetic_only": true,
+  "phase": "preparing",
+  "feed_available": true,
+  "sequence": 0,
+  "test_clock_offset_s": 0.0,
+  "code_remaining_s": 95,
+  "session_valid": false,
+  "requests": {
+    "GET /display/mobile 303": 1,
+    "GET /connect 200": 1,
+    "GET /favicon.ico 404": 1,
+    "POST origin null": 1,
+    "POST /connect 403": 1
+  },
+  "upstream_requests": {},
+  "operations": [
+    "status",
+    "stop"
+  ],
+  "listener_closed": true,
+  "product_code_seconds": 120,
+  "product_session_seconds": 28800
+}
