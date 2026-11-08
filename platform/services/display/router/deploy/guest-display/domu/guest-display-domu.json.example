@@ -1,0 +1,12 @@
+{
+  "web_root": "/opt/xenova/display-web",
+  "app_port": 8086,
+  "data_host": "192.168.77.1",
+  "data_port": 8085,
+  "data_token_file": "/etc/xenova/guest-display/guest-data.token",
+  "page": "/display/mobile",
+  "display": ":0",
+  "width": 1280,
+  "height": 720,
+  "chromium": "/usr/bin/chromium"
+}
