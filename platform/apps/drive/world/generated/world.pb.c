@@ -42,4 +42,55 @@ PB_BIND(xenova_drive_AppliedState, xenova_drive_AppliedState, 2)
 PB_BIND(xenova_drive_DriveLink, xenova_drive_DriveLink, 4)
 
 
+PB_BIND(xenova_drive_LaneGeometry, xenova_drive_LaneGeometry, 2)
+
+
+PB_BIND(xenova_drive_LaneModel, xenova_drive_LaneModel, 2)
+
+
+PB_BIND(xenova_drive_ParkingSlot, xenova_drive_ParkingSlot, AUTO)
+
+
+PB_BIND(xenova_drive_ParkingSetMeta, xenova_drive_ParkingSetMeta, AUTO)
+
+
+PB_BIND(xenova_drive_MapLocalization, xenova_drive_MapLocalization, AUTO)
+
+
+PB_BIND(xenova_drive_SceneAdmissionRef, xenova_drive_SceneAdmissionRef, AUTO)
+
+
+PB_BIND(xenova_drive_MissionExecution, xenova_drive_MissionExecution, 2)
+
+
+PB_BIND(xenova_drive_GearSegment, xenova_drive_GearSegment, AUTO)
+
+
+PB_BIND(xenova_drive_DirectionGateRef, xenova_drive_DirectionGateRef, AUTO)
+
+
+PB_BIND(xenova_drive_MissionGrant, xenova_drive_MissionGrant, 2)
+
+
+PB_BIND(xenova_drive_MissionBudgetRequest, xenova_drive_MissionBudgetRequest, AUTO)
+
+
+PB_BIND(xenova_drive_MissionBudgetReply, xenova_drive_MissionBudgetReply, 2)
+
+
+PB_BIND(xenova_drive_MapperClockProbe, xenova_drive_MapperClockProbe, 2)
+
+
+PB_BIND(xenova_drive_MapperClockReply, xenova_drive_MapperClockReply, 2)
+
+
+PB_BIND(xenova_drive_SceneGrant, xenova_drive_SceneGrant, 2)
+
+
+PB_BIND(xenova_drive_SurveySummary, xenova_drive_SurveySummary, AUTO)
+
+
+PB_BIND(xenova_drive_TofObservation, xenova_drive_TofObservation, 2)
+
+
 

@@ -114,6 +114,7 @@ Python 공통 클라이언트의 내부 `Message.received_monotonic`은 Paho 수
 - 프로세스 목록과 수집 상태는 이 표본에 없다. Spring 연동은 VM 종류에 따라 출처를 구분하고 메트릭만 저장하며, 숫자로 바꾸기 전에 누적값의 원 정밀도를 보존해야 한다. 자원 지표 수신을 Agent나 앱 생존으로 해석하지 않는다.
 - 직접 계측한 `rx_bytes_per_s`와 패킷·힙·풀·스레드 상세는 [Telemetry 2.1](../../platform/guests/zephyr/telemetry/contract/CONTRACT.md)을 따른다.
 
+<a id="demo-commands"></a>
 ### 3.2 데모 명령 (MQTT-04·05)
 
 격리·자동 복구 시연용 명령이다. Linux의 `stress`·`agent_exit`는 에이전트 설정 `XENOVA_AGENT_DEMO_COMMANDS=1`일 때만 실행한다. Zephyr drive-v1은 같은 VM command 토픽에서 `auto_delay`를 실행한다. CPU 사용률과 주행 deadline 장애 시연은 AUTO 스레드가 busy wait하는 `auto_delay`로 수행한다.
@@ -152,8 +153,10 @@ Python 공통 클라이언트의 내부 `Message.received_monotonic`은 Paho 수
 - 결과를 받지 못하면(만료까지) 보낸 쪽은 결과 없음으로 처리한다. 같은 `command_id` 로 다시 보내면 실행 없이 마지막 결과만 돌아온다
 - MQTT-05 는 QoS 1 이라 같은 결과가 두 번 이상 올 수 있다(재전달, 재시작 뒤 재제출). 백엔드는 `(vm_id, command_id)` 를 한 명령의 집계 키로 쓴다. 같은 `status`·같은 payload 의 재전달은 무시하고, `RUNNING` → `SUCCEEDED`/`FAILED` 는 정상 상태 전이로 처리한다. 종결 상태 뒤에 다른 종결 상태가 오면 계약 위반으로 기록한다
 - Zephyr `auto_delay`는 UTC 시계가 없으므로 `expires_at`의 형식과 상한은 명령을 발행하는 백엔드가 검증한다. drive-v1은 현재 boot 일치, retained 여부와 파라미터를 검증하고 단조 시계로 실행 시간을 제한한다. 결과의 UTC 시각 필드는 null이다.
-- 지연 주입 중 AUTO 계산이 release deadline을 연속 5회 넘으면 drive-v1은 해당 VM의 `apps/autonomous/events`에 `vm.trust`를 QoS 1로 한 번 발행한다. payload는 `trust=UNTRUSTED`, `reason=AUTO_DEADLINE_MISS`, `consecutive_misses=5`, `command_id`를 담는다. Gateway는 현재 AUTO 출력 owner의 유효한 이벤트만 받는다. 같은 세대의 미러 VM이 hold 조건까지 충족했으면 Authority 세대를 한 번 증가시키며 기존 owner 차단과 미러 owner 선정을 함께 기록하고, 미러가 새 세대를 적용한 뒤 출력을 허용한다. 준비된 미러가 없으면 `SAFE_STOP`으로 전환한다.
-- Recovery Worker도 binding 검증을 통과한 같은 `vm.trust`를 현재 execution에 고정된 `VM_UNTRUSTED` 판정으로 소비한다. heartbeat가 계속 와도 그 execution의 신뢰 실패는 해제되지 않으며, 기존 Gateway protection과 `recover_once`를 거쳐 새 execution으로 재시작한다. Rejoin Coordinator는 새 execution의 receipt·boot/app instance를 다시 적용하고 현재 Authority generation의 readiness/lifecycle이 hold 조건을 충족할 때까지 보호와 `distrusted` 기록을 유지한다. 이후 protection을 RELEASED로 끝내고 해당 VM을 출력 권한 없는 Standby 후보로 합류시킨다.
+- 현재 소스의 FW1.0.33 후보는 AUTO 지연·heap 비율을 `vm.trust`로 발행하지 않는다. 실제 AUTO 작업이 원 release deadline을 넘으면 해당 결과를 즉시 제한하고 기존 `app.lifecycle`의 NOT_READY로 보고한다. 원 errno·health failure·주입 명령의 결과는 각각 보존한다. 명령의 `SUCCEEDED`는 설정된 주입 기간의 종결이며 실제 AUTO 계산·준비·승계 성공이 아니다.
+- `AUTO_DEADLINE_MISS`의 `consecutive_misses`, `command_id`는 AUTO 기능 실패 근거다. 현재 binding·boot·app과 일치하는 비-retained 보고만 소비한다. Gateway는 해당 AUTO 자격을 제한하고 현재 후보로 승계/정지를 판단하며, Worker는 이를 진단으로 보관하고 이 보고만으로 `VM_UNTRUSTED` latch·새 복구 시도를 만들지 않는다.
+- 과거 Authority `distrusted`와 원 보호 기록은 기존 형식으로 읽고 자동 변환·삭제하지 않는다. 실제 VM 장애의 원 복구는 Gateway 보호→기존 `recover_once`→새 execution의 receipt·binding·준비 확인→정당한 protection 종결→Standby 재합류를 따른다. 현재 Active를 자동 탈환하지 않는다. 입력/기능 회복의 AUTO 재개는 현재 Active와 기존 명시 요청·카운트다운·제어 적용을 사용하고 사용자 `manual_hold`를 보존한다.
+- 관측창 종료는 주입 기간 종료·취소·미수락의 근거가 아니다. 동일 요청은 원 key·boot·명세로 회수하며, 실행 교체 뒤 새 boot에 명령을 자동 재주입하지 않는다. 같은 원 표본이나 같은 결과 재전달을 새 위반/새 계산으로 세지 않는다. MQTT-04/05 필드·토픽과 Telemetry 2.1 형식은 바꾸지 않는다.
 
 ## 4. RC카 구성과 app_id
 

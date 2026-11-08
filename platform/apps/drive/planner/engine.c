@@ -84,11 +84,57 @@ enum de_result de_vehicle(struct drive_engine *e,const dw_vehicle *vehicle){
  enum dw_result rc=dw_odom_add(&e->odometry,vehicle);
  return !rc?DE_OK:rc==DW_BUSY?DE_BUSY:DE_POSE;
 }
+static bool grant_primitive(const xenova_drive_MissionGrant *grant,const char *expected){
+ static const char hex[]="0123456789abcdef";
+ if(strlen(expected)!=64)return false;
+ for(size_t i=0;i<32;i++)if(expected[2*i]!=hex[grant->primitive.bytes[i]>>4]||expected[2*i+1]!=hex[grant->primitive.bytes[i]&15])return false;
+ return true;
+}
+enum de_result de_mission(struct drive_engine *e,const xenova_drive_MissionGrant *grant,uint64_t now){
+ if(!grant){e->has_grant=false;return DE_OK;}
+ if(dw_mission_grant_validate(grant)||grant->issued_pi_us>now||strcmp(grant->configuration,e->config->id)||
+    strcmp(grant->calibration,e->config->calibration)||strcmp(grant->vehicle,e->config->vehicle)||
+    !grant_primitive(grant,e->assets->sha256))return DE_CONFIGURATION;
+ bool changed=!e->has_grant||e->grant.grant_revision!=grant->grant_revision||
+  e->grant.mission_revision!=grant->mission_revision||memcmp(e->grant.mission_id.bytes,grant->mission_id.bytes,16)||
+  e->grant.admitted!=grant->admitted||e->grant.cancel_fence_revision!=grant->cancel_fence_revision;
+ if(changed&&e->requested==UINT32_MAX)return DE_LIMIT;
+ e->grant=*grant;e->has_grant=true;
+ if(changed)atomic_fetch_add(&e->requested,1);
+ return DE_OK;
+}
+static void mission_metadata(struct lp_path *path,const xenova_drive_MissionGrant *g){
+ struct lp_execution *out=&path->execution;memset(out,0,sizeof(*out));out->present=true;out->features=DW_STATE_FEATURES;
+ xenova_drive_MissionExecution *m=&out->mission;
+ m->mission_id.size=m->operator_request_nonce.size=m->scene_admission_id.size=16;
+ memcpy(m->mission_id.bytes,g->mission_id.bytes,16);memcpy(m->operator_request_nonce.bytes,g->operator_request_nonce.bytes,16);
+ memcpy(m->scene_admission_id.bytes,g->scene_admission_id.bytes,16);
+ m->mission_revision=g->mission_revision;m->kind=g->kind;m->phase=g->kind==1&&g->admitted?10:0;
+ m->grant_revision=g->grant_revision;m->cancel_fence_revision=g->cancel_fence_revision;m->scene_admission_revision=g->scene_revision;
+ /* 새 parking phase/goal은 만들지 않는다. 후속 parking 계산 owner가 생성한다. */
+ float travel=0;for(size_t i=1;i<path->count;i++)travel+=hypotf(path->points[i].pose.x-path->points[i-1].pose.x,
+                                                          path->points[i].pose.y-path->points[i-1].pose.y);
+ if(travel>0){out->segments_count=1;out->segments[0]=(xenova_drive_GearSegment){0,(uint32_t)path->count-1,1};}
+}
 static enum de_result inputs(struct drive_engine *e,const struct dw_snapshot *map,uint64_t now,dw_pose *pose,dw_vehicle *vehicle,uint64_t *deadline){
  if(dw_snapshot_time(map,now,(uint64_t)e->config->live_age_us,deadline))return DE_EXPIRED;
  enum dw_result rc=dw_current_pose(&map->world,&e->odometry,now,(uint64_t)e->config->pose_age_us,pose,vehicle);
  if(rc)return rc==DW_BUSY?DE_BUSY:DE_POSE;
- if(vehicle->position_error_m>e->config->max_position_error||vehicle->heading_error_rad>e->config->max_heading_error)return DE_POSE;
+ if(map->world.required_features&DW_LOCALIZATION_BOUNDS){
+  const xenova_drive_MapLocalization *loc=&map->world.localization;
+  if(!map->world.has_localization||loc->quality!=1||!loc->valid_for_us||map->observed_upper_age_us>map->received_us)return DE_POSE;
+  uint64_t start=map->received_us-map->observed_upper_age_us;
+  if(loc->observed_mapper_us>=map->world.observed_us){
+   uint64_t delta=loc->observed_mapper_us-map->world.observed_us;if(delta>UINT64_MAX-start)return DE_CLOCK;start+=delta;
+  }else{uint64_t delta=map->world.observed_us-loc->observed_mapper_us;if(delta>start)return DE_CLOCK;start-=delta;}
+  if(loc->valid_for_us>UINT64_MAX-start||now<start||now>=start+loc->valid_for_us)return DE_EXPIRED;
+  if(deadline&&*deadline>start+loc->valid_for_us)*deadline=start+loc->valid_for_us;
+  float age=(float)((double)(now-start)/1000000.);
+  vehicle->position_error_m+=loc->anchor_position_bound_m+loc->geometry_position_bound_m+age*loc->position_drift_bound_mps;
+  vehicle->heading_error_rad+=loc->anchor_heading_bound_rad+loc->geometry_heading_bound_rad+age*loc->heading_drift_bound_rps;
+ }
+ if(!isfinite(vehicle->position_error_m)||!isfinite(vehicle->heading_error_rad)||
+    vehicle->position_error_m>e->config->max_position_error||vehicle->heading_error_rad>e->config->max_heading_error)return DE_POSE;
  return DE_OK;
 }
 enum de_result de_receive_poll(struct drive_engine *e,uint64_t now){
@@ -118,6 +164,9 @@ enum de_result de_plan_start(struct drive_engine *e,uint64_t now,struct lp_budge
  if(!request||request==e->started)return DE_WAITING;
  struct dw_handle h;const struct dw_snapshot *map;
  enum dw_result dr=dw_acquire(&e->maps,&h,&map);if(dr)return DE_MAP;
+ if((map->world.required_features&DW_LANE_MODEL)&&e->has_grant&&(!e->grant.admitted||e->grant.kind!=1)){
+  (void)dw_release(&e->maps,h);return DE_WAITING;
+ }
  dw_pose pose,goal;dw_vehicle vehicle={0};enum de_result rc=inputs(e,map,now,&pose,&vehicle,NULL);
  float terminal_sweep=.5f*e->config->primitive_speed*e->config->primitive_duration/(LP_PRIMITIVE_SAMPLES-1);
  /* The terminal node may retain a valid nonzero heading. A front-only
@@ -153,7 +202,10 @@ enum de_result de_plan_start(struct drive_engine *e,uint64_t now,struct lp_budge
   struct de_reference previous;const struct lp_path *old;
   if(!de_path_acquire(e,&previous,&old)){
    struct lp_metrics checked={0};
-   bool same_intent=(old->direction!=0)==e->maneuver_active&&
+   bool same_mission=!(map->world.required_features&DW_LANE_MODEL)||!e->has_grant||(old->execution.present&&old->execution.mission.grant_revision==e->grant.grant_revision&&
+     old->execution.mission.mission_revision==e->grant.mission_revision&&
+     !memcmp(old->execution.mission.mission_id.bytes,e->grant.mission_id.bytes,16));
+   bool same_intent=same_mission&&((old->direction!=0)==e->maneuver_active)&&
                     old->merge_passed_reference_revision==e->merge_passed_reference_revision;
    float remaining=lp_path_remaining(old,pose,NULL);
    bool same_goal=hypotf(goal.x-old->goal.x,goal.y-old->goal.y)<e->config->goal_distance||remaining>replan_distance;
@@ -167,6 +219,7 @@ enum de_result de_plan_start(struct drive_engine *e,uint64_t now,struct lp_budge
  if(!rc)rc=reserve(e,&e->planning_path,&path);
  if(rc){(void)dw_release(&e->maps,h);return e->last_reason=rc;}
  e->planning_map=h;e->planning_snapshot=map;e->planning=true;e->plan_finalized=false;
+ e->planning_grant=e->grant;
  e->started=request;e->budget=budget;e->plans++;
  float steering=vehicle.has_measured_steering_rad?vehicle.measured_steering_rad:
                  vehicle.has_estimated_steering_rad?vehicle.estimated_steering_rad:NAN;
@@ -186,6 +239,13 @@ enum de_result de_plan_slice(struct drive_engine *e,unsigned expansions,uint64_t
   * search deadline. Every later command still projects against its own map. */
  if(!e->plan_finalized){
   bool valid=e->search_reason==LP_PATH_FOUND&&!e->stopping;
+  if(valid&&(path->world_features&DW_LANE_MODEL)&&e->has_grant){
+   if(!e->grant.admitted||e->grant.grant_revision!=e->planning_grant.grant_revision||
+      e->grant.mission_revision!=e->planning_grant.mission_revision||
+      e->grant.cancel_fence_revision!=e->planning_grant.cancel_fence_revision||
+      memcmp(e->grant.mission_id.bytes,e->planning_grant.mission_id.bytes,16))valid=false;
+   else mission_metadata(path,&e->planning_grant);
+  }
   if(valid){
    struct dw_handle current;const struct dw_snapshot *snapshot;
    enum dw_result acquired=dw_acquire(&e->maps,&current,&snapshot);
@@ -254,18 +314,22 @@ enum de_result de_plan_slice(struct drive_engine *e,unsigned expansions,uint64_t
  return e->last_reason=valid?DE_OK:e->search_reason==LP_CANCELLED?DE_CANCELLED:DE_PATH;
 }
 static enum de_result track(struct drive_engine *e,struct lp_tracker *tracker,uint64_t now,float dt,struct lp_command *command,
- dw_vehicle *vehicle,struct lp_budget budget,struct de_reference *completed,struct de_witness *witness){
+ dw_vehicle *vehicle,struct lp_budget budget,struct de_reference *completed,struct de_witness *witness,
+ const xenova_drive_MissionGrant *mission,bool enforce_mission_profile){
  memset(command,0,sizeof(*command));command->emergency=true;command->result=LP_INPUT;
  struct dw_handle mh;const struct dw_snapshot *map;
  if(dw_acquire(&e->maps,&mh,&map))return DE_MAP;
  dw_pose pose;uint64_t map_end=0;enum de_result rc=inputs(e,map,now,&pose,vehicle,&map_end);
+ if(!rc&&enforce_mission_profile&&(map->world.required_features&DW_LANE_MODEL)&&!mission)rc=DE_STATE;
  struct de_reference ph;const struct lp_path *path=NULL;
  if(!rc)rc=de_path_acquire(e,&ph,&path);
  if(!rc){
   struct lp_metrics measured={0};
-  enum lp_result tracked=lp_track(tracker,path,&map->world,pose,vehicle,e->config,dt,command,&measured,&budget);
-  rc=tracked==LP_PATH_FOUND||tracked==LP_STOP?DE_OK:DE_PATH;
-  if(tracker==&e->tracker&&(tracked==LP_COLLISION||tracked==LP_INPUT||tracked==LP_NUMERIC))e->path_invalidated=true;
+  enum lp_result tracked=LP_INPUT;
+  if(enforce_mission_profile&&(map->world.required_features&DW_LANE_MODEL)&&!lp_mission_matches(path,mission))rc=DE_STATE;
+  else{tracked=lp_track(tracker,path,&map->world,pose,vehicle,e->config,dt,command,&measured,&budget);
+   rc=tracked==LP_PATH_FOUND||tracked==LP_STOP?DE_OK:DE_PATH;}
+  if(rc!=DE_STATE&&tracker==&e->tracker&&(tracked==LP_COLLISION||tracked==LP_INPUT||tracked==LP_NUMERIC))e->path_invalidated=true;
   if(!rc){
    uint64_t pose_end=vehicle->pi_sample_us+(uint64_t)e->config->pose_age_us-vehicle->clock_error_us;
    command->valid_until_pi_us=map_end<pose_end?map_end:pose_end;
@@ -282,16 +346,25 @@ static enum de_result track(struct drive_engine *e,struct lp_tracker *tracker,ui
  return e->last_reason=rc;
 }
 enum de_result de_track(struct drive_engine *e,uint64_t now,float dt,struct lp_command *command,dw_vehicle *vehicle,struct lp_budget budget){
- enum de_result rc=track(e,&e->tracker,now,dt,command,vehicle,budget,&e->last_track_path,&e->last_track_world);
+ enum de_result rc=track(e,&e->tracker,now,dt,command,vehicle,budget,&e->last_track_path,&e->last_track_world,NULL,true);
+ if(!rc)atomic_fetch_add(&e->completed,1);
+ return rc;
+}
+enum de_result de_track_mission(struct drive_engine *e,const xenova_drive_MissionGrant *mission,uint64_t now,float dt,
+ struct lp_command *command,dw_vehicle *vehicle,struct lp_budget budget){
+ memset(command,0,sizeof(*command));command->emergency=true;command->result=LP_INPUT;
+ if(!mission||dw_mission_grant_validate(mission))return DE_STATE;
+ enum de_result rc=track(e,&e->tracker,now,dt,command,vehicle,budget,&e->last_track_path,&e->last_track_world,mission,true);
  if(!rc)atomic_fetch_add(&e->completed,1);
  return rc;
 }
 enum de_result de_prepare(struct drive_engine *e,uint64_t now,struct de_reference *path,struct de_witness *witness,dw_vehicle *vehicle,struct lp_budget budget){
  struct lp_tracker temporary={0};struct lp_command calculated;
- return track(e,&temporary,now,.02f,&calculated,vehicle,budget,path,witness);
+ return track(e,&temporary,now,.02f,&calculated,vehicle,budget,path,witness,NULL,false);
 }
 enum de_result de_apply(struct drive_engine *e,const dw_state *state,uint64_t now,struct lp_budget budget){
  if(e->planning||e->apply_pending)return DE_BUSY;
+ if(dw_state_validate(state))return DE_STATE;
  struct dw_handle mh;const struct dw_snapshot *map;
  if(dw_acquire(&e->maps,&mh,&map))return DE_MAP;
  dw_pose pose;dw_vehicle vehicle;enum de_result rc=inputs(e,map,now,&pose,&vehicle,NULL);
@@ -310,6 +383,7 @@ enum de_result de_apply(struct drive_engine *e,const dw_state *state,uint64_t no
    state->merge_passed_reference_revision==map->world.reference_revision?state->merge_passed_reference_revision:0;
   path->revision=state->path_revision;path->maneuver_revision=state->maneuver_revision;
   path->direction=state->direction;path->phase=state->maneuver_phase;
+  lp_state_import(path,state);
   strcpy(path->frame,state->frame_epoch);strcpy(path->odom,state->odom_epoch);
   strcpy(path->configuration,state->configuration);strcpy(path->reference,state->reference_id);
   struct lp_metrics metrics={0};struct lp_tracker probe={0};struct lp_command calculated;
@@ -346,6 +420,7 @@ enum de_result de_restart(struct drive_engine *e){
  e->epoch++;e->current=-1;e->started=0;atomic_fetch_add(&e->requested,1);
  memset(&e->tracker,0,sizeof(e->tracker));e->completed=0;e->stopping=false;
  e->maneuver_active=false;e->maneuver_direction=0;e->maneuver_revision=0;e->merge_passed_reference_revision=0;
+ e->has_grant=false;memset(&e->grant,0,sizeof(e->grant));
  give(e);return DE_OK;
 }
 const char *de_reason(enum de_result rc){
@@ -367,7 +442,7 @@ enum de_result de_memory_read(struct drive_engine *e,unsigned region,struct dw_m
   *out=(struct dw_memory){.reserved=sizeof(e->search),.capacity=(uint64_t)e->config->node_limit*sizeof(e->search.nodes[0]),
    .used=(uint64_t)used*sizeof(e->search.nodes[0]),
    .peak=(uint64_t)peak*sizeof(e->search.nodes[0]),
-   .exhausted=atomic_load(&e->search_exhausted)};
+   .exhausted=atomic_load(&e->search_exhausted),.contention=0};
   return DE_OK;
  }
  if(atomic_flag_test_and_set_explicit(&e->lock,memory_order_acquire))return DE_BUSY;

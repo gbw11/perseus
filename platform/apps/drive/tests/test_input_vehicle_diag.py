@@ -161,12 +161,12 @@ def vehicle_native(request,tmp_path_factory):
     (include/'xenova/drive_context.h').write_text('#include <xenova/drive_runtime.h>\n')
     (include/'zephyr/sys/atomic.h').write_text('#include <xenova/drive_runtime.h>\n')
     (include/'zephyr/logging/log.h').write_text('#define LOG_LEVEL_INF 3\n#define LOG_MODULE_REGISTER(...)\n#define LOG_INF(...) do { if(!test_log_filtered) test_log(__VA_ARGS__); } while(0)\n')
-    source=directory/'vehicle.c';source.write_text(PREFIX+BODY);world=HOME/'world';binary=directory/'vehicle'
+    source=directory/'vehicle.c';source.write_text(PREFIX+BODY);mqtt=HOME.parent/'common/xenova-mqtt-c';world=HOME/'world';binary=directory/'vehicle'
     args=['cc','-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-ffunction-sections','-fdata-sections',
           '-Wl,--gc-sections','-Wl,--wrap=dw_link_decode','-Wl,--wrap=dw_odom_add','-Wl,--wrap=dw_odom_reset','-fsanitize=undefined',
           *(['-DCONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS=1'] if request.param else []),
-          *['-I'+str(p) for p in (include,HOME/'zephyr/src',HOME/'planner',world,world/'generated',world/'nanopb')],
-          str(source),str(world/'world.c'),str(world/'generated/world.pb.c'),
+          *['-I'+str(p) for p in (include,HOME/'zephyr/src',HOME/'planner',world,world/'generated',world/'nanopb',mqtt/'include',mqtt/'third_party/jsmn')],
+          str(source),str(world/'world.c'),str(world/'generated/world.pb.c'),*[str(p) for p in sorted((mqtt/'src').glob('*.c'))],
           *[str(world/'nanopb'/name) for name in ('pb_common.c','pb_decode.c','pb_encode.c')],'-lm','-o',str(binary)]
     built=subprocess.run(args,capture_output=True,text=True)
     assert built.returncode==0,built.stderr

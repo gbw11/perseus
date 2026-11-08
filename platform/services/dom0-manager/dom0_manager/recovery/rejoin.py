@@ -8,13 +8,14 @@ from __future__ import annotations
 import fcntl,importlib,logging,os,queue,stat,threading,time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from xenova_mqtt.drive_binding import BindingCache,atomic_json,canonical,private_json
+from xenova_mqtt.drive_binding import BindingCache,app_instance,atomic_json,canonical,private_json
 from xenova_mqtt.readiness import parse as parse_readiness
 
 log=logging.getLogger(__name__)
 CONTEXT=('vm_id','host_boot_id','execution_id','domid','xen_unique_id')
 
 def valid_vm_trust_payload(payload):
+    """Validate the legacy FW32 envelope, not permission for VM recovery."""
     if not isinstance(payload,dict) or payload.get('trust')!='UNTRUSTED':return False
     command_id=payload.get('command_id')
     if not isinstance(command_id,str) or not command_id or len(command_id)>128:return False
@@ -95,16 +96,19 @@ class ProductionBootstrap:
         return value
 
 class RejoinCoordinator:
-    def __init__(self,config,observe,provision,host_boot_id,*,clock=time.monotonic,uid=0):
+    def __init__(self,config,observe,provision,host_boot_id,*,clock=time.monotonic,uid=0,observe_many=None):
         self.config=config;self.observe=observe;self.provision=provision;self.clock=clock;self.uid=uid
+        self.observe_many=observe_many
         self.host=canonical(host_boot_id);self.vm_ids=tuple(canonical(v) for v in config['vm_ids'])
         if len(self.vm_ids)!=2 or len(set(self.vm_ids))!=2:raise ValueError('two distinct drive VMs required')
         self.cache=BindingCache(self.host,clock=clock);self._lock=threading.RLock();self._stop=threading.Event()
         self._executor=ThreadPoolExecutor(max_workers=2,thread_name_prefix='drive-rejoin')
         self._futures={};self._due={};self._rows={};self._completed={};self._progress={}
+        self._batch=None;self._batch_targets=()
         self._published_rows=None
         self._reports=queue.Queue(maxsize=64)
         self._trust_reports=queue.Queue(maxsize=16)
+        self._legacy_faults={}  # bounded by the two configured VMs and two legacy reasons
         self.path=Path(config['receipt_dir'])/'rejoin.json';self.path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
         if self.path.parent.resolve()!=self.path.parent or self.path.parent.stat().st_uid!=uid or self.path.parent.stat().st_mode&0o077:
             raise ValueError('canonical private receipt directory required')
@@ -126,8 +130,9 @@ class RejoinCoordinator:
             atomic_json(self.path,{'schema_version':'1.0-drive-rejoin','vms':records})
             self.records=records
 
-    def _work(self,vm):
+    def _work(self,vm,*,initial_row=None):
         if self._stop.is_set():raise RuntimeError('rejoin stopping')
+        if isinstance(initial_row,Exception):raise initial_row
         with self._lock:
             old=self._rows.get(vm,{})
         refreshed=None;refresh_error=None
@@ -138,7 +143,10 @@ class RejoinCoordinator:
             # Xen observation, while new provisioning keeps its before/after guards.
             try:refreshed=self.provision.refresh(old)
             except (OSError,ValueError) as exc:refresh_error=exc
-        row=self.observe(vm)
+        # A pair observation already validated the same host/target snapshots.
+        # Receipt refresh has no physical effect and never renews its timestamp.
+        # New provisioning still performs its own existing effect-time guards.
+        row=self.observe(vm) if initial_row is None else initial_row
         if row['status']!='observed':
             self._record(vm,{'stage':row['status'].upper(),'execution_id':None});return row
         if row['host_boot_id']!=self.host:raise ValueError('host changed')
@@ -175,8 +183,10 @@ class RejoinCoordinator:
         return {**after,**identity}
 
     def pump(self):
+        if self._stop.is_set():return
         now=self.clock()
         with self._lock:
+            if self._stop.is_set():return
             observed=False
             for vm,future in list(self._futures.items()):
                 if not future.done():continue
@@ -190,12 +200,40 @@ class RejoinCoordinator:
                 except Exception as exc:
                     self._rows[vm]={'status':'unavailable','reason':type(exc).__name__}
                     log.warning('drive binding unavailable vm=%s cause=%s',vm,type(exc).__name__)
-            for vm in self.vm_ids:
-                if not self._stop.is_set() and vm not in self._futures and now>=self._due.get(vm,0):
-                    # Successful probes keep a one-second release cadence. An
-                    # overrun coalesces to one next probe; failures back off above.
-                    self._due[vm]=self.clock()+1
-                    self._futures[vm]=self._executor.submit(self._work,vm)
+            if self._batch is not None and self._batch.done():
+                future,targets=self._batch,self._batch_targets
+                self._batch=None;self._batch_targets=()
+                try:
+                    rows=future.result()
+                    if (not isinstance(rows,dict) or set(rows)!=set(targets) or
+                        any(not isinstance(rows[vm],Exception)and(not isinstance(rows[vm],dict)or
+                            rows[vm].get('vm_id')!=vm)for vm in targets)):
+                        raise ValueError('batch observation target set invalid')
+                except Exception as exc:
+                    observed=True
+                    for vm in targets:
+                        self._rows[vm]={'status':'unavailable','reason':type(exc).__name__};self._due[vm]=now+1
+                        log.warning('drive binding unavailable vm=%s cause=%s',vm,type(exc).__name__)
+                else:
+                    for vm in targets:
+                        if not self._stop.is_set():
+                            self._futures[vm]=self._executor.submit(self._work,vm,initial_row=rows[vm])
+            if self.observe_many is not None:
+                if not self._stop.is_set() and self._batch is None:
+                    targets=tuple(vm for vm in self.vm_ids if vm not in self._futures and now>=self._due.get(vm,0))
+                    if targets:
+                        # One request-local snapshot uses the existing executor;
+                        # due subsets preserve each VM's failure backoff.
+                        released=self.clock()
+                        for vm in targets:self._due[vm]=released+1
+                        self._batch_targets=targets;self._batch=self._executor.submit(self.observe_many,targets)
+            else:
+                for vm in self.vm_ids:
+                    if not self._stop.is_set() and vm not in self._futures and now>=self._due.get(vm,0):
+                        # Successful probes keep a one-second release cadence. An
+                        # overrun coalesces to one next probe; failures back off above.
+                        self._due[vm]=self.clock()+1
+                        self._futures[vm]=self._executor.submit(self._work,vm)
             value={'schema_version':'1.0-drive-bindings','host_boot_id':self.host,
                 'observed_monotonic_ms':int(now*1000),'expires_monotonic_ms':int(now*1000)+3000,
                 'vms':{vm:self._rows.get(vm,{'status':'unavailable'}) for vm in self.vm_ids}}
@@ -203,8 +241,10 @@ class RejoinCoordinator:
                 # Pump readiness at 100ms, but publish only new observation rows.
                 # Rewriting unchanged rows cannot extend their 3s lease and used
                 # to repeat serialization/fsync while waiting for Xen observations.
-                if observed or self._published_rows!=value['vms']:
-                    atomic_json(Path(self.config['binding_file']),value);self.cache.install(value)
+                if not self._stop.is_set() and(observed or self._published_rows!=value['vms']):
+                    atomic_json(Path(self.config['binding_file']),value)
+                    if self._stop.is_set():self.cache.invalidate();return
+                    self.cache.install(value)
                     self._published_rows=value['vms']
             except (OSError,ValueError):
                 self._published_rows=None;self.cache.invalidate();raise
@@ -226,15 +266,36 @@ class RejoinCoordinator:
         except queue.Full:pass  # Dropped evidence expires; it never renews readiness.
 
     def on_trust(self,message):
-        """Capture a binding-verified vm.trust callback without blocking MQTT."""
+        """Keep AUTO deadline evidence without promoting it to VM-wide failure.
+
+        AUTO deadline misses restrict that function; its lifecycle is authoritative
+        for Gateway selection. Xen/fatal/liveness recovery keeps its own path.
+        """
         from xenova_mqtt import topics
         info=topics.parse(message.topic);payload=message.payload;now=self.clock()
         row=self.cache.current(info.vm_id,now)
         if (getattr(message,'retained',False) or message.type!='vm.trust' or info.app_id!='autonomous' or
             not valid_vm_trust_payload(payload) or row is None):return
+        env=message.envelope
+        if row['boot_id']!=env.get('boot_id') or app_instance(row,info.app_id)!=env.get('agent_instance_id'):return
+        scope='function'
+        key=(info.vm_id,payload['reason']);previous=self._legacy_faults.get(key,{})
+        value={'vm_id':info.vm_id,'execution_id':row['execution_id'],'reason':payload['reason'],
+               'scope':scope,'command_id':payload['command_id'],'received_monotonic':message.received_monotonic,
+               'evidence':{key:payload[key] for key in ('trust','consecutive_misses') if key in payload},
+               'reports':min(previous.get('reports',0)+1,2**64-1)}
+        # One MQTT owner publishes a small immutable snapshot. Diagnostics never
+        # waits on the coordinator's receipt/fsync lock and creates no per-key cache.
+        self._legacy_faults={**self._legacy_faults,key:value}
         try:self._trust_reports.put_nowait({'vm_id':info.vm_id,'execution_id':row['execution_id'],
-            'command_id':payload['command_id'],'received_monotonic':message.received_monotonic})
+            'command_id':payload['command_id'],'scope':scope,'reason':payload['reason'],
+            'received_monotonic':message.received_monotonic})
         except queue.Full:pass
+
+    def legacy_fault_reports(self):
+        """Coordinator-lifetime bounded diagnostics; never grants recovery."""
+        snapshot=self._legacy_faults
+        return [{**value,'evidence':dict(value['evidence'])} for value in snapshot.values()]
 
     def trust_events(self):
         values=[]
@@ -296,7 +357,9 @@ class RejoinCoordinator:
         self._stop.set();self.cache.invalidate()
         if self._thread:self._thread.join(timeout=1)
         self._executor.shutdown(wait=False,cancel_futures=True)
-        return not any(not f.done() for f in self._futures.values())
+        pending=list(self._futures.values())
+        if self._batch is not None:pending.append(self._batch)
+        return(self._thread is None or not self._thread.is_alive())and all(f.done()for f in pending)
 
 def production(config_file,manager_data):
     config=private_json(Path(config_file))
@@ -315,13 +378,16 @@ def production(config_file,manager_data):
         for channel in ('drive','telemetry'):private_json(Path(config['credentials'][vm][channel]))
     from xenova_vm import Platform,storage_check
     storage_check(data)  # Reuse the ext4/marker/install guard, not an arbitrary bind mount.
-    from xenova_drive_binding import observe
+    from xenova_drive_binding import observe,observe_pair
     host=Path('/proc/sys/kernel/random/boot_id').read_text().strip()
     platform=Platform(data=manager_data)
     coordinator=None
     def current(vm):
         if coordinator is not None and coordinator._stop.is_set():raise RuntimeError('rejoin stopping')
         return observe(platform,vm)
+    def current_many(identities):
+        if coordinator is not None and coordinator._stop.is_set():raise RuntimeError('rejoin stopping')
+        return observe_pair(platform,identities)
     bootstrap=ProductionBootstrap(config,current)
-    coordinator=RejoinCoordinator(config,current,bootstrap,host)
+    coordinator=RejoinCoordinator(config,current,bootstrap,host,observe_many=current_many)
     return coordinator

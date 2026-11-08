@@ -3,6 +3,7 @@ permission are separate evidence. This class never restarts a VM or provisions
 credentials. All generations originate in AuthorityStore before publication.
 """
 from __future__ import annotations
+from collections import deque
 from dataclasses import dataclass
 from typing import Any
 from xenova_mqtt.readiness import parse as parse_readiness
@@ -11,8 +12,11 @@ from .machine import (ControlMachine,Mode,Timing,DRIVE_APPS,AUTONOMOUS,MANUAL_AP
     AppTrack,ForwardDrive,ForwardStop,PublishControl,PublishEvent,Measure,valid_command)
 
 TRUST_REASONS=frozenset(('AUTO_DEADLINE_MISS',))
+INPUT_FAILURES=frozenset(('INPUT_UNAVAILABLE','INPUT_STALE','INPUT_INVALID','MAP_UNAVAILABLE',
+                         'WORLD_UNAVAILABLE','OBSERVATION_EXPIRED'))
 
 def valid_untrusted_payload(payload):
+    """Validate legacy FW32 evidence, not its former VM-wide interpretation."""
     if not isinstance(payload,dict) or payload.get('trust')!='UNTRUSTED' or payload.get('reason') not in TRUST_REASONS:return False
     command_id=payload.get('command_id')
     if not isinstance(command_id,str) or not command_id or len(command_id)>128:return False
@@ -50,7 +54,7 @@ class VerifiedDriveMachine(ControlMachine):
         self.output_permitted=False;self._authorized=False;self.transport_ok=False;self.delivered=False
         self.failure=None;self._resume_authorized=False
         self.untrusted={row['vm_id']:dict(row) for row in value.get('distrusted',[])}
-        self._trust_commands={row['command_id'] for row in self.untrusted.values()}
+        self._legacy_faults=deque(maxlen=64)
         self.continuous_handoff=False;self._handoff_grace_until=0.;self._resume_auto=False
         self._resume_vm=self.active_vm
         # Restart restores preference, never output permission, even if the last
@@ -120,32 +124,47 @@ class VerifiedDriveMachine(ControlMachine):
             self.nodes[vm][app].last_heartbeat_t=t
 
     def on_vm_untrusted(self,vm,app,payload,t):
-        """Atomically revoke the current owner and select a prepared mirror.
+        """Interpret deployed FW32 reports at the scope their evidence proves.
 
-        The new owner remains disarmed until it applies the newly issued
-        generation. A missing mirror therefore becomes SAFE_STOP, never a
-        continuation of output from the distrusted execution.
+        AUTO deadline evidence revokes that function, never the same
+        execution's normal MANUAL qualification.
+        Historical durable VM distrust remains guarded by recovery completion.
         """
-        if (vm!=self.active_vm or app!=AUTONOMOUS or self.active_app is None or
-            not valid_untrusted_payload(payload)):return []
-        if payload['reason']=='AUTO_DEADLINE_MISS' and self.active_app!=AUTONOMOUS:return []
-        affected_app=self.active_app
-        command_id=payload.get('command_id')
-        if not isinstance(command_id,str) or not command_id or len(command_id)>128 or command_id in self._trust_commands:return []
-        binding=self.bindings.current(vm,t)
+        if (vm not in self.nodes or app!=AUTONOMOUS or not valid_untrusted_payload(payload) or
+                not 0<=self.clock()-t<=self.readiness_lease_s or not self._bound(vm,t,app)):return []
+        binding=self.bindings.current(vm,self.clock())
         if binding is None:return []
-        self._trust_commands.add(command_id)
-        distrust={'vm_id':vm,'execution_id':binding['execution_id'],'reason':payload['reason'],'command_id':command_id,
-                  'observed_monotonic_ms':int(t*1000),'generation':self.generation}
-        self.untrusted[vm]=distrust
-        self.nodes[vm][affected_app].pending=None
+        evidence={key:payload[key] for key in ('trust','reason','command_id','consecutive_misses') if key in payload}
+        fields={'vm_id':vm,'execution_id':binding['execution_id'],**evidence,'gen':self.generation,'t':t}
+        key=(vm,binding['execution_id'],self.sessions.get((vm,app)),payload['command_id'])
+        if key in self._legacy_faults:return []
+        self._legacy_faults.append(key)
+        self._invalidate_function(vm,app,'DEADLINE')
+        actions=[Measure('autonomous_function_failure',fields)]
+        if vm!=self.active_vm or self.active_app!=AUTONOMOUS or not self.output_permitted:return actions
+        return actions+self._autonomous_failure(vm,'autonomous_deadline',self.clock())
+
+    def _invalidate_function(self,vm,app,reason):
+        self.nodes[vm][app].pending=None
+        p=self.prepared[vm,app]
+        p.state='NOT_READY';p.reason=reason;p.observed=None;p.since=None
+
+    def _input_unavailable(self,vm,now):
+        p=self.prepared[vm,AUTONOMOUS]
+        return (p.generation==self.generation and p.state!='READY' and p.reason in INPUT_FAILURES and
+                p.observed is not None and 0<=now-p.observed<=self.readiness_lease_s)
+
+    def _autonomous_failure(self,vm,reason,now):
         other=next(candidate for candidate in self.vm_ids if candidate!=vm)
-        actions=[Measure('vm_untrusted',{'vm_id':vm,'reason':payload['reason'],'command_id':command_id,
-                                         'gen':self.generation,'t':t})]
-        if self.transport_ok and self._qualified(other,affected_app,t,held=True):
-            return actions+self._change(self.mode,other,'vm_untrusted',t,arm=True,distrust=distrust)
+        # One VM's input error is not proof that the shared Jetson failed.
+        # Prefer the other AUTO only with its own current qualification.
+        if self.transport_ok and self._qualified(other,AUTONOMOUS,now,held=True):
+            return self._change(Mode.AUTO,other,reason,now,arm=True)
         self._authorized=False
-        return actions+self._change(Mode.SAFE_STOP,vm,'no_fresh_standby',t,distrust=distrust)
+        if (self._input_unavailable(vm,now) and self._input_unavailable(other,now) and
+                self.transport_ok and self._qualified(vm,MANUAL_APP,now,held=True)):
+            return self._change(Mode.MANUAL,vm,'autonomous_input_unavailable',now,arm=False)
+        return self._change(Mode.SAFE_STOP,vm,'no_fresh_standby',now)
 
     def _ready(self,vm,app,now,held=False):
         p=self.prepared[vm,app]
@@ -319,8 +338,8 @@ class VerifiedDriveMachine(ControlMachine):
         cancelled=self._operator_cancel(now)
         if app and self.output_permitted:
             p=self.prepared[self.active_vm,app]
-            if self.mode is Mode.AUTO and p.state!='READY' and p.reason in ('INPUT_UNAVAILABLE','INPUT_STALE','INPUT_INVALID','MAP_UNAVAILABLE','OBSERVATION_EXPIRED') and self._qualified(self.active_vm,MANUAL_APP,now,held=True):
-                actions=self._change(Mode.MANUAL,self.active_vm,'autonomous_lost',now,arm=True)
+            if self.mode is Mode.AUTO and p.state!='READY':
+                actions=self._autonomous_failure(self.active_vm,'autonomous_unavailable',now)
             elif not self._ready(self.active_vm,app,now) or not self._command_fresh(now):
                 track=self.apps[app];p=self.prepared[self.active_vm,app]
                 actions.append(Measure('output_evidence_lost',{'vm_id':self.active_vm,'app':app,'gen':self.generation,

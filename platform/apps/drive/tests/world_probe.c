@@ -10,6 +10,8 @@
 static struct dw_snapshot sample;
 static struct dw_pool pool;
 static struct dw_odometry odom;
+static dw_state state;
+static xenova_drive_DriveLink link;
 static uint8_t bytes[DW_WIRE_MAX+1];
 static struct dw_trust trust={.vehicle="rc-test-1",.mapper_boot="11111111-1111-4111-8111-111111111111",
  .mapper_instance="22222222-2222-4222-8222-222222222222",.map_epoch="33333333-3333-4333-8333-333333333333",
@@ -61,18 +63,52 @@ static void coordinates(void) {
  assert(dw_odom_add(&odom,&v)==DW_EPOCH);
 }
 int main(int argc,char **argv) {
- if(argc!=2)return 2;
+ if(argc!=2&&argc!=3)return 2;
  FILE *f=fopen(argv[1],"rb");if(!f)return 3;
  size_t length=fread(bytes,1,sizeof(bytes),f);fclose(f);
+ if(argc==3&&!strcmp(argv[2],"world-time")){
+  trust.clock.lower_offset_us=0;trust.clock.upper_offset_us=0;
+  enum dw_result decoded=dw_decode(bytes,length,&trust,1150000,&sample);
+  uint64_t deadline=0;
+  enum dw_result at_publication=decoded?decoded:dw_snapshot_time(&sample,1100000,200000,&deadline);
+  enum dw_result expired=decoded?decoded:dw_snapshot_time(&sample,1150000,200000,NULL);
+  enum dw_result before_publication=decoded?decoded:dw_snapshot_time(&sample,1099999,200000,NULL);
+  printf("{\"result\":\"%s\",\"decoded\":\"%s\",\"age\":%llu,\"deadline\":%llu,\"at_publication\":\"%s\",\"before_publication\":\"%s\"}\n",
+      dw_reason(expired),dw_reason(decoded),(unsigned long long)sample.observed_upper_age_us,
+      (unsigned long long)deadline,dw_reason(at_publication),dw_reason(before_publication));
+  return 0;
+ }
+ if(argc==3){
+  enum dw_result result=!strcmp(argv[2],"state")?dw_state_decode(bytes,length,&state):
+      !strcmp(argv[2],"link")?dw_link_decode(bytes,length,&link):DW_DECODE;
+  if(result==DW_OK&&!strcmp(argv[2],"state")){
+   assert(dw_state_validate(&state)==DW_OK);
+   state.path_count=513;assert(dw_state_validate(&state)==DW_ARRAY);
+  }
+  if(result==DW_OK&&!strcmp(argv[2],"link")){
+   if(link.which_payload==xenova_drive_DriveLink_mission_grant_tag){
+    assert(dw_mission_grant_validate(&link.payload.mission_grant)==DW_OK);
+    link.payload.mission_grant.primitive.size=31;
+    assert(dw_mission_grant_validate(&link.payload.mission_grant)==DW_ARRAY);
+   }else if(link.which_payload==xenova_drive_DriveLink_budget_request_tag){
+    assert(dw_budget_request_validate(&link.payload.budget_request)==DW_OK);
+   }else if(link.which_payload==xenova_drive_DriveLink_budget_reply_tag){
+    assert(dw_budget_reply_validate(&link.payload.budget_reply)==DW_OK);
+   }
+  }
+  printf("{\"result\":\"%s\",\"bytes\":%zu}\n",dw_reason(result),length);
+  return 0;
+ }
  enum dw_result result=dw_decode(bytes,length,&trust,1200000,&sample);
  printf("{\"result\":\"%s\",\"bytes\":%zu,\"world_size\":%zu,\"pool_size\":%zu,\"odom_size\":%zu}\n",
         dw_reason(result),length,sizeof(dw_world),sizeof(pool),sizeof(odom));
  if(result==DW_OK&&sample.world.sequence==1){
   uint64_t deadline=0;
-  assert(dw_snapshot_time(&sample,1199000,300000,&deadline)==DW_OK&&deadline==1400000);
+  uint64_t error=sample.world.has_localization?sample.world.localization.timestamp_error_us:0;
+  assert(dw_snapshot_time(&sample,1199000,300000,&deadline)==DW_OK&&deadline==1400000-error);
   assert(dw_snapshot_time(&sample,1400001,300000,&deadline)==DW_TIME);
   assert(dw_snapshot_time(&sample,1101000,300000,&deadline)==DW_TIME);
-  assert(sample.received_us==1200000&&sample.observed_upper_age_us==100000);
+  assert(sample.received_us==1200000&&sample.observed_upper_age_us==100000+error);
   ownership();coordinates();
  }
  return 0;

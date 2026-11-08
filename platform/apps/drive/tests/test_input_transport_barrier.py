@@ -9,7 +9,7 @@ import subprocess
 
 import pytest
 
-from test_input_clock import HOME, RUNTIME, reply, schema, encode
+from test_input_clock import HOME, RUNTIME, reply, schema, encode, complete_state2_metadata
 from test_lattice import fixture
 
 
@@ -305,10 +305,10 @@ def test_malformed_link_is_still_decoded_and_drained_without_adoption(owner):
 
 
 def test_complete_state_copy_is_drained_without_adoption(owner):
-    original=reply();value=schema.DriveLink(major=1)
+    original=reply();value=schema.DriveLink(major=2)
     value.accepted.host_boot=fixture.BOOT;value.accepted.gateway_instance=original.clock.gateway_instance
     state=value.accepted.state
-    state.CopyFrom(schema.DriveState(major=1,source_vm=original.clock.probe.vm,
+    state.CopyFrom(schema.DriveState(major=2,source_vm=original.clock.probe.vm,
         source_execution=original.clock.probe.execution,source_app_instance=original.clock.probe.app_instance,
         source_generation=1,state_revision=1,frame_epoch=original.clock.vehicle.odom_epoch,
         odom_epoch=original.clock.vehicle.odom_epoch,configuration='lattice-lab-1',primitive='a'*64,
@@ -317,5 +317,6 @@ def test_complete_state_copy_is_drained_without_adoption(owner):
         tracker_index=0,complete=True,message_id='88888888-8888-4888-8888-888888888888',
         calibration='encoder-lab-1',map_epoch=original.clock.vehicle.odom_epoch,observation_seq=1))
     for x in (0.,1.):state.path.add(pose=schema.Pose(x=x,y=1,yaw=0),steering_rad=0,velocity_mps=.1)
+    complete_state2_metadata(state)
     result=owner('state','source-copy',encode(value))
     assert result['rejected_links']==result['dropped']==1 and result['publish']==0

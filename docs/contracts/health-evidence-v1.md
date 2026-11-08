@@ -102,7 +102,7 @@ Gateway의 기존 신선도 제한이 적용된다. 종료 시 원 기한 내 jo
 활성화 준비 확인, 활성 실행 진행은 서로 다른 근거이며 이 프로필의 READY 하나로 대체하지 않는다.
 명시적인 warm 기반 프로필의 대기·활성화·진행 계약은
 [app.lifecycle](mqtt-contract-v1.md#63-대기활성화-보고-applifecycle)을 따른다. 현재 입력으로
-준비 가능한 어댑터와 소비자의 로컬 연결을 지원하며, 미래 지도·maneuver·상태 인계와 실제
+준비 가능한 어댑터와 소비자의 로컬 연결을 지원하며, 지도·maneuver·상태 인계와 실제
 차량의 승계 상한을 수락한 것은 아니다. 정식 목표·미정 사항은 주행 설계 9.6·20절을 유지한다.
 
 공통 `loop_seq`는 선택된 계산의 실제 완료를 관측한다(verified의 SAFE_STOP은 실제 MANUAL
@@ -138,6 +138,35 @@ Worker의 기존 `restart/none`, episode당 3회·backoff 5/15/30초·attempt 11
 verify150초·force 기본 off는 **소스 기본값**이다. 이번에 바꾸거나 원인 미확정에 새 1회 정책을
 적용하지 않았다. 장애 판단 유예와 실행 deadline은 별개다. S01/S02와 사용자 stop·원
 operation/attempt·의도 revision·미완료 소유·원 deadline·예산을 모든 행동의 선행 guard로 유지한다.
+
+### 시연 부하와 장애 범위
+
+부하 명령의 접수·실행 결과와 주행 기능의 건강 판정은 별개다. `auto_delay`는 실제 AUTO 계산 뒤에 busy wait를 더하므로
+그 작업의 원 deadline을 넘길 수 있다. 계산이 없는 WAITING·SAFE_STOP에서 명령 시간이 끝난
+것만으로 계산 지연이나 승계 성공을 주장하지 않는다.
+
+| 실제 관측 | 허용하는 판단·행동 |
+|---|---|
+| AUTO 지연 중 CPU 사용률 증가 | 원 구간의 계측을 보존. 사용률만으로 VM 복구를 시작하지 않음 |
+| 주행 어댑터의 실제 필수 할당·pool 확보 실패 | 해당 기능의 원 실패와 NOT_READY·출력 제한. 기존 유효 자료로 계속 수행할 수 있는지 먼저 구분 |
+| AUTO 작업의 실제 원 deadline 위반 | 해당 결과를 즉시 제한하고 기존 앱별 lifecycle로 전달. 준비된 다른 AUTO·정상 MANUAL·SAFE_STOP 선택은 Gateway가 담당 |
+| 현재 실행의 fatal·손상·정책상 확정된 생존 실패 | 현재 실행·의도·원 기한과 Gateway 보호 아래 기존 Worker/Engine 복구 경로 사용 |
+
+현재 lattice의 map/search/path/odom은 고정 예약 풀이다. 풀 소진 시험은 실제 예약·lease를 유한하게 보유하고 해제하며,
+실패 뒤 새 정상 입력의 실제 계산·반환과 정상 MANUAL 진행을 함께 확인한다.
+
+현재 소스는 `io.c`에서 AUTO 지연 자체를 VM 불신으로 승격하지 않는다.
+`workers.c`의 원 health와 `main.c:warm_report`의 `app.lifecycle`을 사용한다. `AUTO_DEADLINE_MISS`는 AUTO 기능 실패로 소비한다.
+같은 원 표본을 다시 읽어 지속 위반을 늘리지 않는다.
+원 사유·명령 식별자·실행 문맥은 진단에 남기고 이 보고만으로 Worker의 VM 불신 latch나 새 시도를 만들지 않는다.
+
+과거 Authority의 `distrusted` 기록은 기존 형식으로 읽는다. 새 보고의 분류가 바뀌었다고 기록을
+삭제하거나 기존 보호를 자동 해제하지 않는다. 정당한 새 실행·준비·보호 종결을 확인한 뒤 Standby로
+재합류한다. 입력 회복의 명시적 AUTO 재개와 사용자 `manual_hold`는 유지한다.
+
+명령의 주입 기간과 관측창도 분리한다. 관측창이 끝났다고 명령을 취소·미실행으로 확정하지 않으며,
+실행이 교체되면 원 결과를 보존하고 새 boot에 부하를 자동 재주입하지 않는다.
+기능 실패·모드 전환·VM 복구의 순서는 [시나리오 ⑥](../platform/recovery-scenarios.md#6-제어권-전환승계)를 따른다.
 
 ## local 조회와 인수 경계
 

@@ -1,9 +1,40 @@
 # Recovery Worker·Engine 후속 구현 요청
 
 담당: Worker·Engine. 상태: **6-A 인계 준비 / D01·D03의 정책·제품 연결 수락 전**.
-2026-11-02 인계에 2026-11-06 E4 국소 후속을 반영했다. 기존 ID와 [상세 근거](2026-10-27-recovery-health-ctrl.md)는 유지한다.
+2026-11-07 장애 범위 정합화와 기존 E4 후속을 반영했다. 기존 ID와 [상세 근거](2026-10-27-recovery-health-ctrl.md)는 유지한다.
+
+최신 제공 범위는 코드·로컬 검증·FW1.0.33과 하위 모듈의 보드 개별 적용이다.
+세 시연은 정상 준비 단계에서 미수락이며 실제 장애를 주입하지 않았다.
+이 상태를 원 복구·Standby 재합류·다음 장애 대응 완료로 회신하지 않는다.
+[현재 검증](../verification/recovery-scenario-closure-20261030.md#recovery-demo-20261107)에 후보·실패·복원 근거를 모았다.
 
 ## 현재 담당자가 할 일
+
+### D01-W03·W04 / D03-W03·W04 — 기능 실패와 VM 복구를 분리해 수락
+
+부하 명령을 받았다는 이유로 VM 복구를 시작하지 않는다. Gateway는 모드·출력 보호·승계를 맡고,
+Worker는 현재 실행의 정책상 VM 장애를 기존 Engine/Manager로 복구한다.
+[건강 판정](../contracts/health-evidence-v1.md#시연-부하와-장애-범위)과
+[시나리오 ⑥](../platform/recovery-scenarios.md#6-제어권-전환승계)을 기준으로 다음을 연결한다.
+
+| 관측·흐름 | 제공 코드와 담당 수락 |
+|---|---|
+| AUTO 지연 중 높은 CPU 점유 | 원 명령 결과와 실제 주행 기능 실패를 구분하며, 점유율만으로 새 recovery attempt를 만들지 않음 |
+| `AUTO_DEADLINE_MISS` | `recovery/rejoin.py:on_trust/legacy_fault_reports`가 현재 binding·boot·app 검증 뒤 function 진단으로 보관. `worker.py:run_once`가 이 보고를 `Watcher.report_untrusted`로 승격하지 않음 |
+| A AUTO 기능 실패 | 기존 앱별 lifecycle을 Gateway가 소비해 현재 준비된 B AUTO 또는 정상 MANUAL·SAFE_STOP을 선택. A의 같은 실행은 기능 회복 후 Standby 자격을 되찾음. Worker 새 시도·새 boot·부하 자동 재주입 0 |
+| Jetson 입력 상실·회복 | 한 VM의 `WORLD_UNAVAILABLE`만으로 공통 장애를 확정하지 않음. 양쪽 현재 입력 근거와 정상 MANUAL을 확인. 회복 뒤 현재 Active의 준비·명시적 재개·제어 적용을 사용하고 `manual_hold`를 보존. 입력 장애를 반복 VM 복구로 처리하지 않음 |
+| 실제 VM 장애 | 현재 intent/host/execution·원 attempt/deadline·Gateway 보호·E4를 확인해 기존 복구 실행. 새 receipt/binding·준비·정당한 보호 종결 뒤 Standby로 합류하고, 다음 장애에서 정상 후보로 선택되는지 확인 |
+
+현재 소스는 지연 명령 자체를 `vm.trust`로 발행하지 않고 기존 health/lifecycle을 사용한다.
+구형 보고의 의미를 바로잡더라도 과거 Authority `distrusted`·원 시도·보호 기록을 삭제하거나 자동 해제하지 않는다.
+경고와 기능 제한이 실제 fatal·실행 손상·생존 실패의 기존 복구 경로를 막아서도 안 된다.
+
+관련 소스 시험은 `tests/test_drive_rejoin.py`, `test_recovery_worker.py`, `test_warm_liveness.py`와
+Gateway의 `tests/test_verified.py`, `test_warm.py`, `test_provider_ipc.py`를 재사용한다.
+담당자는 후보·실제 로드 모듈·주입 명령과 원 관측 문맥, 원 결과·복구/보호 기록, 정상 회복·다음 장애 결과를 회신한다.
+명령의 주입 기간과 시험 관측창을 구분하고, 같은 표본/결과 재전달로 지속 위반을 늘리지 않는다.
+관측이 끊기거나 실행이 교체되면 원 결과를 회수하며 새 execution에 명령을 자동 재주입하지 않는다.
+이 절은 제공 소스의 소비·수락 지시이며 세 흐름의 실보드 통과를 뜻하지 않는다.
 
 ### D01-W01·W02 / D03-W01·W02 — 제공된 VM별 자격과 적용 프로필 연결
 
@@ -77,10 +108,11 @@ templates/recovery-operation/원 key 조회도 긴 물리 실행 잠금 밖이�
 설치 패키지는 `xenova-gateway-client`, 기본 endpoint는 `/run/xenova-gateway/control.sock`이다.
 현재 root Worker/Gateway 배치에서 같은 host·namespace의 private socket에 접근한다. Authority 파일이나 shell 출력은 읽지 않는다.
 [실제 호출·결과 계약](../contracts/gateway-provider-v1.md)과 [실행·실패 시험 근거](../verification/recovery-scenario-closure-20261030.md#gateway-provider)를 따른다.
-검토 시작 기준은 HEAD `5d05101efd39c457cb78a05b473952bc38e7a317`과 당시 미커밋 diff였다.
-현재 인계 소스는 `feat/platform/recovery-drive-runtime-hardening`의 작업별 커밋이다.
-보드 B의1.0.30 유지, 운영 Python 설치와 시험 사본의 차이, 미완료 READY·부하 시험은
-[최신 중단 기록](../verification/recovery-scenario-closure-20261030.md#r65-pause-20261107)으로 구분한다.
+현재 검토 기준은 `feat/platform/vm-stress-integration`의 HEAD
+`47b7304817eb9d726c7b37a80539d56bb5b5d1af`와 장애 범위 보완 diff다. 설치·회신에서는 최종 후보를 다시 고정한다.
+11/07 보드 A/B의1.0.32 적용·telemetry 수신과 후속1.0.33 소스 후보의 실제 설치는 별개다.
+운영 Python 설치와 시험 사본의 차이, 과거 B1.0.30·미완료 READY 시험은
+[당시 중단 기록](../verification/recovery-scenario-closure-20261030.md#r65-pause-20261107)에 보존한다.
 실제 시험 사본·로드 경로와 미완료는 [보드 예산 시험 연결표](../verification/recovery-scenario-closure-20261030.md#budget-board-followup-20261106)에 연결한다.
 과거 G1 후보 `8e3232a`는 [당시 제공자 검증](../verification/recovery-scenario-closure-20261030.md#gateway-provider)에,
 `cdcb619`와 `feat/platform/gateway-history-driving-app`은 [이력·주행앱 착수 기록](../verification/recovery-scenario-closure-20261030.md#history-driving-app)에 보존한다.

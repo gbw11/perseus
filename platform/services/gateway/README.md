@@ -450,3 +450,39 @@ python tools/measure_failover.py --port 18832 --runs 10
 - 실제 ESP32 연결, 프레임 확정·계약 v1.1 (S15P31E110-241), `vehicle.status` 중계
 - 코어 고정·실시간 우선순위와 실제 서비스/장치 수락은 미완료다. 2026-11-01 정규 recipe·비활성 unit 포장은 추가했으며 실제 설치와 구분한다.
 - 시리얼 쓰기 연속 실패 시 처리 (지금은 로그·횟수만, 최종 정지는 ESP32 와치독)
+# 선택적 Pi J-uplink와 실제 mapper clock
+
+기존 warm/feedback-2/drive-link 실행에 `--mapper-uplink-profile /etc/xenova/mapper-uplink.json`을
+명시할 때만 독립 Linux spawn process를 연다. static `--world-trust`와 함께 사용할 수 없다.
+profile이 없거나 잘못됐거나 실제 왕복이 없으면 mapper clock을 승인하지 않는다.
+J 네트워크 I/O는 child만 수행하고 Gateway의 MANUAL/ESP STOP은 이 clock 준비를 기다리지 않는다.
+패키지는 기존 world extra의 Paho2.1.0/protobuf와 내부 `xenova_drive_world`를 사용하며 자동 설치하지 않는다.
+
+private JSON은 같은 euid 소유·group/other 접근 불가·regular 단일 링크 파일(최대8192B)이다.
+정확한 top keys는 `version(1),clock,host,port,username,password,tof_profiles,tof_max_age_us`다.
+계정/암호 파일은 저장소에 넣지 않는다. `host`는 numeric IPv4이고 J broker 인증/ACL·배포 전송 보호는
+운영자가 수락해야 한다. MQTT payload/topic 이름 자체를 publisher 인증 증거로 보지 않는다.
+
+`clock`의 exact keys는 `vehicle,device,configuration,calibration,primitive,timestamp_error_us,drift_ppm,
+max_offset_width_us,lease_us,vehicle_max_age_us,lookback_us`다. 실제 등록 ID/보정과 수락한 오차 상한을
+넣어야 하며 코드 예시값을 물리 수락값으로 제공하지 않는다. `device`는 승인 topic component,
+primitive는 hex64다. lease≤1s, lookback≤1s이며 H는 원 Vehicle/ToF/카메라 history를 덮어야 한다.
+`tof_profiles`는 최대2개의 `[sensor_id(0/1),leaf_sha256,config_revision]`이고 없는 센서는 빈 목록이다.
+ToF leaf를 전체 vehicle calibration ID와 같다고 가정하지 않는다.
+
+Gateway actor가 P에 준 같은 원 VehicleSample bytes를 direct J 사본으로 준다. P broker를 subscribe해
+relay하지 않는다. 실제 ToF producer는 `runner.submit_mapper_tof(raw)`로 sensor별 최신 한 장을 전달하고,
+실제 scene 내구 승인 뒤 actor가 `runner.publish_mapper_scene_after_commit(raw)`를 호출한다.
+이 저장소의 기존 feedback-2는 Vehicle producer만 제공하므로 ToF/Scene 값을 합성해서 채우지 않는다.
+
+local frame은14장8.1의 header9필드와 little-endian length framing을 사용한다. header≤2048/body≤2048,
+전체≤4096을 각각 검사한다. Probe tag13 결정에 맞춰 PROBE_PLAN JSON은 원 필드+`prior_trust` hex/null로
+cap2048을 명시 적용했다. 최초2회에는 prior가 없고 실제 수락한 원 WorldTrust만 다음 probe에 전달한다.
+Probe≤1024/Reply≤1024이며 TRUST_CANDIDATE는 추가로 `12+실제probe길이+실제reply길이≤2048`이어야 한다.
+
+clock owner는 원 nonce/P1/P4/200ms deadline, 동일 source의 연속2회와 interval 일관성을 검사한다.
+상대 rate `|dP/dJ-1|≤rho`에 따라 Pi 기간을 J 기간으로 환산한 drift를 RTT+max(lease,H)에 보수 합성한다.
+원 expiry=P1+lease는 늘리지 않는다. time lease 갱신과 source admission revision은 별개다.
+J의 returned-lease helper는 원 전체 source와 고정 지원 window만 검증하며 모르는 P4를 만들지 않는다.
+자동 child 재시작 정책은 추가하지 않았고, 명시 restart도 old 실제 종료 확인 후 통로/client만 교체한다.
+실제 broker/프로세스·장비 지연/오차의 운영 수락은 별도 검증한다.

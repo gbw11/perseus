@@ -98,7 +98,7 @@ void shell_print(const struct shell *sh,const char *fmt,...){
 }
 #endif
 static void probe_value(xenova_drive_DriveLink *out,uint64_t sequence){
- memset(out,0,sizeof(*out));out->major=1;out->which_payload=xenova_drive_DriveLink_probe_tag;
+ memset(out,0,sizeof(*out));out->major=2;out->which_payload=xenova_drive_DriveLink_probe_tag;
  strcpy(out->payload.probe.vm,"11111111-1111-4111-8111-111111111111");
  strcpy(out->payload.probe.execution,"22222222-2222-4222-8222-222222222222");
  strcpy(out->payload.probe.app_instance,"33333333-3333-4333-8333-333333333333");
@@ -174,7 +174,19 @@ int main(int argc,char **argv){
  if(!strcmp(scenario,"busy")){atomic_store(&ct_slots[0].state,3);assert(!ct_store(0,&ct_active));struct ct_row r;assert(ct_read(0,&r)==-EBUSY);assert(atomic_load(&ct_counts[CT_SKIPPED])==1);}
  if(!strcmp(scenario,"saturation")){atomic_store(&ct_counts[CT_RECORDS],UINT_MAX);struct ct_row r={0};ct_publish(&r);assert(atomic_load(&ct_counts[CT_RECORDS])==UINT_MAX);}
  if(!strcmp(scenario,"recovery")){publish_rc=-EIO;probe_value(&p,2);assert(binary_publish(&link_client,"fixture/out",&p)==-EIO);publish_rc=0;probe_value(&p,3);assert(binary_publish(&link_client,"fixture/out",&p)==0);assert(transmitted.payload.probe.sequence==3&&atomic_get(&reason)==0);}
- if(!strcmp(scenario,"other")){xenova_drive_DriveLink q=p;q.which_payload=xenova_drive_DriveLink_applied_tag;memset(&q.payload.applied,0,sizeof(q.payload.applied));assert(binary_publish(&link_client,"fixture/out",&q)==0);assert(ct_active.other_calls==1&&ct_active.other_max==4000&&ct_active.other_kind==2);}
+ if(!strcmp(scenario,"other")){
+  xenova_drive_DriveLink q=p;q.which_payload=xenova_drive_DriveLink_applied_tag;
+  memset(&q.payload.applied,0,sizeof(q.payload.applied));xenova_drive_AppliedState *a=&q.payload.applied;
+  strcpy(a->vm,p.payload.probe.vm);strcpy(a->execution,p.payload.probe.execution);strcpy(a->app_instance,p.payload.probe.app_instance);
+  strcpy(a->host_boot,"44444444-4444-4444-8444-444444444444");strcpy(a->gateway_instance,gateway);
+  strcpy(a->frame_epoch,"44444444-4444-4444-8444-444444444444");strcpy(a->odom_epoch,"77777777-7777-4777-8777-777777777777");
+  strcpy(a->configuration,lp_selected_config.id);strcpy(a->calibration,lp_selected_config.calibration);
+  strcpy(a->primitive,lp_selected_assets.sha256);strcpy(a->reference_id,"straight-lab-road");
+  a->state_revision=1;a->reference_revision=1;a->path_revision=1;a->maneuver_revision=1;
+  a->rebuilt=true;a->application_sequence=1;
+  assert(binary_publish(&link_client,"fixture/out",&q)==0);
+  assert(ct_active.other_calls==1&&ct_active.other_max==4000&&ct_active.other_kind==2);
+ }
  if(!strcmp(scenario,"shell-released")){
   for(unsigned index=0;index<8;index++)assert(ct_store(index,&ct_active));
   check_shell_released=true;
@@ -209,9 +221,9 @@ def native(tmp_path_factory):
     (include/'zephyr/logging/log.h').write_text('#define LOG_LEVEL_INF 3\n#define LOG_MODULE_REGISTER(...)\n#define LOG_INF(...) test_log(__VA_ARGS__)\n')
     (include/'zephyr/shell/shell.h').write_text('struct shell {int unused;};\nvoid shell_print(const struct shell *,const char *,...);\n#define SHELL_CMD_REGISTER(name,sub,help,fn) static void *test_shell_registration __attribute__((used))=(void *)&fn\n')
     source=directory/'input.c';source.write_text(HARNESS)
-    world=HOME/'world';binaries={}
+    mqtt=HOME.parent/'common/xenova-mqtt-c';world=HOME/'world';binaries={}
     common=['cc','-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-Wno-misleading-indentation','-ffunction-sections','-fdata-sections','-Wl,--gc-sections','-Wl,--wrap=pb_encode','-Wl,--wrap=dw_link_decode','-fsanitize=undefined','-fstack-usage','-DCONFIG_XENOVA_MQTT_BOUNDED_IO=1','-DCONFIG_XENOVA_MQTT_IO_MS=250',
-        *['-I'+str(path) for path in (include,HOME/'zephyr/src',HOME/'planner',world,world/'generated',world/'nanopb')],str(source),str(world/'world.c'),str(world/'generated/world.pb.c'),*[str(world/'nanopb'/name) for name in ('pb_common.c','pb_decode.c','pb_encode.c')],'-lm','-pthread']
+        *['-I'+str(path) for path in (include,HOME/'zephyr/src',HOME/'planner',world,world/'generated',world/'nanopb',mqtt/'include',mqtt/'third_party/jsmn')],str(source),str(world/'world.c'),str(world/'generated/world.pb.c'),*[str(p) for p in sorted((mqtt/'src').glob('*.c'))],*[str(world/'nanopb'/name) for name in ('pb_common.c','pb_decode.c','pb_encode.c')],'-lm','-pthread']
     for enabled in (False,True):
         binary=directory/('on' if enabled else 'off')
         command=[*common,'-DINPUT_SOURCE="'+str(HOME/'zephyr/src/lattice_input.c')+'"',*(['-DCONFIG_XENOVA_DRIVE_INPUT_DIAGNOSTICS=1','-DCONFIG_SHELL=1'] if enabled else []),'-o',str(binary)]

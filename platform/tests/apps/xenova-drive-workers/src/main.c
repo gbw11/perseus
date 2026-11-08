@@ -365,8 +365,10 @@ int main(void)
 		assert(drive_auto_delay_start(DRIVE_AUTO_DELAY_MAX_MS+1,1)==-EINVAL);
 		assert(!drive_auto_delay_start(2,1));
 		assert(drive_auto_delay_start(2,1)==-EBUSY);
-		int64_t before=k_uptime_get();drive_auto_delay_apply();
-		assert(k_uptime_get()>=before+2);
+		/* native_sim uptime ticks are 10ms in the fixed SDK. Measure the
+		 * original 2ms busy wait with the hardware counter, not tick rounding. */
+		uint64_t before=k_cycle_get_64();drive_auto_delay_apply();
+		assert(k_cyc_to_us_floor64(k_cycle_get_64()-before)>=2000);
 		for(unsigned i=1;i<DRIVE_AUTO_DEADLINE_MISS_LIMIT;i++)
 			assert(!drive_auto_delay_observe_deadline(true));
 		assert(drive_auto_delay_observe_deadline(true));

@@ -57,8 +57,9 @@ config XENOVA_AUTO_DELAY_INJECTION
 	default n
 	help
 	  Subscribes drive-v1 to the VM command topic for bounded auto_delay demo
-	  commands, adds a busy-wait after the real AUTO calculation, and reports
-	  five consecutive deadline misses as a VM trust event. This is a test fault
+	  commands and adds a busy-wait after the real AUTO calculation. The existing
+	  calculation health/lifecycle restricts the affected app; this injector
+	  does not declare a VM trust failure. This is a test fault
 	  injector, not an operating driving policy, and is excluded from normal builds.
 
 config XENOVA_DRIVE_WARM

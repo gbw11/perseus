@@ -18,8 +18,8 @@ static atomic_t stop;
 static struct xm_zclient *client;
 static char control_topic[XM_TOPIC_MAX], input_topic[XM_TOPIC_MAX], perception_topic[XM_TOPIC_MAX];
 #if defined(CONFIG_XENOVA_AUTO_DELAY_INJECTION)
-static char fault_command_topic[XM_TOPIC_MAX],fault_result_topic[XM_TOPIC_MAX],fault_event_topic[XM_TOPIC_MAX];
-static bool fault_command_registered,fault_running,fault_untrusted_sent;
+static char fault_command_topic[XM_TOPIC_MAX],fault_result_topic[XM_TOPIC_MAX];
+static bool fault_command_registered,fault_running;
 static int64_t fault_last_rx=-1,fault_started_ms,fault_deadline_ms;
 static struct xm_auto_delay_command fault_command;
 static char fault_last_status[12];
@@ -273,17 +273,15 @@ static void receive_fault_command(void)
  }
  rc=drive_auto_delay_start(incoming.delay_ms,incoming.duration_s);
  if(rc){fault_result(&incoming,"REJECTED",rc==-EBUSY?"BUSY":"STRESS_FAILED",0);return;}
- fault_command=incoming;fault_running=true;fault_untrusted_sent=false;fault_started_ms=k_uptime_get();
+ fault_command=incoming;fault_running=true;fault_started_ms=k_uptime_get();
  fault_deadline_ms=fault_started_ms+(int64_t)incoming.duration_s*1000;fault_result(&fault_command,"RUNNING",NULL,0);
 }
 static void observe_fault_command(void)
 {
  if(!fault_running)return;
  struct drive_auto_delay_status status;drive_auto_delay_status_get(&status);int64_t now=k_uptime_get();
- if(status.unhealthy&&!fault_untrusted_sent){
-  char json[256];snprintf(json,sizeof(json),"{\"trust\":\"UNTRUSTED\",\"reason\":\"AUTO_DEADLINE_MISS\",\"consecutive_misses\":%u,\"command_id\":\"%s\"}",status.consecutive_deadline_misses,fault_command.command_id);
-  if(!xm_zclient_publish(client,fault_event_topic,"vm.trust",json))fault_untrusted_sent=true;
- }
+ /* Actual AUTO completion/deadline health owns the per-app restriction.
+  * Injector progress and heap occupancy cannot declare a VM-wide failure. */
  if(now>=fault_deadline_ms){fault_running=false;fault_result(&fault_command,"SUCCEEDED",NULL,(uint64_t)(now-fault_started_ms));}
  else if(!status.active){fault_running=false;fault_result(&fault_command,"FAILED","STRESS_FAILED",(uint64_t)(now-fault_started_ms));}
 }
@@ -298,7 +296,6 @@ static void owner(void *a,void *b,void *c) {
   if(!rc&&!fault_command_registered){
    rc=xm_topic_vm(fault_command_topic,sizeof(fault_command_topic),client->id.vm_id,"command");
    if(rc>=0)rc=xm_topic_vm(fault_result_topic,sizeof(fault_result_topic),client->id.vm_id,"command-result");
-   if(rc>=0)rc=xm_topic_vm_app_events(fault_event_topic,sizeof(fault_event_topic),client->id.vm_id,"autonomous");
    if(rc>=0)rc=xm_zclient_subscribe(client,fault_command_topic,1);
    fault_command_registered=rc>=0;if(rc>0)rc=0;
   }

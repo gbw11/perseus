@@ -7,6 +7,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdatomic.h>
+#if defined(CONFIG_XENOVA_AUTO_DELAY_INJECTION)
+#include <xenova/auto_delay.h>
+#endif
 static const char *scenario;
 static struct xm_zclient client;
 static struct xd_inputs snapshot,previous;
@@ -21,6 +24,32 @@ K_SEM_DEFINE(entered,0,1);
 K_SEM_DEFINE(release,0,1);
 K_SEM_DEFINE(poll_entered,0,1);
 static bool is(const char *s){return scenario&&!strcmp(scenario,s);}
+#if defined(CONFIG_XENOVA_AUTO_DELAY_INJECTION)
+/* Command/owner boundary only. Real calculation health and pool exhaustion
+ * are exercised separately by workers and memory-native product tests. */
+K_MUTEX_DEFINE(fault_results_lock);
+static unsigned trust_events,fault_results,fault_starts;
+static char fault_result[512],fault_status[12];
+static int64_t injected_until;
+int drive_auto_delay_start(uint32_t delay,uint32_t duration){
+ assert(delay==2&&duration==1);fault_starts++;injected_until=k_uptime_get()+1000;return 0;
+}
+void drive_auto_delay_stop(void){injected_until=0;}
+void drive_auto_delay_status_get(struct drive_auto_delay_status *out){
+ *out=(struct drive_auto_delay_status){.active=k_uptime_get()<injected_until,
+  .unhealthy=true,.consecutive_deadline_misses=5};
+}
+int __wrap_xm_zclient_publish(struct xm_zclient *c,const char *topic,const char *type,const char *json){
+ ARG_UNUSED(c);ARG_UNUSED(topic);k_mutex_lock(&fault_results_lock,K_FOREVER);
+ if(!strcmp(type,"vm.trust"))trust_events++;
+ else {assert(!strcmp(type,"agent.command_result"));fault_results++;
+  assert(strlen(json)<sizeof(fault_result));strcpy(fault_result,json);
+  const char *states[]={"RUNNING","SUCCEEDED","FAILED","REJECTED"};
+  for(unsigned i=0;i<ARRAY_SIZE(states);i++)if(strstr(json,states[i]))strcpy(fault_status,states[i]);
+ }
+ k_mutex_unlock(&fault_results_lock);return 0;
+}
+#endif
 bool xd_owner_admit(void){return !atomic_get(&source_closed);}
 k_tid_t __real_z_impl_k_thread_create(struct k_thread *,k_thread_stack_t *,size_t,k_thread_entry_t,void *,void *,void *,int,uint32_t,k_timeout_t);
 k_tid_t __wrap_z_impl_k_thread_create(struct k_thread *t,k_thread_stack_t *stack,size_t size,k_thread_entry_t entry,void *a,void *b,void *c,int priority,uint32_t options,k_timeout_t delay) {
@@ -31,7 +60,12 @@ k_tid_t __wrap_z_impl_k_thread_create(struct k_thread *t,k_thread_stack_t *stack
 int xd_owner_prepare(struct xm_zclient *c,const char *control,const char *input) {
  assert(!strcmp(control,"control")&&!strcmp(input,"input"));
  if(atomic_get(&block_prepare)){k_sem_give(&entered);k_sem_take(&release,K_MSEC(500));}
- c->connected=connected;c->id.app_id="manual";return 0;
+ c->connected=connected;c->id.app_id="manual";
+#if defined(CONFIG_XENOVA_AUTO_DELAY_INJECTION)
+ c->id.vm_id="11111111-1111-4111-8111-111111111111";
+ strcpy(c->id.boot_id,"22222222-2222-4222-8222-222222222222");
+#endif
+ return 0;
 }
 int __wrap_xm_zclient_poll(struct xm_zclient *c,int32_t ms) {
  k_sem_give(&poll_entered);
@@ -41,6 +75,13 @@ int __wrap_xm_zclient_poll(struct xm_zclient *c,int32_t ms) {
  return 0;
 }
 int __wrap_xm_zclient_latest(struct xm_zclient *c,const char *topic,struct xm_envelope *e,int64_t *age) {
+#if defined(CONFIG_XENOVA_AUTO_DELAY_INJECTION)
+ if(strstr(topic,"/command")){
+  struct xm_zlatest *s=&c->latest[3];if(!s->len)return -ENODATA;
+  *e=(struct xm_envelope){.type={"agent.command",13},.payload={s->data,s->len}};
+  *age=k_uptime_get()-s->rx_ms;return 0;
+ }
+#endif
  unsigned i=!strcmp(topic,"control")?0:!strcmp(topic,"perception")?2:1;
  struct xm_zlatest *s=&c->latest[i];
  *e=(struct xm_envelope){.type={!i?"vehicle.control":i==2?"perception.result":"drive.input",!i?15:i==2?17:11},
@@ -51,6 +92,9 @@ int __wrap_xm_zclient_latest(struct xm_zclient *c,const char *topic,struct xm_en
  *age=k_uptime_get()-s->rx_ms;return 0;
 }
 int __wrap_xm_zclient_subscribe(struct xm_zclient *c,const char *topic,uint8_t qos) {
+#if defined(CONFIG_XENOVA_AUTO_DELAY_INJECTION)
+ if(strstr(topic,"/command")){assert(qos==1);strcpy(c->latest[3].topic,topic);return 0;}
+#endif
  ARG_UNUSED(c);assert(!strcmp(topic,"perception")&&qos==0);subscriptions++;return 0;
 }
 int __wrap_xm_zclient_publish_until(struct xm_zclient *c,const char *topic,const char *type,const char *json,int64_t end) {
@@ -121,7 +165,28 @@ int main(void) {
   atomic_set(&block_prepare,0);k_sem_give(&release);
  } else {
   read_ready();previous=snapshot;
-  if(is("dual")) {
+  if(is("fault-scope")) {
+#if defined(CONFIG_XENOVA_AUTO_DELAY_INJECTION)
+   freeze();struct xm_zlatest *s=&client.latest[3];assert(s->topic[0]);
+   snprintf(s->data,sizeof(s->data),"{\"command_id\":\"test-1\",\"operation_id\":\"op-1\",\"expected_boot_id\":\"22222222-2222-4222-8222-222222222222\",\"expires_at\":\"2026-11-07T00:00:00Z\",\"action\":\"auto_delay\",\"parameters\":{\"delay_ms\":2,\"duration_s\":1}}");
+   s->len=strlen(s->data);s->rx_ms=k_uptime_get();unfreeze();
+   int64_t until=k_uptime_get()+1500;
+   for(;;){
+    k_mutex_lock(&fault_results_lock,K_FOREVER);bool done=fault_results>=2;k_mutex_unlock(&fault_results_lock);
+    if(done||k_uptime_get()>=until)break;k_sleep(K_MSEC(10));
+   }
+   freeze();assert(fault_results==2&&fault_starts==1&&!trust_events);
+   assert(strstr(fault_result,"test-1")&&strstr(fault_result,"op-1"));
+   assert(!strcmp(fault_status,"SUCCEEDED"));
+   /* Same request replays the original failure, never a second injection. */
+   s->rx_ms++;unfreeze();k_sleep(K_MSEC(30));freeze();
+   assert(fault_results==3&&fault_starts==1&&!trust_events);
+   assert(strstr(fault_result,"test-1")&&strstr(fault_result,"op-1"));
+   unfreeze();candidate(1);assert(!xd_io_command(&command));k_sleep(K_MSEC(30));assert(sends==1);
+#else
+   assert(false);
+#endif
+  } else if(is("dual")) {
    assert(snapshot.dual_mode&&!snapshot.perception.error&&snapshot.perception.length==2);
    assert(subscriptions==1);
    assert(xd_io_start(&client,"control","input")==-EINVAL);

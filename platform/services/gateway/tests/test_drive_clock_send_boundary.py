@@ -22,7 +22,7 @@ from xenova_gateway.odometry import VehicleOdometry
 
 
 def reply(*,receive=0,sent=0):
-    value=schema.DriveLink(major=1);body=value.clock
+    value=schema.DriveLink(major=2);body=value.clock
     body.probe.CopyFrom(schema.ClockProbe(vm=A,execution='e',app_instance='a',sequence=1,guest_send_us=10))
     body.host_boot='h';body.gateway_instance='g';body.pi_receive_us=receive;body.pi_send_us=sent
     body.vehicle.CopyFrom(schema.VehicleSample(major=1,vehicle='v',host_boot='h',device_session='d',odom_epoch='o',
@@ -48,7 +48,7 @@ def pad_clock(value,length):
     raise AssertionError((base,length))
 
 
-@pytest.mark.parametrize('stamp',[0,1,127,128,2**35,2**64-1])
+@pytest.mark.parametrize('stamp',[0,1,127,128,2**35,2**63-1])
 def test_uint64_send_splice_matches_canonical_codec_and_preserves_all_other_fields(stamp):
     value=reply();prepared=PreparedClock(value)
     expected=schema.DriveLink();expected.CopyFrom(value);expected.clock.pi_send_us=stamp
@@ -72,7 +72,15 @@ def test_size_cap_is_checked_before_splice_allocation():
     # major(2), clock tag(1), clock length(3) plus body fill the same wire cap.
     value=pad_clock(reply(sent=1),MAX_BYTES-6);prepared=PreparedClock(value)
     assert len(prepared)==MAX_BYTES and prepared.stamp(1)==prepared
-    with pytest.raises(ValueError,match='wire size cap'):prepared.stamp(2**64-1)
+    with pytest.raises(ValueError,match='wire size cap'):prepared.stamp(2**63-1)
+
+
+@pytest.mark.parametrize('stamp',[2**63,2**64-1])
+def test_send_splice_preserves_the_semantic_timestamp_bound(stamp):
+    prepared=PreparedClock(reply());original=bytes(prepared)
+    with pytest.raises(ValueError,match='semantic uint64 range'):
+        prepared.stamp(stamp)
+    assert bytes(prepared)==original
 
 
 @pytest.mark.parametrize('stamp',[None,False,True,-1,2**64,1.,'1',b'1'])
@@ -83,8 +91,8 @@ def test_explicit_invalid_stamp_is_not_a_default(stamp):
 def test_time_order_type_topic_and_snapshot_ownership_guards():
     value=reply(receive=10,sent=10);prepared=PreparedClock(value)
     with pytest.raises(ValueError,match='send before receive'):prepared.stamp(9)
-    with pytest.raises(ValueError,match='send before receive'):PreparedClock(reply(receive=10,sent=9))
-    for bad in (b'bytes',schema.DriveLink(major=1),schema.DriveLink(major=1,probe=value.clock.probe)):
+    with pytest.raises(ValueError,match='Pi clock order'):PreparedClock(reply(receive=10,sent=9))
+    for bad in (b'bytes',schema.DriveLink(major=2),schema.DriveLink(major=2,probe=value.clock.probe)):
         with pytest.raises(ValueError,match='clock reply required'):PreparedClock(bad)
     for name in ('vm','_layout'):
         with pytest.raises(AttributeError,match='immutable'):setattr(prepared,name,0)
@@ -150,7 +158,7 @@ def provider_fixture(tmp_path,clock):
     io=DriveLinkIO('127.0.0.1',1,None,None,(A,B),clock=clock)
     source_trust=trust(w);source_trust.expires_pi_us=1
     provider=DriveLinkProvider(w.runner,io,source_trust,str(uuid4()))
-    request=schema.DriveLink(major=1)
+    request=schema.DriveLink(major=2)
     request.probe.CopyFrom(schema.ClockProbe(vm=B,execution=w.executions[B],app_instance=w.ids[B]['autonomous'],sequence=1,guest_send_us=100))
     return w,io,provider,request
 
