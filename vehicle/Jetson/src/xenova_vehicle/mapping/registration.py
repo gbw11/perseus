@@ -75,10 +75,16 @@ class SegmentFeature:
 
 @dataclass(frozen=True)
 class FrozenReference:
+    """유한 기하와 원 생산 정책이다. UNSPECIFIED는 endpoint 의미를 소급 수락하지 않는다.
+
+    feature_policy는 pipeline의 strip 생산/복원 경계용이며 generic register의
+    독립 feature 계약이나 LaneCatalog의 common-overlap 기하를 승인하지 않는다.
+    """
     revision: int
     calibration_id: str
     segments: tuple[SegmentFeature, ...]
     shared_error_m: float = 0.
+    feature_policy: str = 'UNSPECIFIED'
 
     def __post_init__(self):
         if type(self.revision) is not int or self.revision < 0 or not self.calibration_id:
@@ -88,6 +94,9 @@ class FrozenReference:
             raise ValueError('reference segment cap exceeded')
         if _number(self.shared_error_m, 'shared error') < 0:
             raise ValueError('negative inherited error')
+        if (type(self.feature_policy) is not str
+                or self.feature_policy not in ('UNSPECIFIED', 'PHYSICAL_STRIP_ENDPOINTS_V1')):
+            raise ValueError('unknown reference feature policy')
 
 
 @dataclass(frozen=True)

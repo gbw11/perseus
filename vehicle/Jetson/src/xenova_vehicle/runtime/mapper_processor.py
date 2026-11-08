@@ -44,6 +44,7 @@ class ResidentMapperProcessor:
         self._latest_source_inputs=None;self._scene_row=self._scene_delivery=None
         self._scene_summary_sent=None;self._scene_freeze_request=None
         self._scene_freeze_attempt=None
+        self._scene_freeze_prequeue=None
         self._scene_restore_archive=None
         self.clock=clock
         if checkpoint_interval_us is not None:
@@ -226,11 +227,22 @@ class ResidentMapperProcessor:
         hazard=self._hazard.snapshot.revision
         attempt=(coordinator.scene.grant_bytes,owner._revision,hazard)
         if attempt==self._scene_freeze_attempt:return
-        self._scene_freeze_attempt=attempt
-        trust=decode(coordinator.scene._lease.trust_bytes,schema.WorldTrust)
-        expires=min(now+owner._job_lifetime,grant.survey_deadline_pi_us-trust.upper_offset_us)
-        if expires<=now:self._scene_status='SCENE_FREEZE_EXPIRED';return
-        job=StorageJob(owner._context,str(uuid4()),now,expires,str(UUID(bytes=grant.request_nonce)))
+        pending=self._scene_freeze_prequeue
+        if pending is None or pending[0]!=coordinator.scene.grant_bytes:
+            trust=decode(coordinator.scene._lease.trust_bytes,schema.WorldTrust)
+            expires=min(now+owner._job_lifetime,grant.survey_deadline_pi_us-trust.upper_offset_us,
+                grant.valid_until_pi_us-trust.upper_offset_us,
+                coordinator.scene._lease.expires_pi_us-trust.upper_offset_us)
+            if expires<=now:self._scene_status='SCENE_FREEZE_EXPIRED';return
+            job=StorageJob(owner._context,str(uuid4()),now,expires,str(UUID(bytes=grant.request_nonce)))
+            self._scene_freeze_prequeue=(coordinator.scene.grant_bytes,attempt,job)
+        else:
+            _,original_attempt,job=pending
+            # 미게시 작업도 원 context/revision/기한을 고정한다. 새 lease나 frame으로 재포장하지 않는다.
+            if original_attempt!=attempt or job.context is not owner._context:
+                self._scene_status='SCENE_FREEZE_INPUT_CHANGED';return
+            if not job.current(owner._context.sha256,now):
+                self._scene_status='SCENE_FREEZE_EXPIRED';return
         snapshot=request=None;described=False
         try:
             hazard_state=self._hazard_checkpoint_state()
@@ -240,6 +252,8 @@ class ResidentMapperProcessor:
             descriptor=coordinator.freeze_scene(job,current_tile_references=refs,current_hazard_revision=hazard,now_j_us=now)
             described=True
             request=owner.queue_checkpoint(job,now_us=now,scene=descriptor,subsystem_state=hazard_state)
+            # 이 원 request의 수락 뒤부터 기존 pending/terminal owner가 회수한다.
+            self._scene_freeze_attempt=attempt;self._scene_freeze_prequeue=None
             archive=(None if snapshot.atlas_owner is None else
                 snapshot.atlas_owner.retain_scene(snapshot.atlas_snapshot,request))
             coordinator.adopt_freeze(request,current_tile_references=refs,current_hazard_revision=hazard,

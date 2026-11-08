@@ -238,8 +238,106 @@ def build_world(snapshot, template, *, source, preferred_road=None, static_retai
     return BuiltWorld(payload, source)
 
 
+def _lane_source_topology(point_sets):
+    """원 dense 기하를 먼저 검산한다. 점 생략으로 loop/순서/side를 수리하지 않는다."""
+    # 같은 저장소의 현재 codec과 동일한 명목 기하 계약이며 새 공개 API가 아니다.
+    from xenova_drive_world.codec import _simple,_cross
+    divider=point_sets[0]
+    for points in point_sets:
+        if any(len(p)!=2 or any(type(v) not in (int,float) or not math.isfinite(v) for v in p) for p in points):
+            raise WorldBuildError('finite original common station points required')
+        _simple(list(points))
+    signs=[]
+    for center,outer in zip(point_sets[1:3],point_sets[3:]):
+        _simple(list(divider)+list(reversed(outer)),True)
+        sign=0
+        for i,p in enumerate(center):
+            k=min(i,len(divider)-2);side=_cross(divider[k],divider[k+1],p)
+            current=1 if side>1e-6 else -1 if side< -1e-6 else 0
+            if not current or sign and current!=sign:raise WorldBuildError('original lane divider side')
+            sign=current
+            if i and sum((p[j]-center[i-1][j])*(divider[i][j]-divider[i-1][j]) for j in (0,1))<=0:
+                raise WorldBuildError('original lane station order')
+        signs.append(sign)
+    if signs[0]==signs[1]:raise WorldBuildError('original lanes must straddle divider')
+
+
+def _wire_outer(center,divider):
+    # world.c의 float 연산 순서대로 재구성한다. Python double 식으로 통과시키지 않는다.
+    return tuple(_f32(_f32(2*v)-d) for v,d in zip(center,divider))
+
+
+def _lane_c_heading(model):
+    """C의 float32 입력/연산 순서를 대조한다. 대상 hypotf 일치는 네이티브 검산이 별도다."""
+    if any(abs(v)>=1e6 for p in model.divider for v in (p.x,p.y)):
+        raise ValueError('converted lane coordinate outside C domain')
+    for lane in model.lanes:
+        if any(abs(v)>=1e6 for p in lane.centerline for v in (p.x,p.y)):
+            raise ValueError('converted lane coordinate outside C domain')
+        error=_f32(_f32(2*lane.position_bound_m)+model.divider_position_bound_m)
+        limit=_f32(2*error)
+        points=[_wire_outer((p.x,p.y),(d.x,d.y)) for p,d in zip(lane.centerline,model.divider)]
+        if any(abs(v)>=1e6 for p in points for v in p):
+            raise ValueError('converted lane coordinate outside C domain')
+        for a,b in zip(points,points[1:]):
+            length=_f32(math.hypot(_f32(b[0]-a[0]),_f32(b[1]-a[1])))
+            if length<=limit:raise ValueError('unbounded reconstructed lane heading')
+
+
+def _positive_up(value):
+    return math.nextafter(value,math.inf) if value else 0.
+
+
+def _lane_subset_bounds(h,point_sets,converted,indices,crossing,original_bound):
+    """원 common-s 보간 전체를 포함하는 위치/방향 bound와 보수 metadata를 만든다."""
+    wires=[tuple(points[k] for k in indices) for points in converted]
+    wires.extend(tuple(_wire_outer(c,d) for c,d in zip(points,wires[0])) for points in wires[1:3])
+    residual=[0.]*5;quantization=[0.]*5;turn=[0.]*5
+    states=[False]*len(indices);crossings=[]
+    for q,(a,b) in enumerate(zip(indices,indices[1:])):
+        crossings.append(int(all(crossing[a:b])))
+        inferred=any(h.inferred[a:b+1]);states[q]|=inferred;states[q+1]|=inferred
+        for side,(original,wire) in enumerate(zip(point_sets,wires)):
+            start,end=original[a],original[b]
+            dx,dy=end[0]-start[0],end[1]-start[1]
+            wx,wy=wire[q+1][0]-wire[q][0],wire[q+1][1]-wire[q][1]
+            if dx==dy==0 or wx==wy==0:return None
+            quantization[side]=max(quantization[side],math.dist(start,wire[q]),math.dist(end,wire[q+1]))
+            quant_angle=abs(math.atan2(dx*wy-dy*wx,dx*wx+dy*wy))
+            for k in range(a,b+1):
+                t=(h.station_s[k]-h.station_s[a])/(h.station_s[b]-h.station_s[a])
+                chord=tuple((1-t)*start[j]+t*end[j] for j in (0,1))
+                residual[side]=max(residual[side],math.dist(original[k],chord))
+                if k==b:continue
+                sx,sy=original[k+1][0]-original[k][0],original[k+1][1]-original[k][1]
+                # 역방향 subsegment를 큰 오차 한 개로 숨기는 간략화는 하지 않는다.
+                if sx*dx+sy*dy<=0:return None
+                angle=abs(math.atan2(sx*dy-sy*dx,sx*dx+sy*dy))
+                turn[side]=max(turn[side],_positive_up(angle+quant_angle))
+    full=len(indices)==len(h.station_s)
+    # full-index에는 생략 잔차가 없다. 원 float32 bound가 이미 덮으면 bytes를 보존한다.
+    bounds=[max(original_bound,_f32_up(h.error_m+q if full else
+                _positive_up(h.error_m+_positive_up(r)+_positive_up(q))))
+            for r,q in zip(residual,quantization)]
+    # 실제 원 outer도 포함한다. center/divider 반올림으로 생긴 복원 잔차를 버리지 않는다.
+    for side in (1,2):
+        required=bounds[side+2]
+        if _f32(_f32(2*bounds[side])+bounds[0])<required:
+            bounds[side]=max(bounds[side],_f32_up(_positive_up((required-bounds[0])/2)))
+            if _f32(_f32(2*bounds[side])+bounds[0])<required:return None
+    def heading(value):return _f32_up(h.yaw_error_rad if full and value==0 else _positive_up(h.yaw_error_rad+value))
+    headings=[heading(turn[0])]
+    headings.extend(heading(max(turn[side],turn[side+2])) for side in (1,2))
+    return wires[:3],bounds[:3],headings,bytes(map(int,states)),bytes(crossings)
+
+
 def lane_model_from_road(road, *, lane_ids, model_revision, lane_revisions, crossing):
-    """유일하고 완전한 역할 가설만 변환한다. stable ID/revision/crossing은 외부 입력이다."""
+    """원 source/ID/revision을 보존해 유한 wire common station 표현만 선택한다.
+
+    원 모든 station과 C outer의 원 tube가 이미 포함되면 bytes를 그대로 유지한다. 짧은 outer heading 때문에만
+    거절된 경우 최대30개의 balanced 부분열을 시도하며 원 양끝/전체 구간을 보존한다.
+    원 dense 위치·방향·inferred·교차 정책의 불확실성은 줄이지 않는다.
+    """
     from ..perception.road import RoadResult
     schema, _, _, validate = _shared()
     if type(road) is not RoadResult or not road.complete or road.status not in ('VALID', 'PARTIAL') or len(road.hypotheses) != 1:
@@ -265,23 +363,43 @@ def lane_model_from_road(road, *, lane_ids, model_revision, lane_revisions, cros
         for center, outer in ((left, left_outer), (right, right_outer)):
             if any(not math.isclose(center[i], (divider[i] + outer[i]) / 2, abs_tol=1e-12, rel_tol=1e-12) for i in (0, 1)):
                 raise WorldBuildError('lane centers are not actual outer/divider midpoints')
+    try:_lane_source_topology(point_sets)
+    except (ValueError,TypeError,OverflowError) as error:
+        raise WorldBuildError('invalid original lane topology: '+str(error)) from error
     converted = [tuple((_f32(point[0]), _f32(point[1])) for point in points) for points in point_sets[:3]]
     quantization = max(math.dist(point, wire) for points, wires in zip(point_sets[:3], converted)
                        for point, wire in zip(points, wires))
     bound, heading = _f32_up(h.error_m + quantization), _f32_up(h.yaw_error_rad)
     states = bytes(int(value) for value in h.inferred)
-    model = schema.LaneModel(revision=model_revision, crossing=crossing, divider_state=states,
-        divider_position_bound_m=bound, divider_heading_bound_rad=heading)
-    for point in converted[0]:
-        model.divider.add(x=point[0], y=point[1])
-    for index in range(2):
-        lane = model.lanes.add(lane_id=lane_ids[index], adjacent_lane_id=lane_ids[1-index],
-            revision=lane_revisions[index], travel_direction=1, position_bound_m=bound,
-            heading_bound_rad=heading, point_state=states)
-        for point in converted[index+1]:
-            lane.centerline.add(x=point[0], y=point[1])
+    def build(points,bounds,headings,states,allowed):
+        model=schema.LaneModel(revision=model_revision,crossing=allowed,divider_state=states,
+            divider_position_bound_m=bounds[0],divider_heading_bound_rad=headings[0])
+        for point in points[0]:model.divider.add(x=point[0],y=point[1])
+        for index in range(2):
+            lane=model.lanes.add(lane_id=lane_ids[index],adjacent_lane_id=lane_ids[1-index],
+                revision=lane_revisions[index],travel_direction=1,position_bound_m=bounds[index+1],
+                heading_bound_rad=headings[index+1],point_state=states)
+            for point in points[index+1]:lane.centerline.add(x=point[0],y=point[1])
+        return model
+    audit=_lane_subset_bounds(h,point_sets,converted,tuple(range(n)),crossing,bound)
+    if audit is None:raise WorldBuildError('original station coverage cannot be represented')
+    # full audit의 inferred OR은 직접 경로에 적용하지 않는다. 원 state/crossing 그대로다.
+    model=build(converted,audit[1],tuple(max(heading,v) for v in audit[2]),states,crossing)
     try:
         validate(model)
+        _lane_c_heading(model)
     except ValueError as error:
-        raise WorldBuildError('invalid shared lane model: ' + str(error)) from error
-    return model
+        if str(error)!='unbounded reconstructed lane heading':
+            raise WorldBuildError('invalid shared lane model: '+str(error)) from error
+        original_error=error
+    else:return model
+    for count in range(n-1,1,-1):
+        indices=tuple((2*i*(n-1)+count-1)//(2*(count-1)) for i in range(count))
+        candidate=_lane_subset_bounds(h,point_sets,converted,indices,crossing,bound)
+        if candidate is None:continue
+        model=build(*candidate)
+        try:
+            validate(model);_lane_c_heading(model)
+        except ValueError:continue
+        return model
+    raise WorldBuildError('invalid shared lane model: '+str(original_error)) from original_error
