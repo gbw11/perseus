@@ -841,7 +841,26 @@ class ParkingBridge:
     def restore(self, loaded, *, now_us):
         if type(loaded) is not LoadedCheckpoint or not loaded.current(loaded.request, self.context.sha256, now_us):
             raise ValueError('actual current LOAD request/result required')
-        evidence = loaded.payload.evidence; originals = {}; contexts = {c.sha256: c for c in evidence.contexts}
+        self._restore_catalog(loaded.payload.evidence,loaded.original_job,now_us=now_us)
+        self.observe_heads(loaded.heads, loaded.request.job, now_us=now_us)
+
+    def restore_complete(self,complete,*,current_scope,now_us):
+        """전체 BOOTSTRAP 자료의 issued ID만 복원한다. provisional head를 재포장하지 않는다."""
+        from .scene import SceneEvidenceScope
+        if (type(current_scope) is not SceneEvidenceScope or current_scope.context!=self.context
+                or current_scope.calibration.sha256!=self.local_calibration_id
+                or current_scope.method_manifest_sha256!=json_bytes(self.method.payload,4096)['body']['method_manifest_sha256']):
+            raise ParkingNotReady('actual current source/method/local calibration scope required')
+        scope=current_scope.with_complete_history(complete,now_us=now_us)
+        _,head=scope.complete_restore_head(complete,now_us=now_us)
+        self._restore_catalog(complete.evidence,complete.original_job,now_us=now_us)
+        # 설명용 내구 하한이다. 새 publication job의 current head나 range 발행권이 아니다.
+        self._head_values=self._head_floor=tuple(hwm for _,hwm,_ in head.heads)
+
+    def _restore_catalog(self,evidence,original_job,*,now_us):
+        if self.catalog.tracks or self._pending_range is not None or self._pending_provenance is not None or self._pending_checkpoint is not None:
+            raise ParkingNotReady('restore requires a fresh catalog owner')
+        originals = {}; contexts = {c.sha256: c for c in evidence.contexts}
         records = {p.provenance_id: p for p in evidence.provenance}
         selected = tuple(c for c in evidence.catalog if c.kind == 'SLOT')
         needed = {c.provenance_id for c in selected}; revisions = set()
@@ -882,7 +901,7 @@ class ParkingBridge:
                 if identity not in records or records[identity].context_sha256 != c.sha256 or identity in originals:
                     raise ValueError('catalog provenance/context linkage mismatch')
                 originals[identity] = sources[entry['geometry_source']], _occupancy_from(entry['occupancy'], sources)
-                if body['storage_context_sha256'] != loaded.original_job.context.sha256:
+                if body['storage_context_sha256'] != original_job.context.sha256:
                     raise ValueError('original catalog context differs from committed job')
                 revision = int(body['catalog_revision'])
                 if str(revision) != body['catalog_revision']:
@@ -896,7 +915,6 @@ class ParkingBridge:
             self.catalog.restore(selected, {p: originals[p] for p in needed}, catalog_revision=revisions.pop(), restored_at_us=now_us)
         self._records = records; self._contexts.update(contexts)
         self._links = {c.stable_id: records[c.provenance_id].parents for c in selected}
-        self.observe_heads(loaded.heads, loaded.request.job, now_us=now_us)
 
     def publication_candidates(self, *, now_us, roi_bounds):
         from xenova_drive_world import schema

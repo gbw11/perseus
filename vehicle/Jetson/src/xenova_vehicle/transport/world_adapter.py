@@ -78,6 +78,7 @@ class WorldSource:
     captured_us: tuple[int, int]
     snapshot_us: int
     wire_clock_epoch: str | None = None
+    vehicle_bundle_sha256: str | None = None
 
     def __post_init__(self):
         if self.kind not in ('LIVE', 'REPLAY', 'SYNTHETIC'):
@@ -96,6 +97,10 @@ class WorldSource:
         if (type(self.calibration_id) is not str or len(self.calibration_id) != 64
                 or any(c not in '0123456789abcdef' for c in self.calibration_id)):
             raise WorldBuildError('original calibration SHA256 required')
+        if self.vehicle_bundle_sha256 is not None and (type(self.vehicle_bundle_sha256) is not str
+                or len(self.vehicle_bundle_sha256)!=64
+                or any(c not in '0123456789abcdef' for c in self.vehicle_bundle_sha256)):
+            raise WorldBuildError('declared vehicle calibration bundle SHA256 required')
         if type(self.captured_us) is not tuple or len(self.captured_us) != 2:
             raise WorldBuildError('original capture interval required; receive time is not a substitute')
         lo, hi = (_uint(value) for value in self.captured_us)
@@ -106,6 +111,20 @@ class WorldSource:
     @property
     def wire_epoch(self):
         return self.clock_id if self.wire_clock_epoch is None else self.wire_clock_epoch
+
+    @property
+    def wire_calibration(self):
+        """내부 profile ID와 승인한 전체 차량 bundle ID를 별도로 보존한다."""
+        return self.calibration_id if self.vehicle_bundle_sha256 is None else self.vehicle_bundle_sha256
+
+    @classmethod
+    def from_calibration(cls,kind,map_frame_id,frame_epoch,clock_id,calibration,captured_us,snapshot_us,
+                         *,wire_clock_epoch=None):
+        from ..perception.calibration import CalibrationProfile
+        if type(calibration) is not CalibrationProfile or calibration.vehicle_bundle_sha256 is None:
+            raise WorldBuildError('pinned profile must explicitly declare its approved vehicle bundle relation')
+        return cls(kind,map_frame_id,frame_epoch,clock_id,calibration.sha256,captured_us,snapshot_us,
+                   wire_clock_epoch=wire_clock_epoch,vehicle_bundle_sha256=calibration.vehicle_bundle_sha256)
 
 
 @dataclass(frozen=True)
@@ -171,7 +190,7 @@ def build_world(snapshot, template, *, source, preferred_road=None, static_retai
     # 공용 decoder와 같이 미검사 unknown bytes를 재발행/fingerprint에 싣지 않는다.
     result.DiscardUnknownFields()
     for name, expected in (('frame_epoch', source.frame_epoch), ('clock_epoch', source.wire_epoch),
-                           ('calibration', source.calibration_id)):
+                           ('calibration', source.wire_calibration)):
         if not result.HasField(name) or getattr(result, name) != expected:
             raise WorldBuildError('template source mismatch: ' + name)
     lo, hi = source.captured_us

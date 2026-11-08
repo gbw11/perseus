@@ -296,15 +296,7 @@ class LoadRequest:
     def __post_init__(self):
         if type(self.job) is not StorageJob or self.purpose not in ('CURRENT_MAP','BOOTSTRAP_RESTORE'):
             raise PersistenceError('original bounded LOAD job/purpose required')
-        reference=json_bytes(self.checkpoint_ref,2048)
-        names={'checkpoint_job_id','durable_revision','manifest_sha256','manifest_length','tile_count',
-               'map_epoch','frame_epoch','odom_epoch','pi_host_boot','configuration','calibration',
-               'primitive_sha256','origin_mapper_instance'}
-        if type(reference) is not dict or set(reference)!=names:raise PersistenceError('exact selected checkpoint reference required')
-        for name in ('checkpoint_job_id','map_epoch','frame_epoch','odom_epoch','pi_host_boot','origin_mapper_instance'):uuid(reference[name])
-        decimal(reference['durable_revision'],positive=True);digest(reference['manifest_sha256']);digest(reference['primitive_sha256'])
-        uint(reference['manifest_length'],16384,positive=True);uint(reference['tile_count'],128)
-        text(reference['configuration']);text(reference['calibration'])
+        selected_checkpoint_reference(self.checkpoint_ref)
         selection=json_bytes(self.selection,512)
         if type(selection) is not dict or selection.get('kind') not in ('CHECKPOINT_PAGE','TILE'):
             raise PersistenceError('LOAD selection must be a checkpoint page or exact tile')
@@ -321,6 +313,20 @@ class LoadRequest:
     def digest(self):
         return sha256(canonical(dict(job=self.job.fields,checkpoint_ref=json_bytes(self.checkpoint_ref,2048),
             selection=json_bytes(self.selection,512),purpose=self.purpose))).hexdigest()
+
+
+def selected_checkpoint_reference(raw):
+    """DB bootstrap/LOAD가 공유하는 기존 exact 선택 ref. 새 field/시각을 만들지 않는다."""
+    reference=json_bytes(raw,2048)
+    names={'checkpoint_job_id','durable_revision','manifest_sha256','manifest_length','tile_count',
+           'map_epoch','frame_epoch','odom_epoch','pi_host_boot','configuration','calibration',
+           'primitive_sha256','origin_mapper_instance'}
+    if type(reference) is not dict or set(reference)!=names:raise PersistenceError('exact selected checkpoint reference required')
+    for name in ('checkpoint_job_id','map_epoch','frame_epoch','odom_epoch','pi_host_boot','origin_mapper_instance'):uuid(reference[name])
+    decimal(reference['durable_revision'],positive=True);digest(reference['manifest_sha256']);digest(reference['primitive_sha256'])
+    uint(reference['manifest_length'],16384,positive=True);uint(reference['tile_count'],128)
+    text(reference['configuration']);text(reference['calibration'])
+    return reference
 
 
 @dataclass(frozen=True,slots=True)

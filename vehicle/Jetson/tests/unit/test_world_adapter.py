@@ -78,6 +78,23 @@ def preferred():
 
 
 class WorldAdapterTests(unittest.TestCase):
+    def test_declared_vehicle_bundle_is_wire_identity_while_local_profile_remains_grid_identity(self):
+        from test_resident_perception import provisional
+        from xenova_vehicle.perception.calibration import CalibrationProfile
+        fields=provisional().to_dict();fields['vehicle_bundle_sha256']='c'*64
+        calibration=CalibrationProfile.from_dict(fields)
+        original=snapshot();original['calibration_id']=calibration.sha256
+        header=template();header.calibration='c'*64
+        original['kind']='REPLAY'
+        bound=WorldSource.from_calibration('REPLAY',original['frame_id'],FRAME,CLOCK,calibration,
+            (1_000_000,1_000_010),1_100_000)
+        built=build_world(original,header,source=bound,preferred_road=preferred())
+        self.assertEqual(built.message().calibration,'c'*64)
+        self.assertEqual(built.source.calibration_id,calibration.sha256)
+        self.assertNotEqual(built.source.calibration_id,built.message().calibration)
+        header.calibration=calibration.sha256
+        with self.assertRaises(WorldBuildError):build_world(original,header,source=bound,preferred_road=preferred())
+
     def test_shared_roundtrip_explicit_occupancy_permission_and_original_age(self):
         import numpy as np
         original, header = snapshot(), template()

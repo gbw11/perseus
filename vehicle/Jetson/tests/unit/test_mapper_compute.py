@@ -13,7 +13,7 @@ from xenova_vehicle.oak.frames import RawFrame
 from xenova_vehicle.oak.yolop_frames import NNInputStamp, NNPacket, RuntimeTensor
 from xenova_vehicle.runtime.local_envelope import decode_structure
 from xenova_vehicle.runtime.mapper_compute import (
-    MapperCompute, MapperComputeError, MapperInput, MapperStillAlive, MAX_PHASE_EVENTS,
+    MapperCompute, MapperComputeError, MapperInput, MapperStillAlive, MapperCancelled, MAX_PHASE_EVENTS,
 )
 from xenova_vehicle.runtime.resident_samples import CaptureSample
 from xenova_vehicle.runtime.resident_transport import SentPacket
@@ -123,6 +123,99 @@ class Processor:
 
 
 class MapperComputeTests(unittest.TestCase):
+    def test_timed_adoption_receives_the_original_final_check_time_and_precedes_legacy_hook(self):
+        clock=Clock();received=[]
+        class TimedProcessor(Processor):
+            def accepted_at(self,original,checked_j_us):received.append((original.job_id,checked_j_us))
+            def accepted(self,original):raise AssertionError('legacy adoption must not run twice')
+        owner=MapperCompute(lambda generation:TimedProcessor(),source_generation='A',clock=clock)
+        owner.start()
+        try:
+            owner.submit(item());event_of(owner,'GEOMETRY_COMPLETED')
+            result=owner.take_result();self.assertTrue(result.accepted)
+            self.assertEqual(received,[(result.job_id,result.completed_us)])
+        finally:self.cleanup(owner)
+
+    def test_publication_and_final_adoption_share_one_actual_reentrant_lock(self):
+        from dataclasses import replace
+        from test_parking_catalog import publication_context
+        from xenova_vehicle.runtime.mapper_mapping import MappingContextPort
+        from xenova_vehicle.storage.contracts import canonical,json_bytes
+        for first in ('PUBLICATION','ADOPTION'):
+            with self.subTest(first=first):
+                port=MappingContextPort();port.publish(None,material=b'original');port.publish(None)
+                self.assertIsNone(port.read())
+                with port.adoption_lock:
+                    self.assertTrue(port.adoption_lock.acquire(False))
+                    port.adoption_lock.release()
+                original=publication_context();port.publish(original)
+                port.publish(replace(original));self.assertIs(port.read(),original)
+                self.assertEqual(port.read_material(),b'original')
+                fields=json_bytes(original.source_binding,2048);fields['source_binding_revision']='2'
+                newer=replace(original,source_binding=canonical(fields))
+                geometry_entered=threading.Event();geometry_gate=threading.Event()
+                adoption_entered=threading.Event();adoption_gate=threading.Event()
+                publish_attempted=threading.Event();published=threading.Event();observed=[];adopted=[]
+                class BoundProcessor(Processor):
+                    def accepted(self,item):
+                        if port.read() is not original:raise MapperCancelled('PUBLICATION_CHANGED')
+                        adoption_entered.set()
+                        # 원자 경계를 관찰하기 위한 시험 gate다. 실제 채택 hook은 대기하지 않는다.
+                        if first=='ADOPTION' and not adoption_gate.wait(2):raise AssertionError('adoption test gate expired')
+                        adopted.append(original)
+                processor=BoundProcessor(enter=geometry_entered,geometry_gate=geometry_gate)
+                owner=MapperCompute(lambda generation:processor,source_generation='A',clock=Clock(),
+                    adoption_lock=port.adoption_lock)
+                publisher=None;owner.start()
+                try:
+                    owner.submit(item());self.assertTrue(geometry_entered.wait(2))
+                    if first=='PUBLICATION':
+                        port.publish(newer);geometry_gate.set()
+                        event=event_of(owner,'CANCELLED')
+                        self.assertEqual(event.reason,'PUBLICATION_CHANGED')
+                        self.assertEqual(adopted,[]);self.assertIsNone(owner.take_result())
+                    else:
+                        geometry_gate.set();self.assertTrue(adoption_entered.wait(2))
+                        def publish():
+                            held=port.adoption_lock.acquire(False);observed.append(held)
+                            if held:port.adoption_lock.release()
+                            publish_attempted.set();port.publish(newer);published.set()
+                        publisher=threading.Thread(target=publish,name='test-publication-owner')
+                        publisher.start();self.assertTrue(publish_attempted.wait(2))
+                        self.assertEqual(observed,[False]);self.assertFalse(published.is_set())
+                        adoption_gate.set();self.assertTrue(published.wait(2))
+                        event_of(owner,'GEOMETRY_COMPLETED')
+                        result=owner.take_result();self.assertIsNotNone(result);self.assertTrue(result.accepted)
+                        self.assertEqual(adopted,[original]);self.assertIs(port.read(),newer)
+                finally:
+                    geometry_gate.set();adoption_gate.set()
+                    try:
+                        if publisher is not None:publisher.join(2)
+                    finally:self.cleanup(owner,geometry_gate,adoption_gate)
+                    if publisher is not None:self.assertFalse(publisher.is_alive())
+
+    def test_storage_maintenance_uses_compute_owner_without_raw_input_or_fake_progress(self):
+        called=threading.Event();threads=[]
+        def maintain():threads.append(threading.current_thread());called.set()
+        owner=MapperCompute(lambda generation:None,source_generation='A',maintenance=maintain)
+        owner.start()
+        try:
+            self.assertTrue(called.wait(1))
+            self.assertTrue(all(thread is not threading.current_thread() and thread.name=='M-compute' for thread in threads))
+            self.assertEqual(owner.poll(),())
+            self.assertIsNone(owner.take_result())
+        finally:self.cleanup(owner)
+
+    def test_storage_maintenance_failure_is_reported_and_actual_thread_can_be_joined(self):
+        def maintain():raise ValueError('invalid original storage job')
+        owner=MapperCompute(lambda generation:None,source_generation='A',maintenance=maintain)
+        owner.start()
+        end=time.monotonic()+1
+        while owner.is_alive and time.monotonic()<end:time.sleep(.001)
+        self.assertEqual(owner.terminal_error,'MAINTENANCE_ValueError')
+        self.assertFalse(owner.is_alive)
+        self.cleanup(owner)
+
     def cleanup(self, owner, *gates):
         owner.request_stop()
         for gate in gates:
