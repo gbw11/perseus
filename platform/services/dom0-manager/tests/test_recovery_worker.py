@@ -507,6 +507,18 @@ def test_worker_shutdown_marks_health_unavailable():
     assert client.published[-1][2]["state"] == "OBSERVATION_UNAVAILABLE" and client.published[-1][4] is True
 
 
+@pytest.mark.parametrize('scope',['warning','function',None])
+def test_legacy_resource_or_function_report_never_authorizes_vm_recovery(monkeypatch,scope):
+    watcher=Watcher(SETTINGS,HeartbeatTable(),AppHeartbeatTable(),clock=lambda:1000.)
+    def forbidden(*args):raise AssertionError('advisory promoted to VM failure')
+    monkeypatch.setattr(watcher,'report_untrusted',forbidden)
+    event={'vm_id':str(DEBIAN),'execution_id':str(UUID(int=77)),'scope':scope}
+    rejoin=SimpleNamespace(trust_events=lambda:[event])
+    worker=RecoveryWorker(SETTINGS,lambda:[_obs()],watcher,link=LinkState.up,
+                          clock=lambda:1000.,rejoin=rejoin)
+    assert worker.run_once()==[] and worker.judgments_total==0
+
+
 def test_worker_passes_subscription_state_to_watcher(tmp_path):
     clock = [1000.0]
     client = FakeClient(granted=set())  # 연결은 됐지만 ACL 이 구독을 거부

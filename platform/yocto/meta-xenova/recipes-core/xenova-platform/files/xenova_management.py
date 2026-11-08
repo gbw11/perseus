@@ -103,7 +103,7 @@ class ReadContext:
     실제 제어에는 전달하지 않는다. 변경을 발견하면 호출자가 최대 한 번 새 회차를 만들며,
     다른 요청·다른 host나 새 실행에 이 문맥을 복사하지 않는다.
     """
-    def __init__(self, manager, action, spec, deadline):
+    def __init__(self, manager, action, spec, deadline, *, _input_ids=None):
         self.m,self.action,self.spec,self.deadline=manager,action,spec,deadline
         self.started_ms=int(manager.p.clock()*1000)
         self.observed_ms={}
@@ -112,9 +112,12 @@ class ReadContext:
         self.states,self.tombs=manager._read_states(action,spec,deadline)
         self.by_id={s['vm_id']:s for s in self.states}
         self.lifecycles={s['vm_id']:(s['lifecycle'],s['generation']) for s in self.states}
-        common=self.e.observation_common_inputs() if self.e is not None and self.states else None
+        # A private binding cohort still validates the complete registry; only
+        # the selected targets' execution files are relevant to its observation.
+        input_states=self.states if _input_ids is None else [s for s in self.states if s['vm_id'] in _input_ids]
+        common=self.e.observation_common_inputs() if self.e is not None and input_states else None
         self.inputs={} if action=='registrations' else {s['vm_id']:(read_intent(manager.data,s['vm_id']) if self.e is None else
-                     self.e.observation_inputs(s['record'],self.lifecycles[s['vm_id']],_common=common)) for s in self.states}
+                     self.e.observation_inputs(s['record'],self.lifecycles[s['vm_id']],_common=common)) for s in input_states}
         self.check()
 
     def check(self):

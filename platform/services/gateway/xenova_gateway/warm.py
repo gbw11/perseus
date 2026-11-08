@@ -116,6 +116,17 @@ class WarmDriveMachine(VerifiedDriveMachine):
 
     def on_readiness(self,*args):return False  # no legacy READY fallback
 
+    def _invalidate_function(self,vm,app,reason):
+        super()._invalidate_function(vm,app,reason)
+        self.qualification.pop((vm,app),None)
+        self.states.invalidate(vm,app)
+
+    def _input_unavailable(self,vm,now):
+        from .verified import INPUT_FAILURES
+        p=self.prepared[vm,'autonomous'];check=self.checks.get((vm,'autonomous'))
+        return (p.generation==self.generation and p.state!='READY' and p.reason in INPUT_FAILURES and
+                check is not None and 0<=now-check[1]<=self.readiness_lease_s)
+
     def on_lifecycle(self,app,vm,payload,t):
         now=self.clock()
         if (t<self.evidence_not_before or not 0<=now-t<=self.readiness_lease_s or vm not in self.nodes or

@@ -1,0 +1,122 @@
+{
+  "issue": "S15P31E110-374",
+  "date": "2026-11-08",
+  "branch": "feat/platform/S15P31E110-374-freshness-recheck",
+  "base_commit": "d54f1ed7a10178c1f3015290732d6fec73499517",
+  "imported_commit": "1ab5ee7f",
+  "preserved_fix": "f1013ad3",
+  "import_command": "git cherry-pick --no-commit 1ab5ee7f",
+  "local_integration_pass": true,
+  "board_acceptance_complete": false,
+  "tests": [
+    {
+      "suite": "platform-focus",
+      "passed": 64,
+      "subtests_passed": 5,
+      "junit_testcases": 69,
+      "failures": 0,
+      "errors": 0,
+      "junit_sha256": "96c1a4d4e53c7b2bbe7781f8637d178f98744e4b7055d0e9db22ad24f84dfa17"
+    },
+    {
+      "suite": "manager-integration",
+      "passed": 107,
+      "subtests_passed": 0,
+      "junit_testcases": 107,
+      "failures": 0,
+      "errors": 0,
+      "junit_sha256": "e0f64b6172b7f0f4ce8275380c51d5bf57733fb915e0c4cfefaf0a37a3614822"
+    },
+    {
+      "suite": "display-boundaries",
+      "passed": 79,
+      "subtests_passed": 0,
+      "junit_testcases": 79,
+      "failures": 0,
+      "errors": 0,
+      "junit_sha256": "5ccff46d4b701d6b8da59d8284bc5ac83aa23ef1798b8a707af746a0907467da"
+    },
+    {
+      "suite": "platform-related",
+      "passed": 117,
+      "subtests_passed": 20,
+      "junit_testcases": 137,
+      "failures": 0,
+      "errors": 0,
+      "junit_sha256": "ef0b495e15412c07e4830fddfaa8a4fd0fb2e7cf5714649425df2e3f6a8fbe41"
+    }
+  ],
+  "totals": {
+    "passed": 367,
+    "subtests_passed": 25
+  },
+  "negative_control": {
+    "scope": "Replace only Execution.observe with the stress implementation inside a separate Python test process; no source file changes",
+    "expected_failures": [
+      "test_delayed_binding_failure_keeps_newer_paired_success[DEADLINE_EXCEEDED-single]",
+      "test_delayed_binding_failure_keeps_newer_paired_success[TARGET_CHANGED-single]"
+    ],
+    "other_cases_passed": 2
+  },
+  "files": [
+    {
+      "path": "platform/services/dom0-manager/dom0_manager/recovery/rejoin.py",
+      "sha256": "7573d68d3b9f2f9bc99fdf25c8de7cf35e1c9f9083b61f189a2bc0aeba540eeb"
+    },
+    {
+      "path": "platform/services/dom0-manager/tests/test_drive_rejoin.py",
+      "sha256": "f043d1a9182149af8e6417298095c37093e73198e8a59224d6cfdc33fcef9461"
+    },
+    {
+      "path": "platform/tests/test_xenova_binding_pair.py",
+      "sha256": "83fae598a8a2a258ed770719c09b3f8f5c47a2899c46a16aeabfe84acffc39aa"
+    },
+    {
+      "path": "platform/tests/test_xenova_drive_binding.py",
+      "sha256": "c59cb0c0a0fcfc20e9f90ad5d9e1fc2175c26e6487b75699c3cbc40a265608d5"
+    },
+    {
+      "path": "platform/tests/test_xenova_management.py",
+      "sha256": "0945d26bdaad6a0e96ab0b57d118daef9ddce6c7a216622fbd141f1066d89678"
+    },
+    {
+      "path": "platform/tests/test_xenova_recovery_foundation.py",
+      "sha256": "56dd17ef19481f085daed47de4f60e270f4eeb4800d0d13c07f42fa3d376f72a"
+    },
+    {
+      "path": "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_drive_binding.py",
+      "sha256": "a059c3267c5f92dde34739d0202f4573ca7353a66c1ffc12eca5876973304e0e"
+    },
+    {
+      "path": "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_execution.py",
+      "sha256": "5ac73bbc1c284db17c1a57249fc62f985db62fe18e9aa13a346f611eb5a03ea5"
+    },
+    {
+      "path": "platform/yocto/meta-xenova/recipes-core/xenova-platform/files/xenova_management.py",
+      "sha256": "4ed1255bb9b9c909a62bd92e8d331cb38d50b5b4d003c03c19185890bfcf1319"
+    },
+    {
+      "path": "platform/tests/test_xenova_binding_pair_error_order.py",
+      "sha256": "175ead01bc5c7be9be6fa5628cbf7aca109e8998e0aa178f3b831f64a329360e"
+    }
+  ],
+  "boundaries": {
+    "board_access": false,
+    "board_changes": false,
+    "other_local_branches_modified_by_this_task": false,
+    "service_restarts": false,
+    "ttl_changed": false,
+    "deadline_changed": false,
+    "auto_commit": false
+  },
+  "environment": {
+    "python": "WSL CPython 3.14.4",
+    "venv": "outputs/venvs/display-374-integration",
+    "dependency_list": "outputs/display-374-local-integration-20261108/requirements-tested.txt"
+  },
+  "limitations": [
+    "Fake Xen/native helper boundaries, real Manager/Execution/files/locks/coordinator and race threads",
+    "No real board deployment, two-browser freshness reacceptance or physical HDMI trial",
+    "Only A/B optimization commit imported; other stress fault-policy and Gateway changes are outside this local integration"
+  ]
+}

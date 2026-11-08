@@ -316,6 +316,10 @@ class GatewayProvider:
             fields['distrusted']=[item for item in self.a.value.get('distrusted',[])
                                   if item['vm_id']!=spec['target_vm']]
         self.a.update(**fields)
+        if not cancel:
+            # The actor updates RAM only after the guarded durable completion.
+            # Old execution reports remain rejected by the current binding.
+            self.m.untrusted.pop(spec['target_vm'],None)
         self.capture_pending.discard(request_id)
         # No preference rollback, generation allocation, automatic resume or
         # freshness renewal. New bindings/calculation/rearm remain necessary.

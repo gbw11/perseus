@@ -334,3 +334,11 @@ ARM/QEMU PTY ioctl 실패와 실제 B 시험의 남은 입력 지연·미수락 
 [제출 경계 후속](../verification/recovery-scenario-closure-20261030.md#clock-retry-submit-20261106)에서 구분한다.
 B는1.0.8·원 통신 설정으로 복원했고 Worker/mock Gateway 복구·소유 broker/자격 사본 정리를 확인했다.
 시험용 `/run` 소스를 운영 설치본으로 취급하거나 새 firmware를 검증된 기본값으로 승격하지 않는다.
+
+2026-11-07 장애 범위 보완의 FW1.0.33은 새 불변 bundle로 ARM 빌드하고 보드 A/B에 개별 적용했다.
+Python은 기존 Manager/Execution/binding·Worker·Gateway·공용 MQTT 설치 경로의 같은 후보를 대조한다.
+paired binding은 기존 `${libexecdir}/xenova-domain-identities-native`를 재사용한다.
+`xenova-platform_1.0.bb`가 이미 이 helper를 빌드해 0755로 설치하므로 새 runtime 의존성이나 recipe 분해는 없다.
+새 필수 공개 옵션·journal 버전 선택·운영 예산은 추가하지 않았다.
+실제 import·설치 파일 hash·서비스 복구는 [시연 범위 검증](../verification/recovery-scenario-closure-20261030.md#recovery-demo-20261107)에 기록한다.
+이는 정규 RPM·전체 이미지 재빌드, 이미지/factory 기본 firmware 변경, 주행 종단 수락의 증거가 아니다.

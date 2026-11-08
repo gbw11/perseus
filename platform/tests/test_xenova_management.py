@@ -34,7 +34,12 @@ class ManagementTest(unittest.TestCase):
         (self.data/'instances').mkdir()
         self.run=Path(self.tmp.name)/'run'
         self.xen=FakeXen(self.data,{})
-        self.p=vm.Platform(self.data,self.run,command=self.xen,defaults_path=FILES/'defaults.json')
+        # 소스 checkout의 DrvFS mode는 승인된 설치 정책의 권한이 아니다.
+        # 같은 정책 bytes를 소유 Linux fixture에 공급하고 실제 권한 검증은 유지한다.
+        policy=self.data/'execution-policy.json'
+        policy.write_bytes((FILES/'execution-policy.json').read_bytes());policy.chmod(0o600)
+        self.p=vm.Platform(self.data,self.run,command=self.xen,defaults_path=FILES/'defaults.json',
+                           execution_policy_path=policy)
         # 명시적 로컬 시간 프로필. 생성 운영 기본값으로 설치하지 않는다.
         self.p.creation_policy_path=self.data/'creation-policy.json'
         self.p.creation_policy_path.write_text(json.dumps({'schema_version':'1.0','call_ms':3600000,
