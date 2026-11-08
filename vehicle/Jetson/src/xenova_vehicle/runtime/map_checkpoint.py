@@ -360,7 +360,10 @@ class MapCheckpointCollector:
         pending.extend(self._vehicle_refs.values())
         pending.extend(mapper_state_roots(self._subsystem_state))
         pending.extend(self._reference_geometry.values())
-        for tile in self._durable_tiles.values():pending.extend(tile.provenance_ids)
+        for tile in self._durable_tiles.values():
+            if type(tile) is not TileVersion:
+                raise MapCheckpointNotReady('durable tile provenance roots unavailable for trimming')
+            pending.extend(tile.provenance_ids)
         pending.extend(record.provenance_id for record in self._durable_catalog)
         if self._alignment_record is not None:pending.append(self._alignment_record[1])
         if self._propagation_anchor_record is not None:pending.append(self._propagation_anchor_record[1])
@@ -423,13 +426,13 @@ class MapCheckpointCollector:
         for item in (*frame.parents,*frame.ancestry):
             if item.provenance_id in self._records and self._records[item.provenance_id]!=item:raise MapCheckpointNotReady('immutable original frame parent conflict')
             self._records[item.provenance_id]=item
+        if self._frame_cache is not None and self._frame_cache[0] is frame and self._frame_cache[1]==alignment_key:
+            return self._frame_cache[2]
         if len(parents)>2:
             mask=0
             for identity in parents:mask|=self._records[identity].source_mask
             interval=(min(self._records[i].pi_lower for i in parents),max(self._records[i].pi_upper for i in parents))
             parents=(self._record(frame,parents,mask,4,pi_interval=interval),)
-        if self._frame_cache is not None and self._frame_cache[0] is frame and self._frame_cache[1]==alignment_key:
-            return self._frame_cache[2]
         rgb_id=None
         if frame.source_kind=='CAMERA':
             capture=sha256(canonical(frame.observation.rgb.stamp.key)).hexdigest();rgb_id=self._rgb_refs.get(capture)
