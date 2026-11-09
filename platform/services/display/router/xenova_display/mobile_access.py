@@ -29,6 +29,9 @@ from .mobile_upstream import LocalFeed, FeedUnavailable, allowed_path
 COOKIE = "xenova_mobile"
 RUNTIME = Path("/run/xenova-display-mobile")
 CODE_SECONDS, SESSION_SECONDS, ATTEMPTS = 120, 8 * 3600, 5
+# The phone shows the one integrated vehicle screen (cluster + infotainment) that HDMI also uses:
+# vm-screens CombinedPage. /display/mobile stays the advertised URL and redirects here.
+PHONE_SCREEN = "/display/combined"
 PAGE = """<!doctype html><html lang="ko"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Xenova 차량 화면 연결</title><style>
@@ -41,7 +44,7 @@ main{width:min(100%,380px);padding:28px;border:1px solid #354353;border-radius:1
 <button type="submit">화면 연결</button></form></main></html>"""
 PENDING_PAGE = (PAGE.split("<p>", 1)[0].replace("<h1>차량 화면 연결</h1>", "<h1>화면 준비 중</h1>")
     + '<p>연결은 확인됐지만 표시 서비스에 아직 연결할 수 없어요. 잠시 후 다시 열어 주세요. 계속되면 운영자에게 알려 주세요.</p>'
-      '<a href="/display/mobile">다시 열기</a></main></html>')
+      f'<a href="{PHONE_SCREEN}">다시 열기</a></main></html>')
 
 
 class Pairing:
@@ -111,7 +114,7 @@ def create_app(endpoint, feed, pairing, *, rotate_signal=False):
     @app.get("/connect")
     def connect_page(request: Request):
         if pairing.valid(request.cookies.get(COOKIE, "")):
-            return RedirectResponse("/display/mobile", status_code=303)
+            return RedirectResponse(PHONE_SCREEN, status_code=303)
         return HTMLResponse(PAGE)
 
     @app.post("/connect")
@@ -132,7 +135,7 @@ def create_app(endpoint, feed, pairing, *, rotate_signal=False):
         if not session:
             return HTMLResponse(PAGE.replace('<form method=',
                 '<p role="alert">번호가 다르거나 만료됐어요. 5회 실패했거나 2분이 지났다면 새 번호를 발급받아 주세요.</p><form method='), status_code=401)
-        response = RedirectResponse("/display/mobile", status_code=303)
+        response = RedirectResponse(PHONE_SCREEN, status_code=303)
         response.set_cookie(COOKIE, session, httponly=True, samesite="strict", secure=False,
                             max_age=SESSION_SECONDS, path="/")
         return response
@@ -140,22 +143,23 @@ def create_app(endpoint, feed, pairing, *, rotate_signal=False):
     @app.get("/{path:path}")
     def read(request: Request, path: str):
         path = "/" + path
-        if path == "/":
-            return RedirectResponse("/display/mobile", status_code=303)
+        if path in ("/", "/display/mobile"):
+            # The advertised phone URL (endpoint.json) opens the integrated screen.
+            return RedirectResponse(PHONE_SCREEN, status_code=303)
         # Scope is checked before auth; do not expose any command/state/internal path.
         if not allowed_path(path) or request.url.query or "%" in request.scope.get("raw_path", b"").decode("latin1"):
             return Response(status_code=404)
         if not pairing.valid(request.cookies.get(COOKIE, "")):
-            if path == "/display/mobile":
+            if path == PHONE_SCREEN:
                 return RedirectResponse("/connect", status_code=303)
             return JSONResponse({"code": "PHONE_SESSION_REQUIRED"}, status_code=401)
         try:
             upstream = feed.get(path)
-            if path == "/display/mobile" and upstream.status != 200:
+            if path == PHONE_SCREEN and upstream.status != 200:
                 return HTMLResponse(PENDING_PAGE, status_code=503)
             return Response(upstream.body, status_code=upstream.status, headers={"Content-Type": upstream.content_type})
         except FeedUnavailable as error:
-            if path == "/display/mobile":
+            if path == PHONE_SCREEN:
                 return HTMLResponse(PENDING_PAGE, status_code=503)
             return JSONResponse({"code": error.code}, status_code=503)
 

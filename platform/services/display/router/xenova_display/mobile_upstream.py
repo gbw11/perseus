@@ -10,7 +10,9 @@ from contextlib import suppress
 import http.client
 import re
 
-READ_PATHS = frozenset({"/display/mobile", "/api/v1/display/presentation"})
+# /display/combined is the integrated vehicle screen the phone shows; /display/mobile is kept
+# for the runtime readiness check (mobile_preflight). Both are the same built index.html.
+READ_PATHS = frozenset({"/display/mobile", "/display/combined", "/api/v1/display/presentation"})
 ASSET = re.compile(r"/assets/[A-Za-z0-9][A-Za-z0-9_.-]{0,159}\.(?:js|css|png|jpg|jpeg|webp|svg|woff2?|ttf|ico)")
 MAX_BODY = 2 * 1024 * 1024
 

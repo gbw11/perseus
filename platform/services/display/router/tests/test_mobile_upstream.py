@@ -33,7 +33,7 @@ def server(status=200, body=b"test", content_type="text/html"):
         thread.join(2)
 
 
-@pytest.mark.parametrize("path", ["/display/mobile", "/api/v1/display/presentation", "/assets/index-test.js", "/assets/logo-test.png"])
+@pytest.mark.parametrize("path", ["/display/mobile", "/display/combined", "/api/v1/display/presentation", "/assets/index-test.js", "/assets/logo-test.png"])
 def test_only_allowed_reads_reach_the_existing_feed(path, monkeypatch):
     monkeypatch.setenv("http_proxy", "http://invalid-proxy:1")
     with server() as (feed, calls):

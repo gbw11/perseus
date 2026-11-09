@@ -37,7 +37,10 @@ def pair(link, code="123456"):
 
 def test_first_open_requires_pairing_and_does_not_expose_data(link):
     client, _, _, _, _, _, calls = link
+    # The advertised URL opens the integrated screen, which needs pairing first.
     response = client.get("/display/mobile")
+    assert response.status_code == 303 and response.headers["location"] == "/display/combined"
+    response = client.get("/display/combined")
     assert response.status_code == 303 and response.headers["location"] == "/connect"
     page = client.get("/connect")
     assert page.status_code == 200 and 'name="code"' in page.text and "123456" not in page.text
@@ -49,15 +52,25 @@ def test_first_open_requires_pairing_and_does_not_expose_data(link):
 def test_single_use_code_issues_http_only_cookie_for_read_only_paths(link):
     client, _, pairing, _, _, published, calls = link
     response = pair(link)
-    assert response.status_code == 303
+    assert response.status_code == 303 and response.headers["location"] == "/display/combined"
     cookie = response.headers["set-cookie"]
     assert "HttpOnly" in cookie and "SameSite=strict" in cookie and f"Max-Age={SESSION_SECONDS}" in cookie
     assert published == ["123456", None]
     assert pairing.code == ""
-    assert client.get("/display/mobile").status_code == 200
+    assert client.get("/connect").headers["location"] == "/display/combined"
+    assert client.get("/display/mobile").headers["location"] == "/display/combined"
+    assert client.get("/display/combined").status_code == 200
     assert client.get("/api/v1/display/presentation").status_code == 200
     assert pair(link).status_code == 401
-    assert calls == ["/display/mobile", "/api/v1/display/presentation"]
+    assert calls == ["/display/combined", "/api/v1/display/presentation"]
+
+
+@pytest.mark.parametrize("path", ["/display/combined?x=1", "/display/monitor-1", "/display/monitor-2", "/display/combined/extra"])
+def test_only_the_integrated_screen_page_is_added(link, path):
+    client, _, _, _, _, _, calls = link
+    pair(link)
+    assert client.get(path).status_code == 404
+    assert not calls
 
 
 def test_wrong_origin_or_missing_origin_does_not_consume_a_code(link):
@@ -106,7 +119,7 @@ def test_expiry_and_rotation_never_reuse_previous_sessions(link):
     old_session = client.cookies.get(COOKIE)
     clock[0] += SESSION_SECONDS
     assert client.get("/api/v1/display/presentation").status_code == 401
-    assert client.get("/display/mobile").headers["location"] == "/connect"
+    assert client.get("/display/combined").headers["location"] == "/connect"
     pairing.rotate()
     assert pair(link).status_code == 303
     assert old_session != client.cookies.get(COOKIE)
@@ -121,9 +134,9 @@ def test_feed_loss_is_not_cached_and_new_report_can_resume(link):
     feed.failing = True
     failed = client.get("/api/v1/display/presentation")
     assert failed.status_code == 503 and failed.json()["code"] == "DISPLAY_FEED_UNAVAILABLE"
-    waiting = client.get("/display/mobile")
+    waiting = client.get("/display/combined")
     assert waiting.status_code == 503 and "화면 준비 중" in waiting.text
-    assert 'href="/display/mobile"' in waiting.text and 'name="code"' not in waiting.text
+    assert 'href="/display/combined"' in waiting.text and 'name="code"' not in waiting.text
     feed.failing = False
     assert client.get("/api/v1/display/presentation").status_code == 200
 
