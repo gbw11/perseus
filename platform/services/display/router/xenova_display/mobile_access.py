@@ -2,6 +2,7 @@
 
 Pairing uses a root-visible, single-use code (120s/5 attempts) and one read-only
 browser session (8h). No VM commands, new feed, HDMI, MQTT or Gateway ownership.
+The listener follows the phone link across cable re-plugs (393): see PhoneLink.
 """
 from __future__ import annotations
 
@@ -16,7 +17,9 @@ from pathlib import Path
 import re
 import secrets
 import signal
+import socket
 import stat
+import subprocess
 import time
 from urllib.parse import parse_qs
 
@@ -29,6 +32,10 @@ from .mobile_upstream import LocalFeed, FeedUnavailable, allowed_path
 COOKIE = "xenova_mobile"
 RUNTIME = Path("/run/xenova-display-mobile")
 CODE_SECONDS, SESSION_SECONDS, ATTEMPTS = 120, 8 * 3600, 5
+# Link following: kernel notifications wake the check at once; the slow re-check also
+# catches a missed notification or an edited phone address in the root config.
+RECHECK_SECONDS, SETTLE_SECONDS, GRACE_SECONDS = 30, 0.5, 3
+RTMGRP_LINK, RTMGRP_IPV4_IFADDR = 0x1, 0x10
 PAGE = """<!doctype html><html lang="ko"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Xenova 차량 화면 연결</title><style>
@@ -87,9 +94,12 @@ def create_app(endpoint, feed, pairing, *, rotate_signal=False):
 
     app = FastAPI(title="Xenova phone display access", docs_url=None, redoc_url=None,
                   openapi_url=None, lifespan=lifespan)
+    # PhoneLink replaces this when the USB address changes; requests always see the current one.
+    app.state.endpoint = endpoint
 
     @app.middleware("http")
     async def boundary(request: Request, call_next):
+        endpoint = app.state.endpoint
         if (not request.client or request.client.host != endpoint.phone_ip
                 or request.headers.get("host") != endpoint.host):
             response = JSONResponse({"code": "PHONE_LINK_REQUIRED"}, status_code=403)
@@ -185,6 +195,151 @@ def publish_code(code):
         temporary.unlink(missing_ok=True)
 
 
+def publish_endpoint(endpoint):
+    """Show the current phone URL to the operator; no file while there is no usable link."""
+    path = RUNTIME / "endpoint.json"
+    if endpoint is None:
+        path.unlink(missing_ok=True)
+        return
+    temporary = RUNTIME / "endpoint.json.new"
+    temporary.unlink(missing_ok=True)
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "w") as stream:
+            stream.write(json.dumps({"url": endpoint.origin + "/display/mobile", "interface": endpoint.interface,
+                "pairing_ttl_s": CODE_SECONDS, "session_ttl_s": SESSION_SECONDS}) + "\n")
+        # Readers (display_mode, operators) never see a half-written file.
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def read_link(config_path):
+    """The verified endpoint now, or None while the cable is out or the link is unusable."""
+    try:
+        return resolve(root_config(config_path))
+    except (ValueError, OSError, KeyError, TypeError, subprocess.SubprocessError):
+        return None
+
+
+def follow(previous, listening, found):
+    """How the listener follows the phone link after it is read again.
+
+    previous: the endpoint last served. found: the endpoint now, or None (no usable link).
+    """
+    if found is None:
+        return "pause" if listening else "wait"
+    if listening and found == previous:
+        return "keep"
+    if (found.local_ip, found.phone_ip, found.port) == (previous.local_ip, previous.phone_ip, previous.port):
+        # Same URL on a re-plugged (new) device: the phone's cookie still matches, keep its session.
+        return "rebind"
+    # A new URL. The browser cookie belongs to the old address, so a new code is needed.
+    return "new_address"
+
+
+def make_server(app):
+    import uvicorn
+    return uvicorn.Server(uvicorn.Config(app, proxy_headers=False, access_log=False, log_level="warning",
+        workers=1, limit_concurrency=16, timeout_graceful_shutdown=GRACE_SECONDS))
+
+
+def link_events():
+    """Kernel link/IPv4-address notifications. Only "something changed" is used, never their content."""
+    events = socket.socket(socket.AF_NETLINK, socket.SOCK_RAW | socket.SOCK_NONBLOCK, socket.NETLINK_ROUTE)
+    try:
+        events.bind((0, RTMGRP_LINK | RTMGRP_IPV4_IFADDR))
+        return events
+    except Exception:
+        events.close()
+        raise
+
+
+def say(message):
+    # Fixed messages only: never an address, code, config value or traceback.
+    print(message, flush=True)
+
+
+class PhoneLink:
+    """Keep the phone listener on the verified USB link across cable re-plugs (393).
+
+    - Cable out or no usable address: stop listening, remove endpoint.json, wait.
+    - Back on the same address (a new kernel device): listen again; the paired session stays.
+    - Back on a new address: listen there, publish the new URL and a new pairing code.
+    The trust rules do not change: same root config, USB device check, phone IP, Host/Origin.
+    """
+
+    def __init__(self, app, pairing, endpoint, sock, *, read, listen=bind, publish=publish_endpoint,
+                 server=make_server, recheck=RECHECK_SECONDS, settle=SETTLE_SECONDS):
+        self.app, self.pairing, self.endpoint, self.sock = app, pairing, endpoint, sock
+        self.read, self.listen, self.publish, self.server = read, listen, publish, server
+        self.recheck, self.settle = recheck, settle
+        self.changed = None
+
+    def _drain(self, events):
+        with suppress(OSError):
+            while events.recv(65536):
+                pass
+        self.changed.set()
+
+    async def _next_change(self):
+        with suppress(TimeoutError):
+            await asyncio.wait_for(self.changed.wait(), self.recheck)
+        await asyncio.sleep(self.settle)  # a re-plug is a burst: link up, then the DHCP address
+        self.changed.clear()
+
+    async def run(self, events=None):
+        loop = asyncio.get_running_loop()
+        self.changed = asyncio.Event()
+        # One handler for the whole run, also while there is no listener (and no app lifespan).
+        loop.add_signal_handler(signal.SIGUSR1, self.pairing.rotate)
+        if events is not None:
+            loop.add_reader(events.fileno(), self._drain, events)
+        server = task = None
+        try:
+            while True:
+                if self.sock is not None and task is None:
+                    server = self.server(self.app)
+                    task = asyncio.create_task(server.serve(sockets=[self.sock]))
+                waiter = asyncio.create_task(self._next_change())
+                done, _ = await asyncio.wait({t for t in (task, waiter) if t is not None},
+                                             return_when=asyncio.FIRST_COMPLETED)
+                if task in done:
+                    waiter.cancel()
+                    # uvicorn stopped by itself: a stop signal or a failed start.
+                    return 0 if server.started else 1
+                found = await asyncio.to_thread(self.read)
+                action = follow(self.endpoint, task is not None, found)
+                if action in ("keep", "wait"):
+                    continue
+                if task is not None:
+                    server.should_exit = True
+                    await task  # closes the listener on the old device
+                    server = task = self.sock = None
+                if action == "pause":
+                    self.publish(None)
+                    say("Phone link lost; waiting for the USB address.")
+                    continue
+                try:
+                    self.sock = self.listen(found)
+                except OSError:
+                    self.publish(None)
+                    say("Phone link is back but the listener could not bind yet; retrying.")
+                    continue
+                self.app.state.endpoint = self.endpoint = found
+                if action == "new_address":
+                    self.pairing.rotate()
+                self.publish(found)
+                say("Phone link back on the same address; the paired session continues." if action == "rebind"
+                    else "Phone link moved to a new address; a new URL and pairing code were issued.")
+        finally:
+            if events is not None:
+                loop.remove_reader(events.fileno())
+            loop.remove_signal_handler(signal.SIGUSR1)
+            if task is not None and not task.done():
+                task.cancel()
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=Path("/etc/xenova/display-mobile.json"))
@@ -192,6 +347,7 @@ def main(argv=None):
     sock = None
     lock = None
     owned = False
+    link = events = None
     try:
         if os.geteuid() != 0:
             raise ValueError("trusted service launcher required")
@@ -208,13 +364,15 @@ def main(argv=None):
         signal.signal(signal.SIGUSR1, signal.SIG_IGN)
         pairing.rotate()
         owned = True
-        (RUNTIME / "endpoint.json").write_text(json.dumps({"url": endpoint.origin + "/display/mobile",
-            "interface": endpoint.interface, "pairing_ttl_s": CODE_SECONDS, "session_ttl_s": SESSION_SECONDS}) + "\n")
-        import uvicorn
-        server = uvicorn.Server(uvicorn.Config(create_app(endpoint, feed, pairing, rotate_signal=True), proxy_headers=False,
-            access_log=False, log_level="warning", workers=1, limit_concurrency=16))
-        server.run(sockets=[sock])
-        return 0 if server.started else 1
+        publish_endpoint(endpoint)
+        link = PhoneLink(create_app(endpoint, feed, pairing), pairing, endpoint, sock,
+                         read=lambda: read_link(args.config))
+        sock = None  # PhoneLink owns the listener from here on
+        try:
+            events = link_events()
+        except (OSError, AttributeError):
+            events = None  # still follows the link through the slow re-check
+        return asyncio.run(link.run(events))
     except Exception:
         # Never log config values, credentials, pairing code, raw HTTP or traceback.
         print("Mobile display startup failed; verify USB interface, private configuration and existing feed.")
@@ -222,6 +380,11 @@ def main(argv=None):
     finally:
         if sock is not None:
             sock.close()
+        if link is not None and link.sock is not None:
+            with suppress(OSError):
+                link.sock.close()
+        if events is not None:
+            events.close()
         if owned:
             with suppress(OSError):
                 (RUNTIME / "pairing-code").unlink(missing_ok=True)

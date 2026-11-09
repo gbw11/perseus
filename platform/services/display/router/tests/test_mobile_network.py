@@ -17,7 +17,7 @@ def usb(tmp_path):
     device.mkdir(parents=True)
     (device / "subsystem").symlink_to(subsystem)
     config = {"schema_version": 1, "usb_interface": "usb0", "phone_ipv4": "192.168.42.129", "port": 8084}
-    info = [{"ifname": "usb0", "flags": ["UP", "BROADCAST"], "addr_info": [
+    info = [{"ifindex": 7, "ifname": "usb0", "flags": ["UP", "BROADCAST"], "addr_info": [
         {"family": "inet", "scope": "global", "local": "192.168.42.2", "prefixlen": 24}]}]
     return sysfs, config, info
 
@@ -34,7 +34,7 @@ def read(usb):
 
 def test_usb_address_is_read_without_ip_assignment_or_route_changes(usb):
     endpoint, calls = read(usb)
-    assert endpoint == Endpoint("usb0", "192.168.42.2", "192.168.42.129", 8084)
+    assert endpoint == Endpoint("usb0", "192.168.42.2", "192.168.42.129", 8084, 7)
     assert endpoint.origin == "http://192.168.42.2:8084"
     assert calls[0][0] == ["ip", "-j", "-4", "address", "show", "dev", "usb0"]
     assert calls[0][1]["timeout"] == 2
@@ -58,10 +58,12 @@ def test_non_usb_interface_is_not_used_as_a_wireless_fallback(usb, tmp_path):
     with pytest.raises(ValueError, match="USB"): read(usb)
 
 
-@pytest.mark.parametrize("change", ["down", "no-address", "ambiguous"])
+@pytest.mark.parametrize("change", ["down", "no-address", "ambiguous", "no-index", "bad-index"])
 def test_down_missing_or_ambiguous_link_does_not_guess_an_address(usb, change):
     info = usb[2]
     if change == "down": info[0]["flags"] = []
+    if change == "no-index": del info[0]["ifindex"]
+    if change == "bad-index": info[0]["ifindex"] = True
     if change == "no-address": info[0]["addr_info"] = []
     if change == "ambiguous": info[0]["addr_info"].append({"family": "inet", "scope": "global", "local": "192.168.42.3", "prefixlen": 24})
     with pytest.raises(ValueError): read(usb)

@@ -23,6 +23,9 @@ class Endpoint:
     local_ip: str
     phone_ip: str
     port: int
+    # A re-plugged phone is a new kernel device even when the name and address repeat.
+    # SO_BINDTODEVICE keeps the old index, so a listener must follow this value (393).
+    ifindex: int = 0
 
     @property
     def host(self): return f"{self.local_ip}:{self.port}"
@@ -51,6 +54,9 @@ def resolve(config, *, sysfs=Path("/sys/class/net"), run=subprocess.run):
     if (not isinstance(rows, list) or len(rows) != 1 or rows[0].get("ifname") != interface
             or "UP" not in rows[0].get("flags", [])):
         raise ValueError("configured USB link is not up")
+    ifindex = rows[0].get("ifindex")
+    if type(ifindex) is not int or ifindex <= 0:
+        raise ValueError("USB link index required")
     matches = []
     for value in rows[0].get("addr_info", []):
         if value.get("family") != "inet" or value.get("scope") != "global":
@@ -61,7 +67,7 @@ def resolve(config, *, sysfs=Path("/sys/class/net"), run=subprocess.run):
             matches.append(str(address))
     if len(matches) != 1:
         raise ValueError("one USB address on the verified phone subnet required")
-    return Endpoint(interface, matches[0], str(phone), port)
+    return Endpoint(interface, matches[0], str(phone), port, ifindex)
 
 
 def bind(endpoint, *, socket_factory=socket.socket):
