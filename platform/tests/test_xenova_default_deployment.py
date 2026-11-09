@@ -44,6 +44,19 @@ class DefaultDeploymentTest(unittest.TestCase):
                 self.assertGreaterEqual(version(current), version(entry["version"]))
                 self.assertRegex(entry["manifest_sha256"], r"^[0-9a-f]{64}$")
 
+    def test_debian_interaction_selection_matches_published_display_template(self):
+        selected = json.loads((ROOT / "platform/guests/default-templates.lock.json").read_text())["templates"]
+        entry = next(e for e in selected if e["template_id"] == "debian-13-arm64")
+        self.assertEqual(entry["version"], "1.0.6")
+        self.assertEqual(entry["directory"], "linux/debian-13-20261015/1.0.6")
+        self.assertEqual(entry["manifest_sha256"],
+                         "144ebb333832e2a3c56c08bdc0d178462160b532fae295bb0a900c9344a133e9")
+        example = json.loads((ROOT / "platform/first-install/example.config.json").read_text())
+        supplied = next(e for e in example["linux_templates"] if e["template_id"] == entry["template_id"])
+        self.assertEqual(supplied["template_version"], entry["version"])
+        self.assertTrue(supplied["template_dir"].endswith("/" + entry["directory"]))
+        self.assertEqual(supplied["template_manifest_sha256"], entry["manifest_sha256"])
+
     def test_capacity_separates_retained_ubuntu_from_default_disks(self):
         templates = [{"logical_bytes": 8 * contract.GIB, "allocated_bytes": 1024, "boot_bytes": 4096}] * 2
         result = contract.capacity(4 * contract.GIB, [templates[1]], retained_templates=templates,

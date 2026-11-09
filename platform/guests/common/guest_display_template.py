@@ -7,7 +7,7 @@ import re
 import stat
 import subprocess
 
-from prepare_rootfs import enable, inside
+from prepare_rootfs import enable, inside, replace_link
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -78,6 +78,7 @@ def install_service(root):
     target.write_bytes(raw)
     target.chmod(0o644)
     return {"path": "/usr/lib/systemd/system/xenova-guest-display-app.service",
+            "enabled_by": "/etc/systemd/system/xenova-guest-display.target.wants/xenova-guest-display-app.service",
             "sha256": hashlib.sha256(raw).hexdigest(), "mode": "0644"}
 
 
@@ -94,6 +95,9 @@ def install_target(root, *, enable_unit=enable):
         raise ValueError("display guest target unit is linked or non-regular")
     target.write_bytes(raw)
     target.chmod(0o644)
+    # 서비스의 WantedBy를 따른다. target을 끄면 앱만 독립 부팅하지 않게 한다.
+    replace_link(root, "etc/systemd/system/xenova-guest-display.target.wants/xenova-guest-display-app.service",
+                 "/usr/lib/systemd/system/xenova-guest-display-app.service")
     enable_unit(root, "xenova-guest-display.target")
     return {"path": "/usr/lib/systemd/system/xenova-guest-display.target",
             "enabled_by": "/etc/systemd/system/multi-user.target.wants/xenova-guest-display.target",

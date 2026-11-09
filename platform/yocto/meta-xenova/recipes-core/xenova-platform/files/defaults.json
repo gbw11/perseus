@@ -12,7 +12,7 @@
       "vcpus": 1,
       "autostart": true,
       "template_id": "debian-13-arm64",
-      "template_version": "1.0.4",
+      "template_version": "1.0.6",
       "display_name": "Debian Interaction"
     }
   ],
