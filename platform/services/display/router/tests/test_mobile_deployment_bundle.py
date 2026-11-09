@@ -34,7 +34,7 @@ def stage_image(folder, built_web=None):
         (web / 'assets/MobilePage-test.js').write_text('export const fixture="synthetic built asset";')
     definitions = [RECIPE / 'xenova-display_0.1.0.bb', RECIPE / 'xenova-display_0.1.0.bbappend', RECIPE / 'xenova-display_%.bbappend']
     texts = [p.read_text() for p in definitions]
-    search = [ROUTER, ROUTER / 'deploy', ROUTER / 'deploy/native', ROUTER / 'examples', web_input, RECIPE / 'files']
+    search = [ROUTER, ROUTER / 'deploy', ROUTER / 'deploy/native', ROUTER / 'deploy/guest-display', ROUTER / 'examples', web_input, RECIPE / 'files']
     for subdir in ('mobile', 'mobile-access'):
         search.insert(0, ROUTER / 'deploy' / subdir)
     for name in dict.fromkeys(re.findall(r'file://([^"\s]+)', '\n'.join(texts))):
