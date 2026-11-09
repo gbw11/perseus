@@ -12,6 +12,9 @@
 | ☐ | HDMI 런타임 설정: HDMI 1대, `ui_origin`, `page` | `/etc/xenova/display-runtime.json` ← `examples/single-hdmi-plan-a-runtime.json`, **EDID는 설치할 때 실제 값** | 주소정 |
 | ☐ | **guest data 토큰** | `/etc/xenova/guest-display/guest-data.token`, root 0600. **설치마다 새로 생성**, 이미지·Git에 넣지 않음 | 첫 부팅 생성 방식은 박신영과 협의 |
 | ☐ | 방화벽 | `192.168.77.1:8085`는 출발지 `192.168.77.20`만, dom0 → `192.168.77.20:8086` 허용 | 배포 담당 |
+| ☐ | **HDMI KMS (Pi4)** | 10-28 방식대로 `/boot/overlays/vc4-kms-v3d-pi4.dtbo`를 넣고 `/boot/config.txt`에 `dtoverlay=vc4-kms-v3d-pi4,cma-64`를 쓴다. 2026-11-09 이미지에는 이 설정이 빠져 있다. 그래서 `/dev/dri`, HDMI 커넥터, EDID가 없고 `xenova-display-hdmi`를 시작할 수 없다 | 박신영(이미지) |
+| ☐ | HDMI 설정 파일 | `/etc/xenova/display-runtime.json`(실제 EDID), `display-Xorg.conf`, `display-kiosk.env`. 2026-11-09 보드에는 셋 다 없다 | 주소정(값)·배포 담당 |
+| ☐ | dom0 CPU 여유 | A안은 dom0에서 Chromium을 돌린다. 2026-11-09 측정: 평소 load 약 10, Chromium 실행 중 load 약 21, idle 1%. GPU가 없는 fbdev에서는 화면을 다 그리지 못했다 | 박신영과 협의 |
 
 ## 2. VM3 (Debian 템플릿)
 
