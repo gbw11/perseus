@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render as rtlRender, screen, within } from '@testing-library/react';
+import { fireEvent, render as rtlRender, screen, within } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { initialVms } from '../mocks/data';
@@ -85,17 +85,54 @@ beforeEach(() => {
 });
 
 describe('Memory 탭', () => {
-  it('RX/TX Pool 요약과 Pool 점유율 그래프는 Network 탭으로 옮기고, 나머지 Memory 구성은 그대로 둔다', () => {
+  it('그래프·안내 문구 없이 세 카드가 요약 → 상세 구조로 보인다 (S15P31E110-409)', () => {
     render(<ResourcesPage view="memory" />);
 
-    // Network 탭으로 옮긴 것
+    // 그래프 없음 (추이는 VM 상세 화면에서 본다)
+    expect(document.querySelectorAll('svg')).toHaveLength(0);
+    expect(screen.queryByText('패킷 처리율')).not.toBeInTheDocument();
+    expect(screen.queryByText(/최근 60초|최근 5분/)).not.toBeInTheDocument();
+    // 제거한 안내 문구
+    for (const text of [
+      '관측 시각과 만료는 영역별로 확인',
+      '정적 예약 포함',
+      /관리 RAM과 내부 버퍼 점유를 분리합니다/,
+      /장치 합산 · 같은 부팅 구간에서만 속도 계산/,
+      /원 관측 약/,
+    ])
+      expect(screen.queryByText(text)).not.toBeInTheDocument();
+    // Network 탭으로 옮긴 Pool 은 계속 없다
     expect(screen.queryByText('RX Pool')).not.toBeInTheDocument();
-    expect(screen.queryByText('TX Pool')).not.toBeInTheDocument();
-    expect(screen.queryByText('Pool 점유율')).not.toBeInTheDocument();
-    expect(screen.queryByText('MQTT 포함 공통 RX/TX 풀')).not.toBeInTheDocument();
-    // origin/frontend Memory 구성 (정리는 별도 이슈)
-    expect(screen.getAllByText('커널 힙 사용률').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('패킷 처리율').length).toBeGreaterThan(0);
+
+    // Zephyr 카드: 부제 "역할 · Zephyr", 제목 오른쪽 마지막 갱신, 요약 → 상세(커널 힙 요약 유지)
+    const zephyr = screen
+      .getByRole('region', { name: 'autonomous 메모리 사용률' })
+      .closest('[class*="memoryVmCard"]')!;
+    expect(within(zephyr as HTMLElement).getByText(/· Zephyr$/)).toBeInTheDocument();
+    expect(within(zephyr as HTMLElement).getByText(/^마지막 갱신/)).toBeInTheDocument();
+    // 커널 힙은 공통 그룹 안에서 다른 앱 버퍼 영역과 같은 형태 ("커널 heap 기준" 배지 없음)
+    const heap = screen.getByRole('group', { name: 'autonomous 공통 커널 힙' });
+    expect(within(heap).getByText('커널 힙')).toBeInTheDocument();
+    // 커널 힙 행도 아코디언: 누르면 현재 여유 등 세부 항목을 펼친다
+    const heapToggle = within(heap).getByRole('button');
+    expect(heapToggle).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(heapToggle);
+    expect(heapToggle).toHaveAttribute('aria-expanded', 'true');
+    expect(within(heap).getByText('현재 여유')).toBeVisible();
+    // 메모리 사용률은 세 카드 모두 같은 요약 섹션 (한 줄 행이 아님), 툴팁 없음
+    for (const name of ['autonomous', 'manual', 'interaction'])
+      expect(screen.getByRole('region', { name: `${name} 메모리 사용률` })).toBeInTheDocument();
+    expect(heap.querySelector('[title]')).toBeNull();
+    expect(screen.queryByText('커널 heap 기준')).not.toBeInTheDocument();
+    expect(heap.closest('[aria-label="autonomous 공통 메모리"]')).not.toBeNull();
+    // 그룹 제목: 자동·공통·수동 색 구분 (세로선 + 글자색), 알약 배지 없음
+    expect(
+      within(screen.getByRole('region', { name: 'autonomous 수동 메모리' })).getByRole('heading', {
+        name: '수동',
+      }),
+    ).toHaveAttribute('data-group', 'manual');
+    expect(screen.getAllByText('메모리 상세').length).toBe(2);
+    // Linux 카드: 요약 + 디스크 I/O
     expect(screen.getByText('디스크 I/O')).toBeInTheDocument();
   });
 });

@@ -1299,6 +1299,22 @@ button.chip:hover:not(.chipOn) {
   border-radius: inherit;
   background: var(--vm-accent);
 }
+.segmentedMetricTrack {
+  position: relative;
+}
+.segmentedMetricTrack i {
+  position: absolute;
+  inset: 0 auto 0 0;
+}
+.segmentedMetricTrack .committedSegment {
+  background: color-mix(in srgb, var(--vm-accent) 28%, var(--x-surface-3));
+}
+.segmentedMetricTrack .reservedSegment {
+  background: color-mix(in srgb, var(--vm-accent) 58%, var(--x-surface-3));
+}
+.segmentedMetricTrack .usedSegment {
+  background: var(--vm-accent);
+}
 .vmCardFoot {
   display: flex;
   align-items: end;
@@ -1392,91 +1408,6 @@ button.chip:hover:not(.chipOn) {
 .memoryNotice[data-tone='fault'] {
   background: var(--x-fault-soft);
   color: var(--x-fault);
-}
-.poolSummaryGrid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--x-space-3);
-}
-.poolSummary {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px var(--x-space-3);
-  min-width: 0;
-  padding: var(--x-space-4);
-  border: 1px solid var(--x-border);
-  border-radius: var(--x-radius);
-  background: var(--x-surface-2);
-  --pool-accent: var(--rx-accent);
-}
-.poolSummary[data-tone='tx'] {
-  --pool-accent: var(--tx-accent);
-}
-.poolSummaryHead {
-  display: contents;
-}
-.poolSummaryHead > span {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-weight: 700;
-}
-.poolSummaryHead > span i {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--pool-accent);
-}
-/* 오른쪽 열은 %·여유 중 긴 쪽 폭을 따르므로, 글자 길이와 상관없이 오른쪽 끝에 붙인다 */
-.poolSummaryHead > strong,
-.linuxMemorySummaryHead > strong {
-  justify-self: end;
-}
-.poolSummaryHead > strong {
-  color: var(--pool-accent);
-  font-family: var(--x-font-mono);
-  font-size: var(--x-text-lg);
-}
-.poolAmount {
-  display: flex;
-  align-items: baseline;
-  gap: 5px;
-  min-width: 0;
-}
-.poolAmount strong {
-  color: var(--x-text);
-  font-family: var(--x-font-mono);
-  font-size: clamp(18px, 1.5vw, 24px);
-  white-space: nowrap;
-}
-.poolAmount span,
-.poolFree span {
-  color: var(--x-text-muted);
-  font-size: 10px;
-}
-.poolFree {
-  display: grid;
-  justify-items: end;
-  align-content: center;
-  gap: 2px;
-}
-.poolFree strong {
-  color: var(--x-text);
-  font-family: var(--x-font-mono);
-  font-size: var(--x-text-xs);
-}
-.poolBar {
-  grid-column: 1 / -1;
-  height: 8px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: var(--x-surface-sunken);
-}
-.poolBar i {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--pool-accent);
 }
 .memoryChartBlock {
   margin-top: var(--x-space-3);
@@ -1618,10 +1549,6 @@ button.chip:hover:not(.chipOn) {
   font-family: var(--x-font-mono);
   font-size: 10px;
 }
-.memoryChartBlock + .linuxMemorySummary,
-.memoryChartBlock + .poolSummaryGrid {
-  margin-top: var(--x-space-3);
-}
 .counterGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1655,118 +1582,10 @@ button.chip:hover:not(.chipOn) {
 .counterItem[data-active='true'] strong {
   color: var(--x-recovering);
 }
-.memoryObservation {
-  margin-top: var(--x-space-2);
-  padding: 9px var(--x-space-3);
-  border-radius: var(--x-radius-sm);
-  background: var(--x-surface-sunken);
-  color: var(--x-text-muted);
-  font-size: var(--x-text-xs);
-}
-.linuxMemorySummary {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px var(--x-space-3);
-  padding: var(--x-space-4);
-  border: 1px solid var(--x-border);
-  border-radius: var(--x-radius);
-  background: var(--x-surface-2);
-}
-.linuxMemorySummaryHead {
-  display: contents;
-}
-.linuxMemorySummaryHead > span {
-  color: var(--x-text);
-  font-weight: 700;
-}
-.linuxMemorySummaryHead > strong {
-  color: var(--vm-accent);
-  font-family: var(--x-font-mono);
-  font-size: var(--x-text-lg);
-}
-.linuxMemoryAmount {
-  display: flex;
-  align-items: baseline;
-  gap: 5px;
-}
-.linuxMemoryAmount strong {
-  color: var(--x-text);
-  font-family: var(--x-font-mono);
-  font-size: clamp(18px, 1.5vw, 24px);
-}
-.linuxMemoryAmount span,
-.linuxMemoryFree span {
-  color: var(--x-text-muted);
-  font-size: 10px;
-}
-.linuxMemoryFree {
-  display: grid;
-  justify-items: end;
-  gap: 2px;
-}
-.linuxMemoryFree strong {
-  font-family: var(--x-font-mono);
-  font-size: var(--x-text-xs);
-}
-.memoryBasisNote {
-  color: var(--x-text-muted);
-  font-size: 10px;
-  line-height: 1.5;
-}
-.memoryBasisBadge {
-  margin-left: var(--x-space-2);
-  padding: 0 var(--x-space-2);
-  border: 1px solid var(--x-border);
-  border-radius: 999px;
-  color: var(--x-text-muted);
-  font-size: 10px;
-  font-weight: 600;
-  vertical-align: middle;
-  cursor: help;
-}
-/* 사용률 그래프 바로 아래 Pool 요약도 다른 블록과 같은 간격(.memoryChartBlock margin-top)을 둔다 */
-.memoryChartBlock + .poolSummaryGrid {
-  margin-top: var(--x-space-3);
-}
-.linuxMemoryBar {
-  grid-column: 1 / -1;
-  height: 8px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: var(--x-surface-sunken);
-}
-.linuxMemoryBar i {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--vm-accent);
-}
-.linuxMemoryLegend {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--x-text-muted);
-  font-family: var(--x-font-mono);
-  font-size: 10px;
-}
-.linuxMemoryLegend i {
-  width: 15px;
-  height: 3px;
-  border-radius: 999px;
-  background: var(--vm-accent);
-}
-.linuxMemoryLine {
-  fill: none;
-  stroke: var(--vm-accent);
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 2;
-}
 .appMemorySection {
   margin-bottom: var(--x-space-4);
 }
-.appMemorySection > header,
-.appMemoryPool > header {
+.appMemorySection > header {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
@@ -1776,121 +1595,38 @@ button.chip:hover:not(.chipOn) {
 .appMemorySection h3 {
   margin: 0;
 }
-.appMemorySection small,
-.appMemoryTime {
+.appMemorySection small {
   color: var(--x-text-muted);
   font-size: var(--x-text-xs);
-}
-.appMemoryGrid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--x-space-3);
 }
 .memoryGroup {
   margin-top: var(--x-space-4);
 }
 .memoryGroup h4 {
-  margin: 0 0 var(--x-space-2);
+  /* 제목을 sm 으로 키운 만큼 아래 영역 박스와의 간격도 한 단계 넓힌다 */
+  margin: 0 0 var(--x-space-3);
 }
-.memoryGroupBadge {
-  display: inline-block;
-  padding: 3px 10px;
-  border: 1px solid var(--x-border);
-  border-radius: 999px;
-  font-size: var(--x-text-xs);
-  color: var(--x-text-muted);
+/*
+ * 자동·공통·수동 그룹 제목. 세로선(3px)은 앱 색 토큰 그대로, 글자는 앱 색 70% + 본문 색 30% 로 섞는다.
+ * xenova 테마의 수동 색(--x-app-manual)은 카드 배경 대비 3.24:1 이라 글자로는 4.5:1 에 못 미치므로
+ * 본문 색과 섞어 5.04:1 로 맞춘다 (세로선은 그래픽 요소 기준 3:1 이상). 공통은 중립 회색(--x-text-muted).
+ */
+.memoryGroupTitle {
+  --group-color: var(--x-text-muted);
+  padding-left: var(--x-space-2);
+  border-left: 3px solid var(--group-color);
+  color: color-mix(in srgb, var(--group-color) 70%, var(--x-text));
+  /* 그룹 제목: xs 에서 한 단계 위 sm. 영역 이름(굵기 700)보다 한 단계 굵게 800.
+     세로선은 블록 높이를 따르므로 line-height 를 글자 높이에 가깝게 줄여 길이를 맞춘다 */
+  font-size: var(--x-text-sm);
+  font-weight: 800;
+  line-height: 1.25;
 }
-.bufferState {
-  display: grid;
-  gap: 4px;
-  margin-top: var(--x-space-2);
-  font-size: var(--x-text-xs);
+.memoryGroupTitle[data-group='auto'] {
+  --group-color: var(--x-app-autonomous);
 }
-.bufferState span,
-.bufferState small {
-  color: var(--x-text-muted);
-}
-.memorySharedNetwork {
-  grid-column: 1 / -1;
-}
-.managedRamSection {
-  margin-bottom: var(--x-space-4);
-}
-.managedRamNotice {
-  grid-column: 1 / -1;
-}
-.appMemoryPool {
-  min-width: 0;
-  padding: var(--x-space-3);
-  border: 1px solid var(--x-border);
-  border-radius: var(--x-radius);
-  background: var(--x-surface-2);
-  --pool-accent: var(--vm-accent);
-}
-.appMemoryPool header b {
-  color: var(--vm-accent);
-  font-family: var(--x-font-mono);
-}
-.appMemoryAmount {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 5px;
-  margin: var(--x-space-2) 0;
-  font-family: var(--x-font-mono);
-}
-.appMemoryAmount > strong {
-  font-size: var(--x-text-lg);
-}
-.appMemoryAmount > span,
-.appMemoryPool dt {
-  color: var(--x-text-muted);
-}
-.appMemoryPool dl {
-  margin: var(--x-space-3) 0;
-  display: grid;
-  gap: 6px;
-  font-size: var(--x-text-xs);
-}
-.appMemoryPool dl > div {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--x-space-2);
-}
-.appMemoryPool dd {
-  margin: 0;
-  font-family: var(--x-font-mono);
-  overflow-wrap: anywhere;
-}
-.appMemoryNotice {
-  color: var(--x-text-muted);
-  font-size: var(--x-text-xs);
-}
-.appPoolChart svg {
-  display: block;
-  width: 100%;
-  height: 80px;
-  overflow: visible;
-}
-.appPoolChart > div:last-child {
-  display: flex;
-  justify-content: space-between;
-  color: var(--x-text-muted);
-  font-size: 10px;
-}
-.appPoolChartEmpty {
-  display: grid;
-  place-items: center;
-  min-height: 80px;
-  color: var(--x-text-muted);
-  font-size: var(--x-text-xs);
-}
-.appMemoryDot {
-  fill: var(--vm-accent);
-}
-.appMemoryTime {
-  display: block;
-  margin-top: var(--x-space-2);
+.memoryGroupTitle[data-group='manual'] {
+  --group-color: var(--x-app-manual);
 }
 @media (max-width: 1200px) {
   .memoryVmGrid {
@@ -4185,4 +3921,272 @@ button.chip:hover:not(.chipOn) {
 /* 수치 표와 아래 그래프 사이는 카드 사이 간격(--x-space-4)보다 한 단계 넓게 */
 .netTableBlock + .memoryChartBlock {
   margin-top: var(--x-space-5);
+}
+
+/* ---- Memory 탭 카드 본문: 섹션(요약·상세·디스크 I/O·안내) 사이 간격을 세 카드 모두 같게 ---- */
+.memoryCardBody {
+  display: grid;
+  gap: var(--x-space-5);
+}
+.memoryCardBody > * {
+  margin: 0;
+}
+
+/* ---- Memory 탭 디스크 I/O: Network 탭 표처럼 작은 회색 라벨 + 큰 숫자(단위는 작게) + 아래 속도 ---- */
+.diskIoGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--x-space-3);
+  font-variant-numeric: tabular-nums;
+}
+.diskIoItem {
+  display: grid;
+  gap: var(--x-space-1);
+  min-width: 0;
+}
+.diskIoItem > span,
+.diskIoItem > small {
+  overflow: hidden;
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.diskIoItem > strong {
+  display: flex;
+  align-items: baseline;
+  gap: var(--x-space-1);
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-lg);
+  font-weight: 800;
+  white-space: nowrap;
+}
+.diskIoItem > strong small {
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+  font-weight: 500;
+}
+
+/* ---- Memory 탭 메모리 사용률 요약 (관리 RAM·Linux): 카드 첫 섹션, 박스 없이 큰 제목·큰 % ---- */
+.memUsage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--x-space-2) var(--x-space-3);
+}
+.memUsageHead {
+  display: contents;
+}
+.memUsageHead > span {
+  font-size: var(--x-text-md);
+  font-weight: 700;
+}
+.memUsageHead > strong {
+  justify-self: end;
+  color: var(--vm-accent);
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-lg);
+  font-variant-numeric: tabular-nums;
+}
+.memUsageAmount {
+  display: flex;
+  align-items: baseline;
+  gap: var(--x-space-1);
+  min-width: 0;
+}
+.memUsageAmount strong {
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-lg);
+  white-space: nowrap;
+}
+.memUsageAmount span,
+.memUsageFree span {
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+}
+.memUsageFree {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+}
+.memUsageFree[title] {
+  cursor: help;
+}
+.memUsageFree strong {
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-xs);
+}
+.memUsageBar {
+  grid-column: 1 / -1;
+  height: var(--x-space-2);
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--x-surface-sunken);
+}
+.memUsageBar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--vm-accent);
+}
+.memUsageNotice {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--x-recovering);
+  font-size: var(--x-text-xs);
+}
+
+/*
+ * ---- Memory 탭 영역 행 아코디언: [이름] [막대 — 남는 너비] [⚠ 고정 자리] [사용률 %] [▸] ----
+ * 이름 열(32px × 3 + 12px)과 ⚠·%·▸ 열이 모두 고정 폭이라 모든 행에서 막대 시작·끝이 같은 세로선에 오고,
+ * % 와 ▸ 는 카드 내용 오른쪽 끝에 붙는다
+ */
+.memRows {
+  display: grid;
+  gap: var(--x-space-1);
+}
+.memRowButton {
+  display: grid;
+  grid-template-columns:
+    calc(var(--x-space-6) * 3 + var(--x-space-3)) minmax(0, 1fr) var(--x-space-4)
+    calc(var(--x-space-6) * 2) var(--x-space-4);
+  align-items: center;
+  gap: var(--x-space-3);
+  width: 100%;
+  /* 오른쪽 안쪽 여백 0: % 와 ▸ 가 카드 내용 오른쪽 끝에 붙는다 */
+  padding: var(--x-space-1) 0 var(--x-space-1) var(--x-space-2);
+  border: 0;
+  border-radius: var(--x-radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: var(--x-text-sm);
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+  cursor: pointer;
+}
+.memRowButton:hover {
+  background: var(--x-surface-2);
+}
+/* 포커스 테두리는 키보드 포커스(:focus-visible)일 때만 */
+.memRowButton:focus {
+  outline: none;
+}
+.memRowButton:focus-visible {
+  outline: 2px solid var(--x-primary);
+  outline-offset: 1px;
+}
+.memRowName {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.memRowValue {
+  font-family: var(--x-font-mono);
+  font-weight: 700;
+  text-align: right;
+  white-space: nowrap;
+}
+.memRowChevron {
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+  text-align: right;
+}
+.memRowBar {
+  position: relative;
+  height: var(--x-space-2);
+  border-radius: 999px;
+  background: var(--x-surface-sunken);
+}
+.memRowBar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--x-text-muted);
+}
+/* Network 탭 Pool 경고와 같은 기준: 80% 이상 주의, 95% 이상 위험 */
+.memRowBar[data-level='warn'] i {
+  background: var(--x-recovering);
+}
+.memRowBar[data-level='fault'] i {
+  background: var(--x-fault);
+}
+/* 접힌 행의 ⚠ 자리: 모든 행 같은 폭, 신호가 없으면 빈자리 */
+.memRowAlert {
+  color: var(--x-recovering);
+  font-size: var(--x-text-xs);
+  text-align: center;
+}
+/*
+ * 펼친 내용: 이름 열 아래에서 들여 쓴 위치부터, 칸마다 작은 회색 라벨(위) + 고정폭 숫자(아래).
+ * 칸 최소 너비는 가장 긴 값 "1023.99 KiB / 1023.99 KiB"(고정폭 xs) 가 들어가는 32px × 6,
+ * 3열 배치 카드(약 450~640px)에서 2열, 1열 배치 좁은 카드에서 1열.
+ * 라벨·값은 줄바꿈하지 않고, 칸보다 길면 말줄임 (겹침·글자 단위 줄바꿈 없음)
+ */
+.memRowDetails {
+  display: grid;
+  gap: var(--x-space-2);
+  margin: var(--x-space-1) 0 var(--x-space-2);
+  /* 오른쪽은 행(%·▸)과 같이 카드 내용 끝까지 */
+  padding: 0 0 0 calc(var(--x-space-2) * 2);
+  font-variant-numeric: tabular-nums;
+}
+.memRowDetails[hidden] {
+  display: none;
+}
+.memRowDetails dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(calc(var(--x-space-6) * 6), 100%), 1fr));
+  gap: var(--x-space-2) var(--x-space-3);
+  margin: 0;
+}
+.memRowDetails dl > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.memRowDetails dt,
+.memRowDetails dd {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Network 탭 표와 같은 토큰: 라벨 xs·muted·500, 숫자 고정폭 */
+.memRowDetails dt {
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+  font-weight: 500;
+}
+.memRowDetails dd {
+  margin: 0;
+  font-family: var(--x-font-mono);
+  font-size: var(--x-text-xs);
+  font-weight: 700;
+}
+/* 한글 상태 문구(단계 등)는 일반 글꼴, 숫자 값만 고정폭 */
+.memRowDetails dl > div[data-kind='text'] dd {
+  font-family: var(--x-font);
+}
+.memRowDetails dl > div[data-tone='warn'] dt,
+.memRowDetails dl > div[data-tone='warn'] dd {
+  color: var(--x-recovering);
+}
+/* 이상 신호 문구 (공간 부족 N회, 입력 만료 등): 주의 색 */
+.memRowProblems {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  color: var(--x-recovering);
+  font-size: var(--x-text-xs);
+  font-weight: 700;
+  list-style: none;
+}
+/* 값이 없는 사유 같은 작은 회색 문장만 일반 줄바꿈 */
+.memRowDetails small {
+  display: block;
+  color: var(--x-text-muted);
+  font-size: var(--x-text-xs);
+  white-space: normal;
 }

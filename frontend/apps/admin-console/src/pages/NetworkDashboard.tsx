@@ -126,9 +126,7 @@ function ZephyrNetworkPanel({ vm, drive }: { vm: Vm; drive: DriveState | null })
       <div className={styles.netStatusLine}>
         <CollectorStatus vmId={vm.vm_id} />
       </div>
-      {metrics.error && (
-        <MetricErrorNotice detail="최근 관측값·이력을 표시하며, Pool 만료 여부는 영역별로 구분합니다." />
-      )}
+      {metrics.error && <MetricErrorNotice />}
 
       <NetTable
         label={`${vm.name} 네트워크 수치`}

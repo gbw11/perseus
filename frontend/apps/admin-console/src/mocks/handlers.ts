@@ -26,7 +26,12 @@ import {
 } from '../api/types';
 import { mockBoardDown, setMockBoardDown } from './board';
 import { initialVms, MOCK_PASSWORD, MOCK_USER, TEMPLATES, VM_IDS } from './data';
-import { mockKernelHeapSamples, mockMemoryPoolSamples, mockZephyrNetworkSamples } from './memoryMetrics';
+import {
+  mockAppMemorySamples,
+  mockKernelHeapSamples,
+  mockMemoryPoolSamples,
+  mockZephyrNetworkSamples,
+} from './memoryMetrics';
 import { mockTelemetryHeartbeat } from './telemetryHeartbeat';
 import { getDisplays, RouteError, scenarioEvents, setRoute, startVm, stopVm, vmStateOf } from './scenario';
 
@@ -582,6 +587,7 @@ export const handlers = [
         items: [
           ...mockKernelHeapSamples(vmId),
           ...mockMemoryPoolSamples(vmId),
+          ...mockAppMemorySamples(vmId),
           ...mockZephyrNetworkSamples(vmId),
         ],
       } as unknown as JsonBodyType);

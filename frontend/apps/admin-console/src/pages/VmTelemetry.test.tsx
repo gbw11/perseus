@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { ToastProvider } from '@xenova/ui';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -228,22 +228,22 @@ describe('VM telemetry dashboard', () => {
     });
     const page = renderPage();
     const card = within(await screen.findByRole('region', { name: 'autonomous 메모리 사용률' }));
-    expect(await card.findByText('25.000%')).toBeInTheDocument();
+    expect(await card.findByText('25.0%')).toBeInTheDocument();
     failed = true;
     now += 1000;
     await act(() => page.client.refetchQueries());
     expect(screen.getByText(/실시간 데이터를 불러오지 못하고 있습니다/)).toBeInTheDocument();
-    expect(card.getByText('25.000%')).toBeInTheDocument();
+    expect(card.getByText('25.0%')).toBeInTheDocument();
     now += 7000;
     act(() => vi.advanceTimersByTime(1000));
-    expect(card.getByText('25.000%')).toBeInTheDocument();
+    expect(card.getByText('25.0%')).toBeInTheDocument();
     expect(card.getByText('관측 만료 · 최근 관측값')).toBeInTheDocument();
     expect(card.getByRole('progressbar')).not.toHaveAttribute('aria-valuenow');
     failed = false;
     report = memoryFixture('ram-reserved-increase', now - 500);
     report.vm_id = sample.vm_id;
     await act(() => page.client.refetchQueries());
-    expect(card.getByText('50.000%')).toBeInTheDocument();
+    expect(card.getByText('50.0%')).toBeInTheDocument();
     expect(card.queryByText('관측 만료 · 최근 관측값')).not.toBeInTheDocument();
     expect(screen.queryByText(/실시간 데이터를 불러오지 못하고 있습니다/)).not.toBeInTheDocument();
     page.unmount();
@@ -278,7 +278,7 @@ describe('VM telemetry dashboard', () => {
     renderPage();
     expect(
       await within(await screen.findByRole('region', { name: 'autonomous 메모리 사용률' })).findByText(
-        '25.000%',
+        '25.0%',
       ),
     ).toBeInTheDocument();
   });
@@ -350,7 +350,8 @@ describe('VM telemetry dashboard', () => {
   );
 
   it.each([false, true])(
-    'renders packet rates without memory metadata and splits reboot gaps=%s',
+    // S15P31E110-409: Memory 탭은 그래프 없이 요약만 보인다. 패킷 처리율은 Network 탭 표에서 본다
+    'does not chart packet rates in Memory even with network samples (reboot=%s)',
     async (reboot) => {
       const fetch = fixture();
       const original = fetch.getMockImplementation()!;
@@ -378,15 +379,14 @@ describe('VM telemetry dashboard', () => {
         return Response.json(body);
       });
       renderPage();
-      const chart = await screen.findByRole('img', { name: 'autonomous RX TX 패킷 처리율 최근 60초' });
-      expect(chart.querySelectorAll('polyline')).toHaveLength(reboot ? 4 : 2);
-      expect(
-        screen.queryByRole('img', { name: 'manual RX TX 패킷 처리율 최근 60초' }),
-      ).not.toBeInTheDocument();
-      expect(screen.getByRole('progressbar', { name: 'autonomous 커널 힙 사용률' })).toHaveAttribute(
-        'aria-valuenow',
-        '50',
+      await waitFor(() =>
+        expect(screen.getByRole('progressbar', { name: 'autonomous 커널 힙 사용률' })).toHaveAttribute(
+          'aria-valuenow',
+          '50',
+        ),
       );
+      expect(screen.queryByText('패킷 처리율')).not.toBeInTheDocument();
+      expect(document.querySelectorAll('svg')).toHaveLength(0);
     },
   );
 
@@ -559,26 +559,30 @@ describe('VM telemetry dashboard', () => {
     const fetch = fixture();
     renderPage();
     for (const name of ['autonomous', 'manual']) {
-      expect(
-        await screen.findByRole('img', { name: `${name} 커널 힙 사용률 최근 5분 그래프` }),
-      ).toBeInTheDocument();
-      expect(screen.getByRole('progressbar', { name: `${name} 커널 힙 사용률` })).toHaveAttribute(
-        'aria-valuenow',
-        '50',
+      await waitFor(() =>
+        expect(screen.getByRole('progressbar', { name: `${name} 커널 힙 사용률` })).toHaveAttribute(
+          'aria-valuenow',
+          '50',
+        ),
       );
       expect(screen.queryByRole('progressbar', { name: `${name} VM 메모리 사용률` })).not.toBeInTheDocument();
       expect(screen.getByRole('region', { name: `${name} 앱 버퍼 점유` })).toBeVisible();
       for (const group of ['자동', '공통', '수동'])
         expect(screen.getByRole('region', { name: `${name} ${group} 메모리` })).toBeVisible();
     }
-    expect(
-      await screen.findByRole('img', { name: 'interaction 메모리 사용률 최근 5분 그래프' }),
-    ).toBeInTheDocument();
-    expect(screen.getAllByText('VM 구성 16 MiB · 관리 RAM과 내부 버퍼 점유를 분리합니다.')).toHaveLength(2);
+    // S15P31E110-409: Memory 탭에는 그래프와 안내 문구가 없다
+    expect(await screen.findByRole('progressbar', { name: 'interaction 메모리 사용률' })).toBeInTheDocument();
+    expect(document.querySelectorAll('svg')).toHaveLength(0);
+    expect(screen.queryByText(/관리 RAM과 내부 버퍼 점유를 분리합니다/)).not.toBeInTheDocument();
     expect(
       screen.queryByText('Zephyr VM 전체 메모리 사용량은 현재 계측되지 않습니다.'),
     ).not.toBeInTheDocument();
-    expect(screen.getAllByText('0.50 KiB')).toHaveLength(4);
+    // 커널 힙 세부 값은 행을 펼쳐서 본다 (S15P31E110-409)
+    for (const name of ['autonomous', 'manual']) {
+      const heap = within(screen.getByRole('group', { name: `${name} 공통 커널 힙` }));
+      fireEvent.click(heap.getByRole('button'));
+      expect(heap.getAllByText('0.50 KiB').length).toBeGreaterThan(0);
+    }
     expect(screen.queryByText('수집기 상태 (v2)')).not.toBeInTheDocument();
     expect(screen.queryByText('TX drop')).not.toBeInTheDocument();
     expect(fetch.mock.calls.some(([url]) => url.endsWith('/telemetry/heartbeat'))).toBe(false);
@@ -646,22 +650,22 @@ describe('VM telemetry dashboard', () => {
     });
     renderPage();
     const ram = within(await screen.findByRole('region', { name: 'autonomous 메모리 사용률' }));
-    expect(await ram.findByText('25.000%')).toBeInTheDocument();
-    expect(ram.getByText('정적 예약 포함')).toBeInTheDocument();
+    expect(await ram.findByText('25.0%')).toBeInTheDocument();
+    expect(ram.queryByText('정적 예약 포함')).not.toBeInTheDocument();
     expect(screen.getByRole('progressbar', { name: 'autonomous 커널 힙 사용률' })).toHaveAttribute(
       'aria-valuenow',
       '13',
     );
     expect(
-      within(screen.getByRole('region', { name: 'autonomous 결과 보관' })).getByText(
-        '철회 관측 · 반환 여부는 점유로 확인',
-      ),
-    ).toBeInTheDocument();
-    const linux = screen.getByText('interaction', { selector: 'strong' }).closest('section')!;
-    expect(within(linux).getByText('2 MiB')).toBeInTheDocument();
-    expect(within(linux).getByTitle('여유 = MemAvailable (memory_available_bytes)')).toBeInTheDocument();
+      within(screen.getByRole('group', { name: 'autonomous 결과 보관' })).getByRole('img'),
+    ).toHaveAccessibleName(/철회 관측/);
+    // Linux 메모리 사용률 요약: 여유와 그 기준(툴팁)
+    const linux = within(screen.getByRole('region', { name: 'interaction 메모리 사용률' }));
+    expect(linux.getByText('2 MiB')).toBeInTheDocument();
+    expect(linux.getByTitle('여유 = MemAvailable (memory_available_bytes)')).toBeInTheDocument();
     const disk = within(screen.getByRole('region', { name: 'interaction 디스크 I/O' }));
-    expect(disk.getByText('3.0 KiB')).toBeInTheDocument();
+    // 디스크 I/O 는 큰 숫자 + 작은 단위로 나눠 보인다 (S15P31E110-409)
+    expect(disk.getByText('3.0').closest('strong')).toHaveTextContent('3.0KiB');
     expect(disk.getByText('2.0 KiB/s')).toBeInTheDocument();
     expect(screen.queryByText('스레드 스택 스냅샷')).not.toBeInTheDocument();
   });
@@ -681,17 +685,17 @@ describe('VM telemetry dashboard', () => {
       return Response.json({ items: [next] });
     });
     renderPage();
-    expect(
-      await screen.findByRole('img', { name: 'manual 커널 힙 사용률 최근 5분 그래프' }),
-    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole('progressbar', { name: 'manual 커널 힙 사용률' })).toHaveAttribute(
+        'aria-valuenow',
+        '50',
+      ),
+    );
     expect(screen.getByRole('progressbar', { name: 'autonomous 커널 힙 사용률' })).not.toHaveAttribute(
       'aria-valuenow',
     );
     expect(
-      screen.queryByRole('img', { name: 'autonomous 커널 힙 사용률 최근 5분 그래프' }),
-    ).not.toBeInTheDocument();
-    expect(
-      within(screen.getByRole('region', { name: 'autonomous 대기 작업' })).getByText('작업 대기'),
+      within(screen.getByRole('group', { name: 'autonomous 대기 작업' })).getByText('작업 대기'),
     ).toBeInTheDocument();
   });
 
@@ -707,14 +711,17 @@ describe('VM telemetry dashboard', () => {
       return Response.json(body);
     });
     renderPage();
-    expect(
-      await screen.findByRole('img', { name: 'autonomous 커널 힙 사용률 최근 5분 그래프' }),
-    ).toBeInTheDocument();
-    const heap = within(screen.getByRole('region', { name: 'autonomous 공통 커널 힙' }));
+    const heapRow = await screen.findByRole('group', { name: 'autonomous 공통 커널 힙' });
+    const heap = within(heapRow);
+    expect(await heap.findByText('50.0%')).toBeInTheDocument();
     expect(heap.getByRole('progressbar')).not.toHaveAttribute('aria-valuenow');
     expect(heap.getByText('50.0%')).toBeInTheDocument();
     expect(heap.getByRole('progressbar')).toHaveAttribute('aria-valuetext', '최근 관측 50.0% · 관측 만료');
-    expect(heap.getByText(/관측 만료 · 최근 관측값/)).toBeInTheDocument();
-    expect(heap.getByText('관측 당시 여유')).toBeInTheDocument();
+    // 접힌 상태에서는 ⚠ 아이콘(aria-label), 펼치면 관측 당시 여유와 주의 색 사유
+    expect(heap.getByRole('img')).toHaveAccessibleName('이상: 관측 만료 · 최근 관측값');
+    fireEvent.click(heap.getByRole('button'));
+    expect(heap.getByText('관측 당시 여유')).toBeVisible();
+    expect(heap.getByText('관측 만료 · 최근 관측값')).toBeVisible();
+    expect(heapRow.querySelector('[title]')).toBeNull();
   });
 });
