@@ -1,9 +1,12 @@
 """Debian display domU 템플릿의 전용 계정 정책 회귀."""
+import http.client
+import importlib
 import json
 import hashlib
 from pathlib import Path
 import sys
 import tempfile
+import threading
 import unittest
 
 
@@ -165,6 +168,82 @@ class DisplayGuestAccountTest(unittest.TestCase):
         (self.web / "index.html").unlink()
         with self.assertRaisesRegex(ValueError, "index.html"):
             display_guest.install_web_assets(self.root, self.web.resolve(), "abcdef1")
+
+    def test_installed_guest_app_serves_screen_assets_and_dom0_data(self):
+        display_guest.prepare(self.root, display_guest.POLICY,
+                              web_assets=self.web.resolve(), web_revision="abcdef1",
+                              command=self.useradd, enable_unit=self.enable_unit,
+                              set_owner=self.set_owner, mode_of=self.mode_of)
+        installed = self.root / "opt/xenova/display-guest"
+        sys.path.insert(0, str(installed))
+        try:
+            app = importlib.import_module("xenova_display.guest_app")
+            calls = []
+
+            class Response:
+                status = 200
+
+                @staticmethod
+                def read(_limit):
+                    return json.dumps({"schema": 1, "mode": "AUTONOMOUS"}).encode()
+
+                @staticmethod
+                def getheader(name, _default=""):
+                    return "application/json" if name == "Content-Type" else _default
+
+            class Dom0:
+                def __init__(self, host, port, timeout):
+                    calls.append(("connect", host, port, timeout))
+
+                def request(self, method, path, headers):
+                    calls.append(("request", method, path, headers))
+
+                @staticmethod
+                def getresponse():
+                    return Response()
+
+                @staticmethod
+                def close():
+                    pass
+
+            config = {
+                "web_root": self.root / "opt/xenova/display-web",
+                "bind": "127.0.0.1", "allowed_clients": ["127.0.0.1"], "app_port": 0,
+                "data_host": "127.0.0.1", "data_port": 18085,
+            }
+            server = app.serve(config, "fixture-token", connect=Dom0)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=3)
+                connection.request("GET", "/display/mobile")
+                screen = connection.getresponse()
+                self.assertEqual((screen.status, screen.read()), (200, b'<div id="root"></div>'))
+                connection.request("GET", "/assets/index-test.js")
+                asset = connection.getresponse()
+                self.assertEqual(asset.status, 200)
+                self.assertIn(b'/display/mobile', asset.read())
+                connection.request("GET", "/api/v1/display/presentation")
+                data = connection.getresponse()
+                self.assertEqual(data.status, 200)
+                self.assertEqual(json.loads(data.read()), {"schema": 1, "mode": "AUTONOMOUS"})
+                connection.request("GET", "/secret")
+                self.assertEqual(connection.getresponse().status, 404)
+                connection.request("POST", "/api/v1/display/presentation")
+                self.assertEqual(connection.getresponse().status, 405)
+                connection.close()
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=3)
+            self.assertIn(("connect", "127.0.0.1", 18085, 2), calls)
+            self.assertIn(("request", "GET", "/api/v1/display/presentation",
+                           {"Authorization": "Bearer fixture-token"}), calls)
+        finally:
+            sys.path.remove(str(installed))
+            for name in list(sys.modules):
+                if name == "xenova_display" or name.startswith("xenova_display."):
+                    sys.modules.pop(name, None)
 
 
 if __name__ == "__main__":
