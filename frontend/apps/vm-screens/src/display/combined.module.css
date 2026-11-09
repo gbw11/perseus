@@ -27,11 +27,11 @@
   --s-pole: #8d939c;
   --s-sidewalk: #eceef1;
   --c-yellow: #f2b705;
-  --h-wall: #f7f1e6;
-  --h-wall-side: #e3dbcc;
-  --h-roof: #b5523b;
-  --h-roof-dark: #8e3b29;
   --s-fade: #f6f7f8;
+  /* 코스 바닥 매트 · 콘 */
+  --s-floor: #cfd5cc;
+  --s-cone: #ff7a1a;
+  --s-cone-dark: #d95d06;
   /* 지도 */
   --m-ground: #eef0ec;
   --m-park: #d3ecd0;
@@ -83,10 +83,6 @@
   --s-pole: #6b717a;
   --s-sidewalk: #0c0e11;
   --c-yellow: #e0a800;
-  --h-wall: #cfc6b6;
-  --h-wall-side: #a89f90;
-  --h-roof: #8e3b29;
-  --h-roof-dark: #6a2a1d;
   --s-fade: #111317;
   --m-ground: #15181d;
   --m-park: #18291c;
@@ -98,6 +94,9 @@
   --m-traveled: #4a5059;
   --m-label: #b7bcc4;
   --m-label-halo: #15181d;
+  --s-floor: #2a2f2a;
+  --s-cone: #ff8a2b;
+  --s-cone-dark: #c4570a;
 }
 .screen * {
   box-sizing: border-box;
@@ -265,10 +264,7 @@
 .centerLine {
   fill: var(--c-yellow);
 }
-.crosswalk {
-  fill: var(--s-lane);
-  opacity: 0.9;
-}
+
 .dash {
   fill: var(--s-lane);
 }
@@ -294,22 +290,7 @@
 .selfCar .cabin_top {
   fill: var(--s-self-top);
 }
-.otherCar .back {
-  fill: var(--s-other-back);
-}
-.otherCar .side {
-  fill: var(--s-other-side);
-}
-.otherCar .top {
-  fill: var(--s-other-top);
-}
-.otherCar .cabin_back,
-.otherCar .cabin_side {
-  fill: var(--s-other-glass);
-}
-.otherCar .cabin_top {
-  fill: var(--s-other-top);
-}
+
 .tailLight {
   fill: #7a1d20;
 }
@@ -317,9 +298,7 @@
   fill: var(--c-red);
   filter: drop-shadow(0 0 6px var(--c-red));
 }
-.otherCar .tailLight {
-  fill: #9a4a4c;
-}
+
 .headLight {
   fill: #fff4c2;
 }
@@ -358,59 +337,35 @@
 .signalNote[data-state='green'] {
   color: var(--c-green);
 }
+.signalNote[data-state='obstacle'] {
+  color: var(--s-cone-dark);
+}
+.coneIcon {
+  width: 1.8vh;
+  height: 2vh;
+  background: var(--s-cone);
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+.courseFloor {
+  fill: var(--s-floor);
+}
+.startLine {
+  fill: var(--c-red);
+}
+.coneBase {
+  fill: var(--s-shadow);
+}
+.coneSide {
+  fill: var(--s-cone);
+  stroke: var(--s-cone-dark);
+  stroke-width: 0.5;
+}
+.coneStripe {
+  fill: #ffffff;
+}
 .signalNote b {
   color: var(--c-muted);
   font-weight: 500;
-}
-.signalIcon {
-  display: inline-flex;
-  gap: 0.35vh;
-  padding: 0.45vh 0.6vh;
-  border-radius: 0.8vh;
-  background: #1c1f24;
-}
-.signalIcon i {
-  width: 1.3vh;
-  height: 1.3vh;
-  border-radius: 50%;
-  background: #3a3f47;
-}
-.signalIcon i[data-on='true'][data-color='red'] {
-  background: #ff4d4f;
-  box-shadow: 0 0 0.8vh #ff4d4f;
-}
-.signalIcon i[data-on='true'][data-color='yellow'] {
-  background: #ffb020;
-  box-shadow: 0 0 0.8vh #ffb020;
-}
-.signalIcon i[data-on='true'][data-color='green'] {
-  background: #34c77b;
-  box-shadow: 0 0 0.8vh #34c77b;
-}
-/* 3D 신호등 */
-.signalPole {
-  fill: var(--s-pole);
-}
-.signalHead {
-  fill: #1c1f24;
-}
-.signalLamp {
-  fill: #3a3f47;
-}
-.signalLamp[data-on='true'][data-color='red'] {
-  fill: #ff4d4f;
-  filter: drop-shadow(0 0 8px #ff4d4f);
-}
-.signalLamp[data-on='true'][data-color='yellow'] {
-  fill: #ffb020;
-  filter: drop-shadow(0 0 8px #ffb020);
-}
-.signalLamp[data-on='true'][data-color='green'] {
-  fill: #34c77b;
-  filter: drop-shadow(0 0 8px #34c77b);
-}
-.signalStopLine {
-  fill: var(--s-lane);
 }
 
 /* 충전·트립 */
@@ -492,107 +447,12 @@
   width: 100%;
   height: 100%;
 }
-.mapGround {
-  fill: var(--m-ground);
-}
-/* 지도 밖 (회전해서 드러나는 가장자리) */
-.mapOutside {
-  fill: var(--m-block);
-}
-.mapPark {
-  fill: var(--m-park);
-}
-.mapWater {
-  fill: var(--m-water);
-}
-.mapBlock {
-  fill: var(--m-block);
-}
-.mapCasingMajor,
-.mapCasingMinor,
-.mapRoadMajor,
-.mapRoadMinor,
-.mapRoute,
-.mapTraveled {
-  fill: none;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-.mapCasingMajor {
-  stroke: var(--m-casing);
-  stroke-width: 64;
-}
-.mapRoadMajor {
-  stroke: var(--m-major);
-  stroke-width: 54;
-}
-.mapCasingMinor {
-  stroke: var(--m-casing);
-  stroke-width: 38;
-}
-.mapRoadMinor {
-  stroke: var(--m-road);
-  stroke-width: 30;
-}
-.mapRoute {
-  stroke: var(--c-blue);
-  stroke-width: 24;
-}
-.mapTraveled {
-  stroke: var(--m-traveled);
-  stroke-width: 18;
-}
-.mapLabel {
-  fill: var(--m-label);
-  font-size: 30px;
-  font-weight: 600;
-  text-anchor: middle;
-  dominant-baseline: central;
-  paint-order: stroke;
-  stroke: var(--m-label-halo);
-  stroke-width: 8px;
-}
-.mapParkLabel {
-  fill: var(--c-green);
-  font-size: 30px;
-  text-anchor: middle;
-  dominant-baseline: central;
-}
-.mapOrigin circle {
-  fill: var(--c-text);
-  stroke: #fff;
-  stroke-width: 6;
-}
-.mapOrigin text,
-.mapDestination text {
-  fill: var(--c-text);
-  font-size: 40px;
-  font-weight: 700;
-  text-anchor: middle;
-  paint-order: stroke;
-  stroke: var(--m-label-halo);
-  stroke-width: 10px;
-}
-.mapDestination path {
-  fill: var(--c-red);
-  stroke: #fff;
-  stroke-width: 5;
-}
-.mapDestination circle {
-  fill: #fff;
-}
+
 .mapHalo {
   fill: var(--c-blue);
   opacity: 0.18;
 }
-.mapDot {
-  fill: #fff;
-  stroke: var(--c-blue);
-  stroke-width: 5;
-}
-.mapArrow {
-  fill: var(--c-blue);
-}
+
 .navBanner {
   position: absolute;
   top: 1.6vh;
@@ -606,9 +466,176 @@
   color: #fff;
   box-shadow: 0 0.6vh 2vh rgba(0, 0, 0, 0.18);
 }
-.navTurn {
-  font-size: 4.4vh;
-  line-height: 1;
+.navStep {
+  display: grid;
+  place-items: center;
+  width: 5vh;
+  height: 5vh;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.22);
+  font-size: 3vh;
+  font-weight: 700;
+}
+
+/* 코스 지도 (cm 단위 SVG) */
+.courseMap {
+  position: absolute;
+  inset: 12vh 3vh 13vh;
+}
+.courseMap svg {
+  width: 100%;
+  height: 100%;
+}
+.courseMapFloor {
+  fill: var(--s-floor);
+}
+.courseMapRoad {
+  fill: var(--m-road);
+}
+.screen[data-theme='dark'] .courseMapRoad {
+  fill: var(--s-road);
+}
+.courseMapEdge,
+.courseMapDivider,
+.courseMapPaint,
+.courseMapStart,
+.courseMapTrail,
+.courseMapPlan {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.courseMapEdge {
+  stroke: var(--m-casing);
+  stroke-width: 1.5;
+}
+.courseMapDivider {
+  stroke: var(--c-dim);
+  stroke-width: 1.2;
+  stroke-dasharray: 5 5;
+}
+.courseMapPaint {
+  stroke: var(--c-yellow);
+  stroke-width: 1.6;
+}
+.courseMapStart {
+  stroke: var(--c-red);
+  stroke-width: 3;
+}
+.courseMapTrail {
+  stroke: var(--m-traveled);
+  stroke-width: 7;
+}
+.courseMapPlan {
+  stroke: var(--c-blue);
+  stroke-width: 9;
+  opacity: 0.85;
+}
+.courseMapTarget {
+  fill: var(--c-blue);
+  fill-opacity: 0.14;
+  stroke: var(--c-blue);
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+}
+.courseMapTarget[data-done='true'] {
+  fill: var(--c-green);
+  stroke: var(--c-green);
+  stroke-dasharray: none;
+}
+.courseMapSlot,
+.courseMapLabel {
+  fill: var(--m-label);
+  font-size: 13px;
+  font-weight: 700;
+  text-anchor: middle;
+  dominant-baseline: central;
+  paint-order: stroke;
+  stroke: var(--m-label-halo);
+  stroke-width: 3px;
+}
+.courseMapSlot {
+  font-size: 16px;
+}
+.courseMapCone {
+  fill: var(--s-cone);
+  stroke: #fff;
+  stroke-width: 1.5;
+}
+.courseMapCar {
+  fill: var(--c-blue);
+  stroke: #fff;
+  stroke-width: 2;
+}
+.courseMapNose {
+  fill: #fff;
+}
+
+/* 시연 시나리오 4단계 (내비 아래) */
+.steps {
+  position: absolute;
+  left: 1.6vh;
+  right: 1.6vh;
+  bottom: 1.4vh;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1vh;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.steps li {
+  display: flex;
+  align-items: center;
+  gap: 1vh;
+  padding: 1vh 1.2vh;
+  border-radius: 1.2vh;
+  background: var(--c-panel);
+  border: 1px solid var(--c-line);
+  color: var(--c-muted);
+}
+.steps li > b {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 3.4vh;
+  height: 3.4vh;
+  border-radius: 50%;
+  background: var(--c-line);
+  color: var(--c-muted);
+  font-size: 1.8vh;
+}
+.steps li strong {
+  display: block;
+  color: var(--c-text);
+  font-size: 1.7vh;
+}
+.steps li small {
+  display: block;
+  font-size: 1.35vh;
+}
+.steps li[data-state='active'] {
+  border-color: var(--c-blue);
+  box-shadow: 0 0 0 0.25vh var(--c-blue) inset;
+}
+.steps li[data-state='active'] > b {
+  background: var(--c-blue);
+  color: #fff;
+}
+.steps li[data-state='done'] > b {
+  background: var(--c-green);
+}
+.steps li[data-state='pending'] strong {
+  color: var(--c-muted);
+}
+.stepCheck {
+  width: 2.2vh;
+  height: 2.2vh;
+  fill: none;
+  stroke: #fff;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .navBanner strong {
   display: block;
@@ -674,52 +701,6 @@
 .dockItem[data-tone='danger'] {
   color: var(--c-red);
   border-color: var(--c-red);
-}
-
-/* 차로 안내 (내비 아래 가운데) */
-.laneGuide {
-  position: absolute;
-  left: 50%;
-  bottom: 1.6vh;
-  transform: translateX(-50%);
-  display: grid;
-  justify-items: center;
-  gap: 0.5vh;
-  padding: 0.9vh 1.4vh 0.8vh;
-  border-radius: 1.2vh;
-  background: #1c1f24;
-  color: #fff;
-  box-shadow: 0 0.6vh 2vh rgba(0, 0, 0, 0.25);
-}
-.laneRow {
-  display: flex;
-  gap: 0.4vh;
-}
-.lane {
-  display: grid;
-  place-items: center;
-  width: 5.6vh;
-  height: 5.6vh;
-  border-left: 0.25vh dashed #5a6069;
-}
-.lane:first-child {
-  border-left: none;
-}
-.lane svg {
-  width: 3.6vh;
-  height: 3.6vh;
-  fill: #5a6069;
-}
-.lane[data-recommended='true'] svg {
-  fill: #ffffff;
-}
-.lane[data-recommended='true'] {
-  border-radius: 0.8vh;
-  background: var(--c-blue);
-}
-.laneGuide small {
-  font-size: 1.4vh;
-  color: #c9ced6;
 }
 
 /* ── 정차(부팅 직후) 화면 ── */
@@ -794,7 +775,8 @@
 .miniLine {
   fill: none;
   stroke: var(--c-blue);
-  stroke-width: 44;
+  /* 도로 폭 0.8 m (cm 단위 지도) */
+  stroke-width: 80;
   stroke-linejoin: round;
 }
 .miniOrigin {
@@ -1066,41 +1048,4 @@
   color: var(--c-muted);
   font-size: 2.2vh;
   letter-spacing: 0.6vh;
-}
-
-/* 목적지 집 (주행 장면) */
-.wall_back {
-  fill: var(--h-wall);
-}
-.wall_side {
-  fill: var(--h-wall-side);
-}
-.wall_top {
-  fill: var(--h-wall-side);
-}
-.roofDark {
-  fill: var(--h-roof-dark);
-}
-.roofLight {
-  fill: var(--h-roof);
-}
-.houseDoor {
-  fill: #7a5236;
-}
-.houseWindow {
-  fill: #9cc7ef;
-}
-.homePin path {
-  fill: var(--c-red);
-  stroke: #fff;
-  stroke-width: 2;
-}
-.homePin text {
-  fill: var(--c-text);
-  font-size: 18px;
-  font-weight: 700;
-  text-anchor: middle;
-  paint-order: stroke;
-  stroke: var(--s-fade);
-  stroke-width: 4px;
 }
