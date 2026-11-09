@@ -1,31 +1,30 @@
-import { useEffect, useMemo, useState } from 'react';
-import { CityNav } from './CityNav';
-import { ROUTE_SCALE, routePosition, turnTravel } from './cityMap';
-import { DriveScene } from './DriveScene';
+import { useEffect, useState } from 'react';
+import { obstacleAhead } from './course';
+import { CourseNav } from './CourseNav';
+import { CourseScene } from './CourseScene';
 import {
   activeCommand,
+  courseOf,
   maxSpeedOf,
   RATED_RUNTIME_S,
   remainingRuntimeS,
-  roadOf,
-  signalAhead,
   tripOf,
   vmLineStatus,
   vehicleOf,
-  worldObjectsOf,
 } from './driveExtras';
 import { ROLE } from './model';
 import { DEPART_MS, ParkedView, type ParkedCallout } from './ParkedView';
 import { driveSummary } from './presentation';
 import { useDisplayTheme } from './theme';
+import { useScenarioSteps } from './scenarioSteps';
 import { useDisplay } from './useDisplay';
-import { useSmoothMapDistance } from './useSmoothDistance';
-import { useChase, useSmoothObjects } from './useSmoothObjects';
+import { useSmoothPose } from './useSmoothPose';
 import styles from './combined.module.css';
 
 /**
  * 모니터 2대(계기판·인포테인먼트)를 한 화면(1920×1080)으로 합친 차량 화면. 양산차 중앙 화면 배치:
- * 왼쪽 = 주행 화면 (속도·최대 속도·3D 주변·예상 주행 가능 시간·트립), 오른쪽 = 내비게이션 (회사 → 집 지도·다음 안내·VM 상태).
+ * 왼쪽 = 주행 화면 (속도·최대 속도·Jetson 시험 코스 3D·예상 주행 가능 시간·트립),
+ * 오른쪽 = 내비게이션 (코스 탑뷰·시연 시나리오 4단계·VM 상태).
  * 값은 /api/v1/display/presentation 하나에서 온다. 신선하지 않거나 없는 값은 "—" 로 둔다.
  * 속도는 실제 RC 로봇과 맞대어 보도록 m/s 로 표시한다.
  */
@@ -78,51 +77,29 @@ export function CombinedPage() {
   const maxSpeed = connected ? maxSpeedOf(p) : null;
   const target = drive?.command?.v_mps ?? null;
   const trip = connected ? tripOf(p) : null;
-  // 수집기 값이 바뀔 때만 새 배열 (주변 차 보간이 새 값이 온 때를 알 수 있게)
-  const feedObjects = useMemo(() => (connected && worldObjectsOf(p)) || [], [connected, p]);
-  // 주변 차: 1초마다 오는 위치 사이를 차마다 속도로 이어 그린다
-  const smoothObjects = useSmoothObjects(feedObjects);
+  // 코스 위 위치·콘·계획 (제안 필드 state.course). 1초마다 오는 위치 사이를 이어 그린다
+  const course = connected ? courseOf(p) : null;
+  const pose = useSmoothPose(course?.pose ?? null);
+  const obstacles = course?.obstacles ?? [];
+  const plan = course?.plan ?? [];
   const stopped = mode === 'SAFE_STOP';
   const autopilot = mode === 'AUTO' && Boolean(active);
   const handover = !active && (preparing || mode === 'AUTO_READY') ? selectedDrive : null;
-  // 1초마다 오는 트립 사이를 속도로 보간한 지도 거리: 내비 이동과 주행 장면 회전·차선 흐름이 같이 부드럽게 움직인다
-  const mapDistance = useSmoothMapDistance(
-    trip?.distance_m ?? null,
-    speed === null ? null : speed * ROUTE_SCALE,
-  );
-  // 보간으로 앞서 간 거리 (RC m): 서 있는 것(사거리·신호등·가로지르는 차의 앞뒤 위치)은 그만큼 당겨 그린다.
-  // 1초마다 한 번에 뛰지 않게. 수집기가 아직 앞이라고 한 사거리는 지나간 것으로 바꾸지 않는다 (회전 전/후 판단은 수집기 기준)
-  const lead = trip ? Math.max(0, mapDistance / ROUTE_SCALE - trip.distance_m) : 0;
-  const feedRoad = connected ? roadOf(p) : null;
-  const feedCross = feedRoad?.intersection ?? null;
-  // 내 차로: 1초마다 반 차로씩 오는 값을 초당 0.8 차로로 따라가 차로 변경이 미끄러지듯 보이게.
-  // 회전으로 새 도로에 들어서면(도로 이름이 바뀜) 원호가 닿은 차로로 바로 맞춘다
-  const lane = useChase(feedRoad?.lane ?? null, 0.8, feedRoad?.name);
-  const road = feedRoad && {
-    ...feedRoad,
-    lane: lane ?? feedRoad.lane,
-    intersection:
-      feedCross && lead > 0
-        ? {
-            ...feedCross,
-            y_m: feedCross.y_m > 0 ? Math.max(0.001, feedCross.y_m - lead) : feedCross.y_m - lead,
-          }
-        : feedCross,
-  };
-  // 신호등은 서 있으므로 보간한 만큼 당긴다 (차는 위에서 차마다 보간)
-  const objects =
-    lead > 0
-      ? smoothObjects.map((o) => (o.kind === 'traffic_light' ? { ...o, y_m: o.y_m - lead } : o))
-      : smoothObjects;
-  // 앞 신호등 인식: 빨간·노란불이면 정지 대기로 본다 (거리는 내비와 같은 지도 축척)
-  const signal = signalAhead(objects);
-  const signalStop = signal?.state === 'red' || signal?.state === 'yellow';
+  // 차 앞 1 m 안 콘
+  const cone = pose ? obstacleAhead(pose, obstacles) : null;
   // 출발 전 정차: 트립이 시작점이고 멈춰 있으면 차 외관 화면. 움직이기 시작하면 바퀴가 구르며 나가는 모습을
   // 잠깐 보여 준 뒤 2분할 주행 화면. 트립을 아직 못 받았고 주행한 적도 없으면(수집기가 트립을 안 보내는 보드 등)
   // 빈 주행 화면 대신 정차 화면에 둔다
   const driven = useHasDriven(trip);
   const parked = (speed ?? 0) < 0.02 && (trip !== null ? trip.distance_m < 0.05 : !driven);
   const departing = useDeparture(parked);
+  const steps = useScenarioSteps({
+    mode: connected ? mode : null,
+    activeRole: active?.role ?? null,
+    pose,
+    speed,
+    parked,
+  });
   const vmStatus = (vm: NonNullable<typeof p>['state']['vms'][number]) => vmLineStatus(p, vm, connected);
   const callouts: ParkedCallout[] = (p?.state.vms ?? []).map((vm) => ({
     key: ROLE[vm.role].name,
@@ -131,9 +108,6 @@ export function CombinedPage() {
     anchor: vm.role === 'interaction' ? ('center' as const) : ('hood' as const),
     ...vmStatus(vm),
   }));
-  // 집까지 150 m 안이면 주행 장면 오른쪽에 집을 세운다 (남은 지도 거리 → RC m)
-  const remainingMap = trip ? routePosition(mapDistance).remaining : null;
-  const homeAheadM = remainingMap !== null && remainingMap < 150 ? remainingMap / ROUTE_SCALE : null;
   const time = now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
 
   const parkedView = (
@@ -156,7 +130,7 @@ export function CombinedPage() {
   const lamps = [
     { key: 'estop', label: '비상정지', on: live?.flags?.estop },
     { key: 'watchdog', label: '명령 끊김', on: live?.flags?.watchdog },
-    { key: 'signal', label: '신호 정지', on: signalStop },
+    { key: 'obstacle', label: '장애물 인식', on: cone !== null },
   ];
 
   return (
@@ -218,32 +192,18 @@ export function CombinedPage() {
         </ul>
 
         <div className={styles.sceneWrap}>
-          <DriveScene
-            steer={live?.steer_rad ?? 0}
-            objects={objects}
-            distanceM={mapDistance / ROUTE_SCALE}
-            turnTravelM={trip ? turnTravel(mapDistance, trip.distance_m * ROUTE_SCALE) : null}
-            homeAheadM={homeAheadM}
+          <CourseScene
+            pose={pose}
+            obstacles={obstacles}
+            plan={plan}
             stopped={stopped}
-            road={road}
-            rainbow={Boolean(active) && !stopped}
-            braking={stopped || (signalStop && (speed ?? 0) < 0.2)}
+            braking={stopped || speed === 0}
           />
-          {signal && (
-            <p className={styles.signalNote} data-state={signal.state ?? 'unknown'} data-testid="signal-note">
-              <span className={styles.signalIcon} aria-hidden="true">
-                <i data-color="red" data-on={signal.state === 'red'} />
-                <i data-color="yellow" data-on={signal.state === 'yellow'} />
-                <i data-color="green" data-on={signal.state === 'green'} />
-              </span>
-              {signal.state === 'red'
-                ? '빨간불 인식 · 정지'
-                : signal.state === 'yellow'
-                  ? '노란불 인식 · 감속'
-                  : signal.state === 'green'
-                    ? '초록불 인식 · 통과'
-                    : '신호등 인식 · 불빛 미확인'}
-              <b>{Math.round((signal.y_m * ROUTE_SCALE) / 5) * 5} m</b>
+          {cone && (
+            <p className={styles.signalNote} data-state="obstacle" data-testid="obstacle-note">
+              <span className={styles.coneIcon} aria-hidden="true" />콘 {cone.obstacle.id} 인식 ·{' '}
+              {cone.ahead < 0.05 ? '옆으로 지나는 중' : '피해 가는 중'}
+              <b>{Math.max(0, Math.round(cone.ahead * 100))} cm</b>
             </p>
           )}
         </div>
@@ -304,12 +264,7 @@ export function CombinedPage() {
             {error ?? '연결 대기'} · 현재 값은 미확인입니다.
           </div>
         )}
-        <CityNav
-          tripM={trip?.distance_m ?? null}
-          mapDistance={mapDistance}
-          mapSpeedMps={speed === null ? null : speed * ROUTE_SCALE}
-          now={now}
-        />
+        <CourseNav pose={pose} obstacles={obstacles} plan={plan} steps={steps} />
         <footer className={styles.dock} aria-label="VM 상태">
           {p?.state.vms.map((vm) => {
             const status = vmStatus(vm);

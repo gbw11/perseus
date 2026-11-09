@@ -1,3 +1,4 @@
+import type { Obstacle, P2 } from './course';
 import type { DisplayVm, Presentation, Source } from './model';
 
 /**
@@ -189,42 +190,45 @@ export function tripOf(p: Presentation | null): { distance_m: number; driving_s:
     : null;
 }
 
-export interface WorldObject {
-  id: string;
-  kind: 'car' | 'traffic_light' | 'unknown';
-  /** 신호등이면 인식한 불빛, 모르면 null */
-  state: 'red' | 'yellow' | 'green' | null;
-  /** 차의 진행 방향: 같은 방향 / 마주 옴 / 교차로를 가로지름 (왼쪽으로·오른쪽으로, 방향 모르면 cross) */
-  heading: 'same' | 'oncoming' | 'cross' | 'cross_left' | 'cross_right';
-  /** 차 기준 상대 위치 (m): x 오른쪽 +, y 앞쪽 + */
-  x_m: number;
-  y_m: number;
+export interface CourseState {
+  trackId: string;
+  /** 후륜축 위치 (코스 좌표 m, yaw 반시계 rad) — 시뮬레이터 sim.pose 와 같은 기준 */
+  pose: { x: number; y: number; yaw: number };
+  /** 코스 위 장애물 (sim.world obstacles 와 같은 꼴: 중심 x·y, 폭 w·깊이 h) */
+  obstacles: Obstacle[];
+  /** 주행 계획 경로 (코스 좌표, 차 앞부터). 수동 운전·정지 중이면 빈 배열 */
+  plan: P2[];
 }
 
-/** 주변 물체 (state.world.objects, 제안). 신선하지 않으면 그리지 않는다 */
-export function worldObjectsOf(p: Presentation | null): WorldObject[] | null {
-  const v = (p?.state as Record<string, unknown> | undefined)?.world;
-  if (!object(v) || source(v.source)?.status !== 'fresh' || !Array.isArray(v.objects)) return null;
-  return v.objects.flatMap((o) =>
-    object(o) && typeof o.id === 'string' && finite(o.x_m) && finite(o.y_m)
-      ? [
-          {
-            id: o.id,
-            kind: (['car', 'traffic_light'].includes(String(o.kind))
-              ? o.kind
-              : 'unknown') as WorldObject['kind'],
-            state: (['red', 'yellow', 'green'].includes(String(o.state))
-              ? o.state
-              : null) as WorldObject['state'],
-            heading: (['oncoming', 'cross', 'cross_left', 'cross_right'].includes(String(o.heading))
-              ? o.heading
-              : 'same') as WorldObject['heading'],
-            x_m: o.x_m,
-            y_m: o.y_m,
-          },
-        ]
-      : [],
-  );
+/**
+ * 코스 위 차 위치·장애물·계획 (state.course, 제안). 신선하지 않으면 null — 지도에 차를 그리지 않는다.
+ * 실보드 수집기는 아직 보내지 않는다 (sim.pose·sim.world 또는 젯슨 위치 추정이 필요)
+ */
+export function courseOf(p: Presentation | null): CourseState | null {
+  const v = (p?.state as Record<string, unknown> | undefined)?.course;
+  if (!object(v) || source(v.source)?.status !== 'fresh') return null;
+  const pose = v.pose;
+  if (!object(pose) || !finite(pose.x) || !finite(pose.y) || !finite(pose.yaw)) return null;
+  const point = (q: unknown): q is P2 => Array.isArray(q) && q.length === 2 && finite(q[0]) && finite(q[1]);
+  return {
+    trackId: typeof v.track_id === 'string' ? v.track_id : '',
+    pose: { x: pose.x, y: pose.y, yaw: pose.yaw },
+    obstacles: (Array.isArray(v.obstacles) ? v.obstacles : []).flatMap((o) =>
+      object(o) && typeof o.id === 'string' && finite(o.x) && finite(o.y) && finite(o.w) && finite(o.h)
+        ? [
+            {
+              id: o.id,
+              kind: typeof o.kind === 'string' ? o.kind : 'unknown',
+              x: o.x,
+              y: o.y,
+              w: o.w,
+              h: o.h,
+            },
+          ]
+        : [],
+    ),
+    plan: Array.isArray(v.plan) ? v.plan.filter(point) : [],
+  };
 }
 
 /**
@@ -236,68 +240,4 @@ export const RATED_RUNTIME_S = 60 * 60;
 /** 예상 주행 가능 시간 (초): 완충 기준 시간 − 이번 주행에서 달린 시간 (트립 주행 시간). 0 아래로 내려가지 않는다 */
 export function remainingRuntimeS(drivingS: number): number {
   return Math.max(0, RATED_RUNTIME_S - drivingS);
-}
-
-/** 앞에 있는 가장 가까운 신호등 (내 차선 근처, 앞쪽) */
-export function signalAhead(objects: WorldObject[]): WorldObject | null {
-  return (
-    objects
-      .filter((o) => o.kind === 'traffic_light' && o.y_m > 0 && Math.abs(o.x_m) < 0.6)
-      .sort((a, b) => a.y_m - b.y_m)[0] ?? null
-  );
-}
-
-export interface RoadInfo {
-  name: string;
-  /** 한 방향 차로 수 */
-  lanes: number;
-  /** 내 차로 (1 = 중앙선 옆 1차로). 소수면 차로를 옮기는 중 */
-  lane: number;
-  /** 반대 방향 차로 수 */
-  oncomingLanes: number;
-  /**
-   * 앞 사거리 (차 기준 거리, 가로지르는 도로). 거리가 음수면 방금 돌아 나온 사거리이고 가로지르는 도로는 지나온 도로다.
-   * turn: 경로가 이 사거리에서 꺾는 방향 (직진이면 null)
-   */
-  intersection: { y_m: number; crossRoad: string; crossLanes: number; turn: 'left' | 'right' | null } | null;
-  /**
-   * 주행 계획 (차로): lane = 옮겨 갈 차로, 그 뒤 thenAfterM(내 차 앞 RC m) 지점부터 thenLane 으로 돌아간다 (추월).
-   * 없으면 지금 차로 그대로
-   */
-  plan: { lane: number; thenLane: number | null; thenAfterM: number | null } | null;
-}
-
-/** 지금 도로 (state.road, 제안). 신선하지 않으면 null — 장면은 기본 3차로로 그린다 */
-export function roadOf(p: Presentation | null): RoadInfo | null {
-  const v = (p?.state as Record<string, unknown> | undefined)?.road;
-  if (!object(v) || source(v.source)?.status !== 'fresh') return null;
-  if (!Number.isSafeInteger(v.lanes) || !finite(v.lane) || !Number.isSafeInteger(v.oncoming_lanes))
-    return null;
-  const i = v.intersection;
-  return {
-    name: typeof v.name === 'string' ? v.name : '',
-    lanes: Math.max(1, v.lanes as number),
-    lane: v.lane,
-    oncomingLanes: Math.max(0, v.oncoming_lanes as number),
-    intersection:
-      object(i) && finite(i.y_m)
-        ? {
-            y_m: i.y_m,
-            crossRoad: typeof i.cross_road === 'string' ? i.cross_road : '',
-            crossLanes: Number.isSafeInteger(i.cross_lanes) ? (i.cross_lanes as number) : 2,
-            turn: i.turn === 'left' || i.turn === 'right' ? i.turn : null,
-          }
-        : null,
-    plan: planOf(v.plan),
-  };
-}
-
-function planOf(v: unknown): RoadInfo['plan'] {
-  if (!object(v) || !finite(v.lane)) return null;
-  const then = finite(v.then_lane) && finite(v.then_after_m);
-  return {
-    lane: v.lane,
-    thenLane: then ? (v.then_lane as number) : null,
-    thenAfterM: then ? (v.then_after_m as number) : null,
-  };
 }

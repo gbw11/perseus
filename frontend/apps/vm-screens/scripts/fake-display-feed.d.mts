@@ -3,4 +3,4 @@ export const SCENARIOS: string[];
 export const IDS: { primary: string; backup: string; interaction: string };
 export function build(now: number): unknown;
 export function setScenario(name: string): void;
-export function setTripForTest(mapDistance: number, now?: number): void;
+export function setTripForTest(pathM: number, now?: number): void;

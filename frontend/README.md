@@ -199,17 +199,18 @@ cd apps/admin-console && VITE_MOCK=true npx vite --port 5173            # VITE_M
 cd apps/vm-screens && npm run preview:monitors     # 가짜 수집기 8082 + vite 5174
 ```
 
-| 주소                                     | 화면                                                                                           |
-| ---------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `http://localhost:5174/display/combined` | 모니터 2대를 합친 차량 화면: 출발 전 차 외관 → 출발하면 왼쪽 3D 주행 · 오른쪽 내비 (회사 → 집) |
-| `http://localhost:5174/display/mobile`   | 휴대폰 화면                                                                                    |
+| 주소                                     | 화면                                                                                                  |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `http://localhost:5174/display/combined` | 모니터 2대를 합친 차량 화면: 출발 전 차 외관 → 출발하면 왼쪽 3D 주행 · 오른쪽 내비 (Jetson 시험 코스) |
+| `http://localhost:5174/display/mobile`   | 휴대폰 화면                                                                                           |
 
 옛 모니터 화면(`/display/monitor-1` 계기판·`/display/monitor-2` 인포테인먼트)은 지웠다. 두 주소는 쿼리스트링을 그대로 들고 `/display/combined` 로 넘어간다.
 
 - 테마: 07~19시 밝게, 그 밖에는 어둡게. `?theme=light|dark` 로 고정
-- 가짜 수집기 조작: `http://127.0.0.1:8082/scenario/<cycle|cruise|safe-stop|auto-ready|failover-done|manual|feed-down>`, 경로 위 지점으로 건너뛰기 `/jump/<지도 m>` (전체 3,820 m)
-- 지도·경로·사거리·차로 수는 `src/display/cityMap.ts` 하나에서 정한다 (가짜 수집기도 같은 파일을 읽는다)
-- 차량·Zephyr·주변 값(`state.vehicle` `drive_apps` `drive_limits` `trip` `road` `world`)은 **제안 필드**다. 실제 dom0 수집기는 아직 보내지 않으므로 보드에서는 "수신 대기"로 보인다
+- 시연 시나리오 (`cycle`, 한 바퀴): 출발선에서 정차 → ① 콘 A·B 회피 (VM1 자율) → ② 수동 전환 후 자동 복귀 → ③ VM1 장애 (안전 정지 → VM2 승계 준비 → VM2 자율) → ④ P1 주차 → 10초 뒤 처음부터
+- 가짜 수집기 조작: `http://127.0.0.1:8082/scenario/<cycle|cruise|safe-stop|auto-ready|failover-done|manual|feed-down>`, 시연 경로 위 지점으로 건너뛰기 `/jump/<경로 m>` (전체 8.9 m, VM1 장애 5.92 m · 주차 진입 7.82 m), `/restart`·`/park`·`/go`
+- 코스 형상·시연 경로는 `src/display/course.ts` 하나에서 정한다 (가짜 수집기도 같은 파일을 읽는다). 형상은 시뮬레이터 `tools/generate_jetson_tracks.py` 의 `jetson-demo`(R60cm) 와 같은 식이고, 차량 치수·회피·주차 경로는 **실측 전 도식**이다
+- 차량·Zephyr·코스 값(`state.vehicle` `drive_apps` `drive_limits` `trip` `course`)은 **제안 필드**다. 실제 dom0 수집기는 아직 보내지 않으므로 보드에서는 "수신 대기"로 보인다 (`course` 가 없으면 지도에 차를 그리지 않는다)
 
 ## 규칙
 

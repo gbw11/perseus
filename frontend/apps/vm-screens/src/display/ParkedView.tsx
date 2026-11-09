@@ -10,7 +10,7 @@ import {
   type C3,
   type CarFace,
 } from './carModel';
-import { PLACES, ROUTE, ROUTE_LENGTH } from './cityMap';
+import { BOUNDS, courseLoop, LAP, SLOTS, START_POSE, TRACK_NAME } from './course';
 import { RATED_RUNTIME_S } from './driveExtras';
 import styles from './combined.module.css';
 
@@ -100,10 +100,8 @@ export function ParkedView({
             ⌂
           </span>
           <div>
-            <small>
-              {PLACES.origin.name} → {PLACES.destination.name}
-            </small>
-            <b>{(ROUTE_LENGTH / 1000).toFixed(1)} km · 출발하면 안내를 시작합니다</b>
+            <small>{TRACK_NAME} · 출발선 → P1 주차</small>
+            <b>한 바퀴 {LAP.toFixed(1)} m · 회피 → 수동 전환 → VM 승계 → 주차</b>
           </div>
         </article>
       </footer>
@@ -115,24 +113,50 @@ export function ParkedView({
             ✓
           </div>
           <strong>출발 준비 완료</strong>
-          <span>
-            {callouts.map((c) => c.key).join(' · ')} 연결됨 · {PLACES.origin.name} → {PLACES.destination.name}
-          </span>
+          <span>{callouts.map((c) => c.key).join(' · ')} 연결됨 · 출발선 → P1 주차</span>
         </div>
       )}
     </section>
   );
 }
 
-/** 오른쪽 위 작은 경로 지도 (회사 → 집) */
+/** 오른쪽 위 작은 코스 지도: 출발 자리 → P1 (cm, y 뒤집음) */
+const miniPoints = (d: number) =>
+  courseLoop(d, 0.1)
+    .map(([x, y]) => `${(x * 100).toFixed(0)},${((BOUNDS.h - y) * 100).toFixed(0)}`)
+    .join(' ');
+const MINI_ROAD = miniPoints(0);
+
 function MiniRoute() {
-  const points = ROUTE.map((p) => `${p.x},${p.y}`).join(' ');
+  const p1 = SLOTS[0]!;
   return (
-    <svg className={styles.miniRoute} viewBox="200 100 2800 1800" aria-label="경로 미리보기" role="img">
-      <rect x="200" y="100" width="2800" height="1800" className={styles.miniGround} />
-      <polyline points={points} className={styles.miniLine} />
-      <circle cx={PLACES.origin.x} cy={PLACES.origin.y} r="60" className={styles.miniOrigin} />
-      <circle cx={PLACES.destination.x} cy={PLACES.destination.y} r="70" className={styles.miniDestination} />
+    <svg
+      className={styles.miniRoute}
+      viewBox={`-10 -10 ${BOUNDS.w * 100 + 20} ${BOUNDS.h * 100 + 20}`}
+      aria-label="코스 미리보기"
+      role="img"
+    >
+      <rect
+        x="-10"
+        y="-10"
+        width={BOUNDS.w * 100 + 20}
+        height={BOUNDS.h * 100 + 20}
+        className={styles.miniGround}
+      />
+      <polygon points={MINI_ROAD} className={styles.miniLine} />
+      <circle
+        cx={START_POSE[0] * 100}
+        cy={(BOUNDS.h - START_POSE[1]) * 100}
+        r="16"
+        className={styles.miniOrigin}
+      />
+      <rect
+        x={p1.x0 * 100}
+        y={(BOUNDS.h - p1.y1) * 100}
+        width={(p1.x1 - p1.x0) * 100}
+        height={(p1.y1 - p1.y0) * 100}
+        className={styles.miniDestination}
+      />
     </svg>
   );
 }
