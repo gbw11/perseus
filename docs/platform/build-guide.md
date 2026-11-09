@@ -144,11 +144,16 @@ cp -a "$REPO/frontend" "$RUN/frontend-build"
 )
 mkdir "$RUN/display-web-input"
 cp -a "$RUN/frontend-build/apps/vm-screens/dist" "$RUN/display-web-input/display-web"
+DISPLAY_WEB_REVISION="$(git -C "$REPO" rev-parse --verify HEAD)"
 printf '\nXENOVA_DISPLAY_WEB_ASSETS = "%s"\n' "$RUN/display-web-input" \
   >> "$YOCTO_BUILD_DIR/conf/local.conf"
 ```
 
 원본·lockfile·완성 자산 해시를 보관하고, 생성한 dist는 Git에 넣지 않는다.
+같은 dist를 Debian Interaction 템플릿에 넣을 때는 템플릿 생성 명령에
+`--display-web-assets "$RUN/display-web-input/display-web"`와
+`--display-web-revision "$DISPLAY_WEB_REVISION"`을 함께 전달한다. 템플릿 manifest에는
+프론트 커밋, 파일별 SHA-256과 전체 트리 SHA-256이 기록된다.
 xenova-display 패키지는 피드·웹 자산·키오스크와 송신기의 user unit을 설치한다.
 피드는 /etc/xenova/display-bindings.json과 root 전용 display.env를 준비한 경우에만
 시작한다. 실제 UUID·EDID·좌표·X11 인증·비-root 그래픽 세션을 설정한 뒤

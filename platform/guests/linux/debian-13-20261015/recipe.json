@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "source_id": "debian-13-20261015",
-  "version": "1.0.4",
+  "version": "1.0.6",
   "files": [
     {
       "source": "files/motd",
@@ -13,5 +13,19 @@
     "packages": [
       "python3-paho-mqtt"
     ]
+  },
+  "guest_display": {
+    "account": "xenova-display",
+    "python_modules": [
+      "__init__.py",
+      "capture_limits.py",
+      "mjpeg.py",
+      "guest_sender.py",
+      "guest_app.py"
+    ],
+    "web_assets": "external-vm-screens-dist",
+    "config": "/etc/xenova/guest-display-domu.json",
+    "service": "xenova-guest-display-app.service",
+    "target": "xenova-guest-display.target"
   }
 }
