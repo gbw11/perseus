@@ -1,7 +1,8 @@
 [Unit]
 Description=Xenova guest display data for the display domU (Plan A; Plan B also relays frames)
 Wants=xenova-display-feed.service
-After=network.target xenova-display-feed.service
+Requires=xenova-bridge.service
+After=xenova-bridge.service xenova-display-feed.service
 ConditionPathExists=/etc/xenova/guest-display.json
 ConditionPathExists=/etc/xenova/display.env
 StartLimitIntervalSec=120
@@ -29,4 +30,5 @@ CapabilityBoundingSet=
 StandardOutput=journal
 StandardError=journal
 
-# Example only: not installed or enabled by this change.
+[Install]
+WantedBy=multi-user.target

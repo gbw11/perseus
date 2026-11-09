@@ -12,9 +12,9 @@
     {
       "guest_kind": "linux",
       "id": "debian-13-20261015",
-      "version": "1.0.4",
-      "directory": "linux/debian-13-20261015/1.0.4",
-      "manifest_sha256": "4bf654646fea56cbc0f68078dfd9d8b5f06572d6f8e4489fbbfb076446901f49",
+      "version": "1.0.6",
+      "directory": "linux/debian-13-20261015/1.0.6",
+      "manifest_sha256": "144ebb333832e2a3c56c08bdc0d178462160b532fae295bb0a900c9344a133e9",
       "template_id": "debian-13-arm64"
     },
     {

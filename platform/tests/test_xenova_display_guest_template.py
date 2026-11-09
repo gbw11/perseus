@@ -97,6 +97,11 @@ class DisplayGuestAccountTest(unittest.TestCase):
         self.assertIn("Restart=on-failure", directives)
         self.assertEqual(result["service"]["path"],
                          "/usr/lib/systemd/system/xenova-guest-display-app.service")
+        service_link = self.root / result["service"]["enabled_by"].lstrip("/")
+        self.assertTrue(service_link.is_symlink())
+        self.assertEqual(service_link.readlink().as_posix(), result["service"]["path"])
+        direct_link = self.root / "etc/systemd/system/multi-user.target.wants/xenova-guest-display-app.service"
+        self.assertFalse(direct_link.exists() or direct_link.is_symlink())
         target = self.root / "usr/lib/systemd/system/xenova-guest-display.target"
         self.assertIn("Wants=xenova-guest-display-app.service", target.read_text().splitlines())
         self.assertEqual(self.enabled, ["xenova-guest-display.target"])
