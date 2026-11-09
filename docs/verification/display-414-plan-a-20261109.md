@@ -72,8 +72,30 @@ python -m pytest -p no:cacheprovider -rs tests
 | VM3를 거친 presentation 20회 | 모두 200, 지연 p50 273 ms, 최대 505 ms |
 | 기존 서비스 | feed·dom0-manager active, hdmi·mobile inactive. 설치 전후 같음 |
 
+### 3차: HDMI 실물 표시 시도 (09:46~10:15, 모니터 연결)
+
+- **정식 HDMI 경로를 쓸 수 없다.**
+  - 현재 이미지의 `/boot/config.txt`는 기본값(`dtoverlay=vc4-kms-v3d`)이고 Pi4 overlay 파일이 없다.
+  - 10-28에 넣은 KMS 설정과 백업이 모두 사라졌다.
+  - 그래서 dom0에 `/dev/dri`, HDMI 커넥터, EDID가 없다. `xenova-display-hdmi`(native_session)는 실제 EDID가 있어야 해서 시작할 수 없다.
+- **fbdev 진단으로 띄워 봤다.** 재부팅과 부팅 설정 변경은 없었고, 임시 unit 하나만 썼다.
+  - 구성: 펌웨어 framebuffer `/dev/fb1`(1824×984)에 Xorg fbdev를 띄우고, 그 위에서 414 kiosk(`virtual_x11`, `ui_origin`)를 실행했다. native_session은 helper 함수만 재사용했다.
+  - 사전 점검은 모두 통과했다.
+  - Chromium은 떴지만 모니터에는 **흰 화면**이 나왔다.
+  - kiosk 상태는 `renderer_starting`과 `renderer_stale`을 오갔다. Chromium PID가 바뀌었으니 재시작을 반복한 것이다.
+  - 화면 샘플은 흰색과 앱 배경색(#0f141b) 사이를 오갔다.
+- **원인: dom0 CPU 포화.**
+  - Chromium 실행 중 load 약 21, idle 1%였다.
+  - 화면을 GPU 없이 CPU로만 그리느라 페이지 로드가 15초 제한을 넘겼다. 그러면 kiosk가 실패로 보고 Chromium을 다시 띄웠다.
+  - 10:15에 진단 세션을 끄고 파일을 지웠다. 콘솔은 tty1로 돌아왔다.
+- **조치:** kiosk를 고쳤다.
+  - 페이지 로드는 문서 commit까지만 기다린다. 제한은 30초다.
+  - VM3 화면은 `--app`으로 이미 열린 경우 다시 불러오지 않는다.
+  - renderer 오류 뒤에는 5초부터 최대 60초까지 기다렸다가 다시 띄운다.
+  - 이미지 KMS 설정과 dom0 CPU 여유는 BUILD-CHECKLIST §1에 박신영 협의 항목으로 남겼다.
+
 ## 아직 확인하지 않은 것
 
-- dom0 kiosk가 HDMI 실물에서 VM3 화면을 여는 것. 모니터가 필요하다.
+- dom0 kiosk가 HDMI 실물에서 VM3 화면을 여는 것. 이미지 KMS 복구와 dom0 CPU 여유가 먼저 필요하다.
 - VM3 재시작 중 표시와 복귀.
 - 부팅 직후 guest data 서비스가 열리기까지 약 30초 동안 화면이 대기 상태로 보이다가 복귀하는지.

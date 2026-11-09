@@ -18,6 +18,15 @@ from uuid import uuid4
 
 from .outputs import RuntimeConfig, X11Layout
 
+# A busy dom0 (load 20, 1% idle on the board, 2026-11-09) needs far longer than
+# 15 s to parse and paint the UI bundle. Navigation therefore waits only for the
+# document to commit; painting continues in Chromium and is not a renderer failure.
+NAVIGATION_TIMEOUT_MS = 30000
+# After a renderer error, wait before relaunching Chromium so one slow or broken
+# start cannot turn into a relaunch storm on the shared board.
+RESTART_BACKOFF_S = 5
+RESTART_BACKOFF_MAX_S = 60
+
 
 def write_status(path, value):
     path = Path(path)
@@ -43,6 +52,7 @@ class Kiosk:
         self.contexts, self.pages, self.renewed = {}, {}, {}
         self.profiles = {}
         self.states = {}
+        self.failures, self.retry_at = {}, {}
         self.mapping = {}
         self.mapping_at = 0
         self.launch_lock = asyncio.Lock()
@@ -141,7 +151,11 @@ class Kiosk:
         self.pages[output.output_id] = page
         for other in list(context.pages):
             if other is not page: await other.close()
-        await page.goto(self.config.page_url(output), timeout=15000)
+        target = self.config.page_url(output)
+        # 414: a domU-served page needs no dom0 session cookie, so the --app
+        # navigation is already the right one; reloading would parse it twice.
+        if not (self.config.ui_origin and page.url == target):
+            await page.goto(target, wait_until="commit", timeout=NAVIGATION_TIMEOUT_MS)
         cdp = await context.new_cdp_session(page)
         window = await cdp.send("Browser.getWindowForTarget")
         await cdp.send("Browser.setWindowBounds", {"windowId": window["windowId"], "bounds": {"windowState":"normal"}})
@@ -268,6 +282,12 @@ class Kiosk:
                 await self.close_output(identity)
             else:
                 if page is None or page.is_closed():
+                    wait = self.retry_at.get(identity, 0) - time.monotonic()
+                    if wait > 0:
+                        state.update(status="renderer_backoff", retry_in_s=round(wait, 1),
+                                     error_type=self.states.get(identity, {}).get("error_type"))
+                        self.states[identity] = state
+                        return
                     state["status"] = "renderer_starting"
                     self.states[identity] = state
                     await self.close_output(identity)
@@ -283,6 +303,8 @@ class Kiosk:
                 if tuple(bounds[k] for k in ("left","top","width","height")) != (output.x,output.y,output.width,output.height):
                     raise RuntimeError("browser is outside configured output")
                 state["renderer_verified_monotonic"] = time.monotonic()
+                self.failures.pop(identity, None)
+                self.retry_at.pop(identity, None)
                 self.states[identity] = state
                 if self.config.ui_origin:
                     # 414: the domU-served page has no feed session and posts no acks to dom0.
@@ -315,9 +337,13 @@ class Kiosk:
                     # Keep the window and its explicit stale-data UI when the local feed is down.
                     state["feed_status"] = "unavailable"
         except Exception as error:
+            failures = self.failures[identity] = self.failures.get(identity, 0) + 1
+            delay = min(RESTART_BACKOFF_MAX_S, RESTART_BACKOFF_S * 2 ** (failures - 1))
+            self.retry_at[identity] = time.monotonic() + delay
             state["status"] = "renderer_error"
             state["error_type"] = type(error).__name__
             state["renderer_alive"] = False
+            state["retry_in_s"] = delay
             self.states[identity] = state
             await self.close_output(identity)
         self.states[identity] = state

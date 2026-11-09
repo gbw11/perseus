@@ -36,8 +36,9 @@ def test_example_and_ui_origin_rules():
 
 
 class Page:
-    def __init__(self): self.urls = []
-    async def goto(self, url, timeout): self.urls.append(url)
+    def __init__(self, url=""): self.url, self.urls, self.waits = url, [], []
+    async def goto(self, url, *, wait_until, timeout):
+        self.url = url; self.urls.append(url); self.waits.append((wait_until, timeout))
     def is_closed(self): return False
 
 
