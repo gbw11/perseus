@@ -30,12 +30,20 @@ class DisplayGuestAccountTest(unittest.TestCase):
         (self.web / "index.html").write_text('<div id="root"></div>')
         (self.web / "assets/index-test.js").write_text('const route="/display/mobile";')
         self.enabled = []
+        self.owned = []
 
     def enable_unit(self, root, unit):
         self.assertEqual(Path(root), self.root)
         self.assertEqual(unit, "xenova-guest-display.target")
         self.assertTrue((self.root / "usr/lib/systemd/system" / unit).is_file())
         self.enabled.append(unit)
+
+    def set_owner(self, path):
+        self.owned.append("/" + Path(path).relative_to(self.root).as_posix())
+
+    @staticmethod
+    def mode_of(path):
+        return 0o755 if Path(path).is_dir() else 0o644
 
     def useradd(self, argv, **kwargs):
         self.assertEqual(argv[:3], ["chroot", str(self.root), "/usr/sbin/useradd"])
@@ -52,7 +60,8 @@ class DisplayGuestAccountTest(unittest.TestCase):
     def test_prepare_creates_locked_system_account_without_home(self):
         result = display_guest.prepare(self.root, display_guest.POLICY,
                                        web_assets=self.web.resolve(), web_revision="abcdef1",
-                                       command=self.useradd, enable_unit=self.enable_unit)
+                                       command=self.useradd, enable_unit=self.enable_unit,
+                                       set_owner=self.set_owner, mode_of=self.mode_of)
         self.assertEqual(result["account"], {"account": "xenova-display", "uid": 998, "gid": 998,
                                              "home": "/nonexistent", "shell": "/usr/sbin/nologin",
                                              "password_locked": True})
@@ -90,6 +99,12 @@ class DisplayGuestAccountTest(unittest.TestCase):
         self.assertEqual(self.enabled, ["xenova-guest-display.target"])
         self.assertEqual(result["target"]["enabled_by"],
                          "/etc/systemd/system/multi-user.target.wants/xenova-guest-display.target")
+        permissions = result["permissions"]
+        self.assertEqual(permissions["owner"], "root:root")
+        self.assertEqual(permissions["token"], "deferred-to-credential-provisioning")
+        self.assertEqual(sorted(self.owned), permissions["checked"])
+        self.assertEqual(permissions["directory_mode"], "0755")
+        self.assertEqual(permissions["file_mode"], "0644")
         self.assertFalse((self.root / "nonexistent").exists())
 
     def test_existing_account_or_instance_is_rejected(self):

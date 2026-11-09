@@ -1,8 +1,10 @@
 """새 Linux 템플릿에 display domU 계정과 Plan A Python 모듈을 준비한다."""
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 
 from prepare_rootfs import enable, inside
@@ -98,6 +100,47 @@ def install_target(root, *, enable_unit=enable):
             "sha256": hashlib.sha256(raw).hexdigest(), "mode": "0644"}
 
 
+def root_owner(path):
+    os.chown(path, 0, 0, follow_symlinks=False)
+
+
+def posix_mode(path):
+    return stat.S_IMODE(path.stat().st_mode)
+
+
+def apply_permissions(root, *, set_owner=root_owner, mode_of=posix_mode):
+    """코드·웹·설정·unit은 root만 수정하고 서비스 계정에는 읽기만 허용한다."""
+    root = Path(root)
+    trees = [inside(root, "opt/xenova/display-guest", create_parents=False),
+             inside(root, "opt/xenova/display-web", create_parents=False)]
+    files = [inside(root, "etc/xenova/guest-display-domu.json", create_parents=False),
+             inside(root, "usr/lib/systemd/system/xenova-guest-display-app.service", create_parents=False),
+             inside(root, "usr/lib/systemd/system/xenova-guest-display.target", create_parents=False)]
+    checked = []
+    for tree in trees:
+        if tree.is_symlink() or not tree.is_dir():
+            raise ValueError("display guest content root is linked or absent")
+        for path in [tree, *sorted(tree.rglob("*"))]:
+            if path.is_symlink() or not (path.is_dir() or path.is_file()):
+                raise ValueError("display guest content contains a linked or special entry")
+            mode = 0o755 if path.is_dir() else 0o644
+            path.chmod(mode)
+            set_owner(path)
+            if mode_of(path) != mode:
+                raise ValueError("display guest content permissions did not apply")
+            checked.append("/" + path.relative_to(root).as_posix())
+    for path in files:
+        if path.is_symlink() or not path.is_file():
+            raise ValueError("display guest configuration or unit is linked or absent")
+        path.chmod(0o644)
+        set_owner(path)
+        if mode_of(path) != 0o644:
+            raise ValueError("display guest file permissions did not apply")
+        checked.append("/" + path.relative_to(root).as_posix())
+    return {"owner": "root:root", "directory_mode": "0755", "file_mode": "0644",
+            "checked": sorted(checked), "token": "deferred-to-credential-provisioning"}
+
+
 def install_web_assets(root, source, revision):
     """검증한 vm-screens dist를 복사하고 재현 가능한 파일·트리 해시를 반환한다."""
     if source is None:
@@ -174,7 +217,7 @@ def verify(root):
 
 
 def prepare(root, policy, *, web_assets=None, web_revision=None, command=subprocess.run,
-            enable_unit=enable):
+            enable_unit=enable, set_owner=root_owner, mode_of=posix_mode):
     """새 템플릿에 계정을 만들고 고정한 Plan A Python 모듈을 설치한다."""
     validate_policy(policy)
     root = Path(root)
@@ -207,6 +250,7 @@ def prepare(root, policy, *, web_assets=None, web_revision=None, command=subproc
     config = install_config(root)
     service = install_service(root)
     target = install_target(root, enable_unit=enable_unit)
+    permissions = apply_permissions(root, set_owner=set_owner, mode_of=mode_of)
     return {"account": account, "python_root": "/opt/xenova/display-guest",
             "python_modules": installed, "web": web, "config": config, "service": service,
-            "target": target}
+            "target": target, "permissions": permissions}
